@@ -1,0 +1,146 @@
+import type { AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
+import type { SupervisedRun } from "./supervise.ts";
+
+export function claudeCodeArgs(prompt: string, model: string): string[] {
+  return [
+    "claude",
+    "-p",
+    prompt,
+    "--model",
+    model,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--dangerously-skip-permissions",
+  ];
+}
+
+export interface ClaudeStreamState {
+  usage: TokenUsage;
+  plan?: PlanStatus;
+  result?: {
+    isError: boolean;
+    subtype: string;
+    text: string;
+    apiErrorStatus: number | null;
+  };
+}
+
+export function emptyUsage(): TokenUsage {
+  return { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0 };
+}
+
+export function initialClaudeState(): ClaudeStreamState {
+  return { usage: emptyUsage() };
+}
+
+export function isClaudeFinalLine(line: string): boolean {
+  return parseJson(line)?.type === "result";
+}
+
+export function applyClaudeLine(state: ClaudeStreamState, line: string): ClaudeStreamState {
+  const event = parseJson(line);
+  if (!event) return state;
+
+  if (event.type === "rate_limit_event" && isRecord(event.rate_limit_info)) {
+    return { ...state, plan: toPlanStatus(event.rate_limit_info) };
+  }
+
+  if (event.type === "result") {
+    const usage = isRecord(event.usage) ? event.usage : {};
+    return {
+      ...state,
+      usage: {
+        inputTokens: state.usage.inputTokens + num(usage.input_tokens),
+        cacheCreationInputTokens: state.usage.cacheCreationInputTokens + num(usage.cache_creation_input_tokens),
+        cacheReadInputTokens: state.usage.cacheReadInputTokens + num(usage.cache_read_input_tokens),
+        outputTokens: state.usage.outputTokens + num(usage.output_tokens),
+      },
+      result: {
+        isError: event.is_error === true,
+        subtype: typeof event.subtype === "string" ? event.subtype : "",
+        text: typeof event.result === "string" ? event.result : "",
+        apiErrorStatus: typeof event.api_error_status === "number" ? event.api_error_status : null,
+      },
+    };
+  }
+
+  return state;
+}
+
+const PLAN_LIMIT_TEXT = /usage limit|limit reached|rate limit/i;
+
+export function claudeOutcome(state: ClaudeStreamState, run: SupervisedRun): AttemptOutcome {
+  if (run.stopReason === "deadline") return { kind: "deadline" };
+  if (run.stopReason === "idle-timeout") return { kind: "idle-timeout" };
+
+  const result = state.result;
+  const planRejected = state.plan?.status === "rejected";
+  const limitError =
+    result !== undefined &&
+    result.isError &&
+    (result.apiErrorStatus === 429 || PLAN_LIMIT_TEXT.test(result.text));
+
+  if (planRejected || limitError) {
+    const resetsAt = planResumeAt(state.plan);
+    return {
+      kind: "plan-limit",
+      message: result?.text || run.stderrTail || "plan limit reached",
+      ...(resetsAt ? { resetsAt } : {}),
+    };
+  }
+
+  if (result && !result.isError && result.subtype === "success") {
+    return { kind: "completed", summary: result.text };
+  }
+
+  return {
+    kind: "agent-error",
+    message: result?.text || run.stderrTail || "the agent ended with no result",
+    exitCode: run.exitCode,
+  };
+}
+
+function toPlanStatus(info: Record<string, unknown>): PlanStatus {
+  const windows: PlanStatus["windows"] = {};
+  if (isRecord(info.unifiedWindows)) {
+    for (const [name, value] of Object.entries(info.unifiedWindows)) {
+      if (isRecord(value) && typeof value.resetsAt === "number") {
+        windows[name] = { utilization: num(value.utilization), resetsAt: new Date(value.resetsAt * 1000) };
+      }
+    }
+  }
+  return {
+    status: typeof info.status === "string" ? info.status : "unknown",
+    ...(typeof info.rateLimitType === "string" ? { limitType: info.rateLimitType } : {}),
+    ...(typeof info.resetsAt === "number" ? { resetsAt: new Date(info.resetsAt * 1000) } : {}),
+    windows,
+  };
+}
+
+function planResumeAt(plan: PlanStatus | undefined): Date | undefined {
+  if (!plan) return undefined;
+  const exhausted = Object.values(plan.windows)
+    .filter((w) => w.utilization >= 1)
+    .map((w) => w.resetsAt)
+    .sort((a, b) => b.getTime() - a.getTime());
+  return exhausted[0] ?? plan.resetsAt;
+}
+
+function parseJson(line: string): Record<string, unknown> | undefined {
+  if (!line.startsWith("{")) return undefined;
+  try {
+    const value: unknown = JSON.parse(line);
+    return isRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function num(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}

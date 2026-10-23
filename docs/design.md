@@ -116,6 +116,8 @@ When the Claude plan limit is reached, the run **pauses**. It is not a failure:
 - The draft PR gives the reason. I start the run again after the limit resets.
 - `maxParallel` goes down by one.
 
+Claude Code reports the plan usage in its `stream-json` output: a `rate_limit_event` gives the status and the utilization of each window (`five_hour`, `seven_day`) with its reset time. The worker layer records it in each attempt.
+
 ### Blocks during a run
 
 The coordinator never asks me during a run. It records each block in the PR and goes on with the rest.
@@ -187,7 +189,7 @@ Only subscriptions, no paid API calls.
 |---|---|---|
 | Refinement | Claude Code CLI, interactive, on the host | My Claude session |
 | Base subtask and workers | Claude Code CLI, in Docker | `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Max 5x) |
-| Independent verifier | OpenCode CLI, in Docker | OpenCode Go key, with Extra Usage off |
+| Independent verifier | OpenCode CLI, in Docker | OpenCode Go key, with Extra Usage off. Only models of the `opencode-go/` provider: `opencode/` is the pay-per-use Console |
 
 These are not used:
 
@@ -234,8 +236,8 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 
 ## To verify in the pilot
 
-- [ ] OpenCode Go authenticates in a container with no pay-per-use fallback.
-- [ ] How the Claude Code CLI reports the plan limit.
-- [ ] One `setup-token` token works in 2 containers at the same time.
+- [ ] OpenCode Go authenticates in a container with no pay-per-use fallback. OpenCode v2 does not read `auth.json`, and `auth login` needs a terminal. Not solved yet.
+- [ ] How the Claude Code CLI reports a rejected request at the plan limit. The plan usage is known (`rate_limit_event`); the exact form of a rejection is not seen yet.
+- [ ] One `setup-token` token works in 2 containers at the same time. A Docker test covers it when `CLAUDE_CODE_OAUTH_TOKEN` is set.
 - [ ] The `askwell` image: `pnpm`, Playwright with Chromium, access to Neon branches, one `E2E_PORT` per worker.
 - [ ] The initial values of patience, limits and parallelism.
