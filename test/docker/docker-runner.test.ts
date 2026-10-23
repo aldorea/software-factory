@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,7 +17,7 @@ const identity = {
 };
 
 async function toyRepo(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "toy-repo-"));
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "toy-repo-")));
   await runOk("git", ["init", "-q", "-b", "main", dir]);
   await writeFile(join(dir, "README.md"), "# toy\n");
   await writeFile(join(dir, ".gitignore"), ".factory/\n");
@@ -45,7 +45,7 @@ afterEach(async () => {
   while (open.length > 0) await open.pop()?.close();
 });
 
-describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", () => {
+describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeout: 360_000 }, () => {
   const runner = new DockerWorkerRunner();
 
   it("runs git inside the container on the worker branch, as the host user", async () => {
@@ -104,6 +104,63 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", () => {
     });
     expect(attempt.outcome.kind).toBe("agent-error");
     expect(existsSync(attempt.logPath)).toBe(true);
+  });
+
+  it("removes a leftover container with the same name", async () => {
+    await runOk("docker", ["run", "-d", "--name", "factory-leftover", IMAGE]);
+    const worker = await runner.start(await spec("leftover"));
+    open.push(worker);
+
+    expect((await worker.exec("true")).exitCode).toBe(0);
+  });
+
+  it("reuses the worktree that a dirty close kept", async () => {
+    const s = await spec("reuse-dirty");
+    const first = await runner.start(s);
+    await first.exec("echo wip > wip.txt");
+    await first.close();
+
+    const second = await runner.start(s);
+    open.push(second);
+    expect(second.worktreePath).toBe(first.worktreePath);
+    expect((await second.exec("cat wip.txt")).stdout).toBe("wip\n");
+  });
+
+  it("resumes a branch with no worktree and keeps counting its commits from the base", async () => {
+    const s = await spec("resume-branch");
+    const first = await runner.start(s);
+    await first.exec("echo one > one.txt && git add one.txt && git commit -q -m one");
+    await first.close();
+    expect(existsSync(first.worktreePath)).toBe(false);
+
+    const second = await runner.start(s);
+    open.push(second);
+    expect((await second.exec("cat one.txt")).stdout).toBe("one\n");
+    await second.exec("echo two > two.txt && git add two.txt && git commit -q -m two");
+    expect(await second.commits()).toHaveLength(2);
+  });
+
+  it("refuses a directory in the worktree path that git does not know, and leaves it as it is", async () => {
+    const s = await spec("orphan");
+    const orphan = join(s.repoDir, ".factory", "worktrees", "orphan");
+    await runOk("mkdir", ["-p", orphan]);
+    await writeFile(join(orphan, "mine.txt"), "keep\n");
+
+    await expect(runner.start(s)).rejects.toThrow(/does not know it as a worktree/);
+    expect(await readFile(join(orphan, "mine.txt"), "utf8")).toBe("keep\n");
+  });
+
+  it("applies the cpu and memory limits", async () => {
+    const worker = await runner.start(await spec("resources", { cpus: "1", memory: "512m" }));
+    open.push(worker);
+
+    const inspect = await runOk("docker", [
+      "inspect",
+      "--format",
+      "{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}",
+      "factory-resources",
+    ]);
+    expect(inspect.trim()).toBe(`${1e9} ${512 * 1024 * 1024}`);
   });
 
   it.skipIf(!CLAUDE_TOKEN)("runs two Claude Code workers at once with one subscription token", async () => {

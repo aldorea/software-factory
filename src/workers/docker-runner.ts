@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,18 @@ import {
   initialClaudeState,
   isClaudeFinalLine,
 } from "./claude-code.ts";
-import { addWorktree, commitsSince, commonGitDir, isClean, removeWorktree, revParse } from "./git.ts";
+import {
+  addWorktree,
+  addWorktreeForBranch,
+  branchExists,
+  commitsSince,
+  commonGitDir,
+  isClean,
+  listWorktrees,
+  mergeBase,
+  removeWorktree,
+  revParse,
+} from "./git.ts";
 import { applyOpenCodeLine, initialOpenCodeState, openCodeArgs, openCodeOutcome } from "./opencode.ts";
 import { run, runOk } from "./sh.ts";
 import { supervise } from "./supervise.ts";
@@ -25,18 +37,23 @@ import type {
 
 export class DockerWorkerRunner implements WorkerRunner {
   async start(spec: WorkerSpec): Promise<Worker> {
-    const baseSha = await revParse(spec.repoDir, spec.baseRef);
-    const worktreePath = join(spec.repoDir, ".factory", "worktrees", spec.id);
-    await addWorktree(spec.repoDir, worktreePath, spec.branch, baseSha);
+    const container = `factory-${spec.id.replace(/[^a-zA-Z0-9_.-]/g, "-")}`;
+    await run("docker", ["rm", "-f", container]);
+
+    const { worktreePath, created } = await prepareWorktree(spec);
+    const baseSha = await mergeBase(spec.repoDir, spec.baseRef, spec.branch);
     const gitDir = await commonGitDir(worktreePath);
     const secretsDir = await mkdtemp(join(tmpdir(), "factory-"));
-    const container = `factory-${spec.id.replace(/[^a-zA-Z0-9_.-]/g, "-")}`;
 
     try {
       const envFile = join(secretsDir, "env");
       await writeFile(envFile, toEnvFile(spec.env), { mode: 0o600 });
       const mounts = ["-v", `${worktreePath}:${worktreePath}`, "-v", `${gitDir}:${gitDir}`];
-      await runOk("docker", [
+      const resources = [
+        ...(spec.cpus !== undefined ? ["--cpus", spec.cpus] : []),
+        ...(spec.memory !== undefined ? ["--memory", spec.memory] : []),
+      ];
+      const runArgs = [
         "run",
         "-d",
         "--init",
@@ -44,15 +61,21 @@ export class DockerWorkerRunner implements WorkerRunner {
         container,
         "--env-file",
         envFile,
+        ...resources,
         ...mounts,
         "-w",
         worktreePath,
         spec.image,
-      ]);
-      await rm(envFile);
+      ];
+      try {
+        await runUntilVisible(runArgs, container, worktreePath, spec.branch);
+      } finally {
+        await rm(envFile, { force: true });
+      }
     } catch (error) {
+      await run("docker", ["rm", "-f", container]);
       await rm(secretsDir, { recursive: true, force: true });
-      await removeWorktree(spec.repoDir, worktreePath).catch(() => undefined);
+      if (created) await removeWorktree(spec.repoDir, worktreePath).catch(() => undefined);
       throw error;
     }
 
@@ -75,16 +98,17 @@ class DockerWorker implements Worker {
     this.attempts += 1;
     const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${this.attempts}.jsonl`);
     const startedAt = new Date();
-    const exec = (args: string[]) => ["exec", this.container, ...args];
+    const exec = (args: string[]) => ["exec", "-i", this.container, ...args];
     const terminate = (pattern: string) => async () => {
-      await run("docker", exec(["pkill", "-KILL", "-f", pattern]));
+      await run("docker", ["exec", this.container, "pkill", "-KILL", "-f", pattern]);
     };
 
     if (agent.kind === "claude-code") {
       let state = initialClaudeState();
       const runResult = await supervise({
         command: "docker",
-        args: exec(claudeCodeArgs(prompt, agent.model)),
+        args: exec(claudeCodeArgs(agent.model)),
+        stdin: prompt,
         logPath,
         deadline: limits.deadline,
         idleTimeoutMs: limits.idleTimeoutMs,
@@ -107,7 +131,8 @@ class DockerWorker implements Worker {
     let state = initialOpenCodeState();
     const runResult = await supervise({
       command: "docker",
-      args: exec(openCodeArgs(prompt, agent.model)),
+      args: exec(openCodeArgs(agent.model)),
+      stdin: prompt,
       logPath,
       deadline: limits.deadline,
       idleTimeoutMs: limits.idleTimeoutMs,
@@ -142,6 +167,46 @@ class DockerWorker implements Worker {
     }
     return { preservedWorktreePath: this.worktreePath };
   }
+}
+
+const MOUNT_VISIBLE_TIMEOUT_MS = 15_000;
+
+async function runUntilVisible(
+  runArgs: string[],
+  container: string,
+  worktreePath: string,
+  branch: string,
+): Promise<void> {
+  const deadline = Date.now() + MOUNT_VISIBLE_TIMEOUT_MS;
+  let last = "";
+  while (Date.now() < deadline) {
+    await runOk("docker", runArgs);
+    const head = await run("docker", ["exec", container, "git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD"]);
+    if (head.exitCode === 0 && head.stdout.trim() === branch) return;
+    last = head.stderr.trim() || head.stdout.trim();
+    await run("docker", ["rm", "-f", container]);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(`The container does not see ${worktreePath} on ${branch}: ${last}`);
+}
+
+async function prepareWorktree(spec: WorkerSpec): Promise<{ worktreePath: string; created: boolean }> {
+  const registered = (await listWorktrees(spec.repoDir)).find((entry) => entry.branch === spec.branch);
+  if (registered) return { worktreePath: registered.path, created: false };
+
+  const worktreePath = join(spec.repoDir, ".factory", "worktrees", spec.id);
+  if (existsSync(worktreePath)) {
+    throw new Error(
+      `${worktreePath} exists but git does not know it as a worktree of ${spec.branch}. Check its content and remove it by hand.`,
+    );
+  }
+
+  if (await branchExists(spec.repoDir, spec.branch)) {
+    await addWorktreeForBranch(spec.repoDir, worktreePath, spec.branch);
+  } else {
+    await addWorktree(spec.repoDir, worktreePath, spec.branch, await revParse(spec.repoDir, spec.baseRef));
+  }
+  return { worktreePath, created: true };
 }
 
 function toEnvFile(env: Record<string, string>): string {

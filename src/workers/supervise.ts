@@ -14,6 +14,7 @@ export interface SupervisedRun {
 export interface SuperviseOptions {
   command: string;
   args: string[];
+  stdin?: string;
   logPath: string;
   deadline: Date;
   idleTimeoutMs: number;
@@ -29,7 +30,9 @@ const STDERR_TAIL_BYTES = 4000;
 export async function supervise(options: SuperviseOptions): Promise<SupervisedRun> {
   await mkdir(dirname(options.logPath), { recursive: true });
   const log = createWriteStream(options.logPath, { flags: "a" });
-  const child = spawn(options.command, options.args, { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(options.command, options.args, { stdio: ["pipe", "pipe", "pipe"] });
+  child.stdin.on("error", () => undefined);
+  child.stdin.end(options.stdin ?? "");
 
   let stopReason: StopReason = "exited";
   let buffer = "";

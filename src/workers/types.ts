@@ -13,6 +13,8 @@ export interface WorkerSpec {
   image: string;
   env: Record<string, string>;
   logDir: string;
+  cpus?: string;
+  memory?: string;
 }
 
 export interface AttemptLimits {

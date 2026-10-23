@@ -1,17 +1,18 @@
 import type { AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
 import type { SupervisedRun } from "./supervise.ts";
 
-export function claudeCodeArgs(prompt: string, model: string): string[] {
+export function claudeCodeArgs(model: string): string[] {
   return [
     "claude",
-    "-p",
-    prompt,
-    "--model",
-    model,
+    "--print",
+    "--verbose",
     "--output-format",
     "stream-json",
-    "--verbose",
+    "--model",
+    model,
     "--dangerously-skip-permissions",
+    "-p",
+    "-",
   ];
 }
 

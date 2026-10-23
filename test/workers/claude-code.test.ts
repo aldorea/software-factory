@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyClaudeLine,
+  claudeCodeArgs,
   claudeOutcome,
   initialClaudeState,
   isClaudeFinalLine,
@@ -44,6 +45,15 @@ const result = (overrides: Record<string, unknown> = {}) =>
 function feed(lines: string[]): ClaudeStreamState {
   return lines.reduce(applyClaudeLine, initialClaudeState());
 }
+
+describe("Claude Code command", () => {
+  it("takes the prompt from stdin, not from the arguments", () => {
+    const args = claudeCodeArgs("claude-haiku-5-5");
+    expect(args.slice(-2)).toEqual(["-p", "-"]);
+    expect(args).toContain("--print");
+    expect(args).toContain("claude-haiku-5-5");
+  });
+});
 
 describe("Claude Code stream", () => {
   it("reads usage and a successful result", () => {
