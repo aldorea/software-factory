@@ -238,6 +238,6 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 
 - [ ] OpenCode Go authenticates in a container with no pay-per-use fallback. OpenCode v2 does not read `auth.json`, and `auth login` needs a terminal. Not solved yet.
 - [ ] How the Claude Code CLI reports a rejected request at the plan limit. The plan usage is known (`rate_limit_event`); the exact form of a rejection is not seen yet.
-- [ ] One `setup-token` token works in 2 containers at the same time. A Docker test covers it when `CLAUDE_CODE_OAUTH_TOKEN` is set.
+- [x] One `setup-token` token works in 2 containers at the same time. Verified on 2026-10-24 with the Docker test that runs when `CLAUDE_CODE_OAUTH_TOKEN` is set.
 - [ ] The `askwell` image: `pnpm`, Playwright with Chromium, access to Neon branches, one `E2E_PORT` per worker.
 - [ ] The initial values of patience, limits and parallelism.
