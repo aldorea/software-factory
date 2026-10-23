@@ -9,6 +9,7 @@ import type { Worker, WorkerSpec } from "../../src/workers/types.ts";
 
 const IMAGE = "software-factory/worker:dev";
 const CLAUDE_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+const OPENCODE_KEY = process.env.OPENCODE_API_KEY;
 const identity = {
   GIT_AUTHOR_NAME: "factory",
   GIT_AUTHOR_EMAIL: "factory@localhost",
@@ -190,5 +191,17 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     }
   });
 
-  it.todo("runs OpenCode Go in a container: headless authentication of OpenCode v2 is not solved");
+  it.skipIf(!OPENCODE_KEY)("runs OpenCode Go in a container with the key in its environment", async () => {
+    const worker = await runner.start(
+      await spec("opencode-go", { env: { ...identity, OPENCODE_API_KEY: OPENCODE_KEY ?? "" } }),
+    );
+    open.push(worker);
+
+    const attempt = await worker.runAgent(
+      { kind: "opencode", model: "opencode-go/beam-free" },
+      "Reply with the single word OK.",
+      { deadline: new Date(Date.now() + 120_000), idleTimeoutMs: 90_000 },
+    );
+    expect(attempt.outcome, attempt.logPath).toEqual({ kind: "completed", summary: "OK" });
+  });
 });

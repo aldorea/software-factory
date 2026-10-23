@@ -7,10 +7,23 @@ describe("OpenCode", () => {
     expect(openCodeArgs("opencode-go/glm-5.3")).toContain("opencode-go/glm-5.3");
   });
 
+  it("refuses a Claude model, even through the subscription provider", () => {
+    expect(() => openCodeArgs("opencode-go/claude-haiku-5-5")).toThrow(/Claude/);
+  });
+
+  it("leaves out the auto approval when asked", () => {
+    expect(openCodeArgs("opencode-go/glm-5.3", { autoApprove: false })).not.toContain("--auto");
+  });
+
+  it("runs a private server, so the key in its environment reaches the provider", () => {
+    expect(openCodeArgs("opencode-go/glm-5.3").slice(0, 3)).toEqual(["opencode", "run", "--standalone"]);
+  });
+
   it("takes the prompt from stdin, not from the arguments", () => {
     expect(openCodeArgs("opencode-go/glm-5.3")).toEqual([
       "opencode",
       "run",
+      "--standalone",
       "--format",
       "json",
       "--auto",

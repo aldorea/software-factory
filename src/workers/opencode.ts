@@ -3,11 +3,23 @@ import type { SupervisedRun } from "./supervise.ts";
 
 export const SUBSCRIPTION_PROVIDER = "opencode-go";
 
-export function openCodeArgs(model: string): string[] {
+export function openCodeArgs(model: string, options: { autoApprove: boolean } = { autoApprove: true }): string[] {
   if (!model.startsWith(`${SUBSCRIPTION_PROVIDER}/`)) {
     throw new Error(`OpenCode model must use the ${SUBSCRIPTION_PROVIDER} provider, got "${model}"`);
   }
-  return ["opencode", "run", "--format", "json", "--auto", "-m", model];
+  if (model.slice(SUBSCRIPTION_PROVIDER.length + 1).startsWith("claude-")) {
+    throw new Error(`OpenCode must not run a Claude model, got "${model}"`);
+  }
+  return [
+    "opencode",
+    "run",
+    "--standalone",
+    "--format",
+    "json",
+    ...(options.autoApprove ? ["--auto"] : []),
+    "-m",
+    model,
+  ];
 }
 
 export interface OpenCodeStreamState {
