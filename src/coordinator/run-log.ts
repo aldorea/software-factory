@@ -66,7 +66,7 @@ export interface GateRecord {
 }
 
 export interface BlockRecord {
-  type: StopType;
+  type: StopType | "scope" | "design-question";
   reason: string;
   lastFailure?: string;
 }

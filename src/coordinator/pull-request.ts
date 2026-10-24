@@ -12,6 +12,7 @@ export function renderPullRequest(issue: Issue, log: RunLog): PullRequestText {
     `Implements #${issue.number}: ${issue.title}.\n\nCloses #${issue.number}`,
     `## Result\n\n${resultLine(log)}`,
     `## Subtasks\n\n${log.subtasks.map(subtaskLine).join("\n")}`,
+    ...scopeExtensionSections(log),
     verificationSection(log),
     ...criteriaSections(issue, log),
     `## Agents\n\n- Workers: ${log.agents.workers.agent}, model ${log.agents.workers.model}`,
@@ -49,6 +50,14 @@ function subtaskLine(subtask: SubtaskRecord): string {
     ...(lastFailure ? [`  Last failure: ${lastFailure}`] : []),
   ];
   return lines.join("\n");
+}
+
+function scopeExtensionSections(log: RunLog): string[] {
+  const lines = log.subtasks
+    .filter((subtask) => subtask.scopeExtensions.length > 0)
+    .map((subtask) => `- **${subtask.id}**: ${subtask.scopeExtensions.map((path) => `\`${path}\``).join(", ")}`);
+  if (lines.length === 0) return [];
+  return [`## Scope extensions\n\nThe coordinator added these paths to the scope of a subtask during the run. \`specs/${log.issue}.md\` is unchanged.\n\n${lines.join("\n")}`];
 }
 
 function verificationSection(log: RunLog): string {
