@@ -112,6 +112,12 @@ export interface VerificationRecord {
   environment?: string;
 }
 
+export interface EvidenceBranchRecord {
+  branch: string;
+  commit?: string;
+  failure?: string;
+}
+
 export interface PullRequestRecord {
   number: number;
   url: string;
@@ -186,6 +192,7 @@ export interface RunLog {
   workerLayerFailures: WorkerLayerFailureRecord[];
   subtasks: SubtaskRecord[];
   verification?: VerificationRecord;
+  evidence?: EvidenceBranchRecord;
   pullRequest?: PullRequestRecord;
 }
 

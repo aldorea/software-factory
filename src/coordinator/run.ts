@@ -6,6 +6,7 @@ import { WorkerLayerError } from "../workers/failures.ts";
 import { runId as makeRunId, runResult } from "./decisions.ts";
 import { testFilesAt } from "./diff.ts";
 import { requestCheckPaths } from "./gate.ts";
+import { evidenceBranchName, evidenceFiles, publishEvidence } from "./evidence-branch.ts";
 import { verifyIntegration } from "./integrated-verification.ts";
 import { adjustMaxParallel } from "./parallelism.ts";
 import type { RunPorts } from "./ports.ts";
@@ -114,6 +115,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   await inWaves(plan, log.maxParallel, (subtask, slot) => startSubtask(context, subtask, slot));
   if (!paused(context)) await verifyIntegration(context, subtasks);
+  await publishHumanEvidence(context);
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();
   await save();
@@ -134,6 +136,23 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     url: pullRequest.url,
   });
   return { result: log.result, pullRequest, runLogPath, log };
+}
+
+async function publishHumanEvidence(context: RunContext): Promise<void> {
+  const { log, request } = context;
+  delete log.evidence;
+  const files = evidenceFiles(log.runId, context.runDir, log.verification?.humanCriteria ?? []);
+  if (files.length === 0) return;
+  const branch = evidenceBranchName(request.issue);
+  try {
+    const commit = await context.gitLock.exclusive(() =>
+      publishEvidence({ repoDir: request.repoDir, remote: REMOTE, issue: request.issue, runId: log.runId, files }),
+    );
+    log.evidence = { branch, commit };
+  } catch (error) {
+    log.evidence = { branch, failure: (error as Error).message };
+  }
+  await context.save();
 }
 
 export function subtaskBranch(integration: string, subtaskId: string): string {
