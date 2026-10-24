@@ -23,7 +23,7 @@ import type { AgentKind } from "../workers/types.ts";
 import { approvalProblem, runId as makeRunId, runResult, verificationPassed, verifiedDecision } from "./decisions.ts";
 import { changedPaths, testFilesAt } from "./diff.ts";
 import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
-import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
+import { collectEvidence, type EvidenceResult } from "./evidence-collection.ts";
 import { firstErrorLine } from "./failures.ts";
 import { followUpFailure, followUpStop, followUpTasks, verificationSignature } from "./follow-up.ts";
 import { gateDecision, protectedFor, requestCheckPaths, type GateDecision } from "./gate.ts";
@@ -34,7 +34,7 @@ import { adjustMaxParallel, type ParallelismBounds } from "./parallelism.ts";
 import { latestRunLog, mergedSubtasks, readRunLogs, runBaseSha, SUBTASK_TRAILER } from "./run-history.ts";
 import { dependencyProblem, schedule, type Schedule } from "./schedule.ts";
 import { decideScopeExtension, type ScopeExtensionDecision } from "./scope-extension.ts";
-import { Lock, runSchedule } from "./slots.ts";
+import { Lock, inWaves } from "./slots.ts";
 import {
   RUN_LOG_VERSION,
   writeRunLog,
@@ -47,8 +47,8 @@ import {
 } from "./run-log.ts";
 import { applyTotals, emptyCost, emptyFriction } from "./run-totals.ts";
 import { agentTokens, type StopLimits, type StopType } from "./stop-rules.ts";
-import { runSubtaskLoop, type LoopResult, type PlanLimitHit } from "./subtask-loop.ts";
-import { judgeTests, NO_JUDGMENT } from "./verifier-run.ts";
+import { attemptSubtask, type LoopResult, type PlanLimitHit } from "./subtask-loop.ts";
+import { judgeTests, NO_JUDGMENT } from "./test-judgment.ts";
 
 export const REMOTE = "origin";
 export const PULL_REQUEST_BASE = "main";
@@ -211,7 +211,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
           ...(firstError !== undefined ? { firstError } : {}),
         });
       }
-      evidence = await runEvidence(worker, plan, {
+      evidence = await collectEvidence(worker, plan, {
         app: config.app,
         commands: config.evidence,
         attachmentsDir: join(runDir, "attachments"),
@@ -250,7 +250,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     return dependencyProblem(subtask, states);
   };
 
-  const runSubtask = async (subtask: Subtask, slot: number) => {
+  const startSubtask = async (subtask: Subtask, slot: number) => {
     const record = records.get(subtask.id) as SubtaskRecord;
     if (log.pauseReason !== undefined || record.state === "merged") return;
     const reason = notStartedReason(subtask);
@@ -315,7 +315,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
     record.state = "working";
     await save();
-    const worked = await runWorker(request, ports, prepared, { ...subtask, scope: [...(scopes.get(subtask.id) as string[])] }, runDir, slot, gitLock, {
+    const worked = await workInWorker(request, ports, prepared, { ...subtask, scope: [...(scopes.get(subtask.id) as string[])] }, runDir, slot, gitLock, {
       record,
       startedAt,
       gate,
@@ -384,7 +384,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     await save();
   };
 
-  await runSchedule(plan, maxParallel, runSubtask);
+  await inWaves(plan, maxParallel, startSubtask);
 
   if (log.pauseReason === undefined) {
     const signatures: string[] = [];
@@ -541,7 +541,7 @@ interface LoopWiring {
   paused: () => boolean;
 }
 
-async function runWorker(
+async function workInWorker(
   request: RunRequest,
   ports: RunPorts,
   prepared: Prepared,
@@ -578,7 +578,7 @@ async function runWorker(
   let result: LoopResult | null = null;
   try {
     const { limits } = config;
-    result = await runSubtaskLoop({
+    result = await attemptSubtask({
       clock: ports.clock,
       agent: workers,
       prompt: await workerPrompt(issue, subtask, config, wiring.followUp),

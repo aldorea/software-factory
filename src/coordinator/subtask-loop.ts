@@ -42,7 +42,7 @@ export type LoopResult =
   | { kind: "paused"; limit?: PlanLimitHit }
   | { kind: "interrupted" };
 
-export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
+export async function attemptSubtask(loop: SubtaskLoop): Promise<LoopResult> {
   const { clock, record } = loop;
   const carried = record.carriedLoop;
   delete record.carriedLoop;

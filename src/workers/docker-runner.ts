@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { adapterFor } from "./agents.ts";
-import { runAttempt } from "./attempt.ts";
+import { performAttempt } from "./attempt.ts";
 import {
   addWorktree,
   addWorktreeForBranch,
@@ -90,7 +90,7 @@ class DockerWorker implements Worker {
   async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
     this.attempts += 1;
     const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${this.attempts}.jsonl`);
-    return runAttempt({
+    return performAttempt({
       adapter: adapterFor(agent.kind),
       model: agent.model,
       prompt,

@@ -1,7 +1,7 @@
 import { criteriaHash, readApproval, technicalHash } from "../spec/approval.ts";
 import type { CheckRecord, CriterionRecord, RunLog, RunResult } from "./run-log.ts";
 import type { GateDecision, GateRejection } from "./gate.ts";
-import type { TestJudgment } from "./verifier-run.ts";
+import type { TestJudgment } from "./test-judgment.ts";
 
 export function approvalProblem(issue: number, specText: string, issueBody: string): string | null {
   const state = readApproval(specText);

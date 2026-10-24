@@ -12,7 +12,7 @@ export interface AttemptRequest {
   stop: (processName: string) => Promise<void>;
 }
 
-export async function runAttempt(request: AttemptRequest): Promise<AttemptResult> {
+export async function performAttempt(request: AttemptRequest): Promise<AttemptResult> {
   const { adapter } = request;
   const startedAt = new Date();
   const stream = adapter.createStream();

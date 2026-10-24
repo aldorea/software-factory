@@ -1,7 +1,7 @@
 import type { Subtask } from "../spec/spec.ts";
 import type { Schedule } from "./schedule.ts";
 
-export async function runInSlots<T>(
+export async function inSlots<T>(
   items: readonly T[],
   limit: number,
   task: (item: T, slot: number) => Promise<void>,
@@ -27,11 +27,11 @@ export class Lock {
   }
 }
 
-export async function runSchedule(
+export async function inWaves(
   plan: Schedule,
   maxParallel: number,
-  runOne: (subtask: Subtask, slot: number) => Promise<void>,
+  onSubtask: (subtask: Subtask, slot: number) => Promise<void>,
 ): Promise<void> {
-  if (plan.base) await runOne(plan.base, 0);
-  for (const wave of plan.waves) await runInSlots(wave, maxParallel, runOne);
+  if (plan.base) await onSubtask(plan.base, 0);
+  for (const wave of plan.waves) await inSlots(wave, maxParallel, onSubtask);
 }

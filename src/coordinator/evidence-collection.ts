@@ -16,7 +16,7 @@ export interface EvidenceContext {
   attachmentsDir: string;
 }
 
-export async function runEvidence(worker: Worker, plan: EvidencePlan, context: EvidenceContext): Promise<EvidenceResult> {
+export async function collectEvidence(worker: Worker, plan: EvidencePlan, context: EvidenceContext): Promise<EvidenceResult> {
   if (plan.criteria.length === 0 && plan.human.length === 0) return { criteria: [], human: [] };
   if (context.app) await startApp(worker, context.app);
   const criteria: CriterionRecord[] = [];

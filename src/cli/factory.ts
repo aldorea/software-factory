@@ -7,7 +7,7 @@ import { macosNotifier } from "../notify/macos.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import { DockerWorkerRunner } from "../workers/docker-runner.ts";
 import { askRoleInTerminal } from "./ask-role.ts";
-import { runInteractive } from "./launch.ts";
+import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
 
 const credentials = Object.fromEntries(
@@ -27,7 +27,7 @@ process.exitCode = await main(process.argv.slice(2), {
   notifier: macosNotifier(),
   credentials,
   ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: askRoleInTerminal } : {}),
-  launch: runInteractive,
+  launch: launchInteractive,
   out: (text) => process.stdout.write(`${text}\n`),
   err: (text) => process.stderr.write(`${text}\n`),
 });

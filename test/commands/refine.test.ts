@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runInteractive } from "../../src/cli/launch.ts";
+import { launchInteractive } from "../../src/cli/launch.ts";
 import { integrationBranchName, issueSlug, prepareRefinement, refineLaunch } from "../../src/commands/refine.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeGitHub } from "../fakes/github.ts";
@@ -78,7 +78,7 @@ describe("interactive launch", () => {
   it("should run the command in the given directory with the given environment and return its exit code", async () => {
     const dir = await temp.make("launch-test-");
 
-    const code = await runInteractive({
+    const code = await launchInteractive({
       command: process.execPath,
       args: ["-e", "process.exit(process.env.FACTORY_CLI === process.cwd() ? 3 : 4)"],
       cwd: dir,
@@ -90,7 +90,7 @@ describe("interactive launch", () => {
 
   it("should fail with a clear message when the command is not installed", async () => {
     await expect(
-      runInteractive({ command: "factory-test-no-such-claude", args: [], cwd: await temp.make("launch-test-"), env: {} }),
+      launchInteractive({ command: "factory-test-no-such-claude", args: [], cwd: await temp.make("launch-test-"), env: {} }),
     ).rejects.toThrow("factory-test-no-such-claude is not installed");
   });
 });
