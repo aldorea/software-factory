@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { followUpStop } from "../../src/coordinator/follow-up.ts";
 import { countedTokens, stopReason, type StopInput, type StopLimits } from "../../src/coordinator/stop-rules.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -76,5 +77,17 @@ describe("countedTokens", () => {
     expect(
       countedTokens({ inputTokens: 100, cacheCreationInputTokens: 20, cacheReadInputTokens: 5_000, outputTokens: 3 }),
     ).toBe(123);
+  });
+});
+
+describe("followUpStop", () => {
+  it("should stop the follow-up rounds on the run limits, counted without the pauses by the caller", () => {
+    expect(followUpStop({ signatures: ["x"], runElapsedMs: 6 * HOUR, runTokens: 0 }, LIMITS)?.type).toBe("run-wall-clock");
+    expect(followUpStop({ signatures: ["x"], runElapsedMs: 0, runTokens: 8_000_000 }, LIMITS)?.type).toBe("run-tokens");
+    expect(followUpStop({ signatures: ["x", "x"], runElapsedMs: HOUR, runTokens: 1_000 }, LIMITS)).toBeNull();
+  });
+
+  it("should stop by patience when the same criteria keep failing round after round", () => {
+    expect(followUpStop({ signatures: ["x", "x", "x"], runElapsedMs: 0, runTokens: 0 }, LIMITS)?.type).toBe("patience");
   });
 });

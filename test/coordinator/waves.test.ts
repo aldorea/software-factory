@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { approveSpec } from "../../src/commands/approve.ts";
 import { runIssue } from "../../src/coordinator/run.ts";
+import { withBranchWorktree } from "../../src/git/repo.ts";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
@@ -392,22 +393,29 @@ describe("factory run with several subtasks", () => {
 
   it("should block the run on a merge conflict, record the conflicting files, and hand the conflict to no agent", async () => {
     const subtasks = [
-      { id: "S1", scope: ["a/"], testChanges: ["tests/shared.test.ts"] },
-      { id: "S2", scope: ["b/"], testChanges: ["tests/shared.test.ts"] },
+      { id: "S1", scope: ["a/"] },
+      { id: "S2", scope: ["b/"] },
       { id: "S3", scope: ["c/"], dependsOn: ["S1"] },
     ];
     const target = await targetRepo({ subtasks, maxParallel: 2 });
-    const mergedS1 = async () => {
+    const commitOutsideTheRun = async () => {
       while (!(await git(target.repoDir, "log", BRANCH, "--format=%B")).includes("Factory-Subtask: S1")) await pause(20);
+      while ((await git(target.repoDir, "worktree", "list", "--porcelain")).includes(`refs/heads/${BRANCH}`)) await pause(20);
+      await withBranchWorktree(target.repoDir, BRANCH, async (worktree) => {
+        await mkdir(join(worktree, "b"), { recursive: true });
+        await writeFile(join(worktree, "b", "shared.txt"), "outside\n");
+        await git(worktree, "add", ".");
+        await git(worktree, "commit", "-q", "-m", "A commit outside the run");
+      });
     };
     const { run, runner, observer } = observed(
       target,
       (id) => ({
-        files: { "tests/shared.test.ts": `${id}\n`, ...(id === "S3" ? { "c/S3.txt": "S3\n" } : {}) },
+        files: id === "S2" ? { "b/shared.txt": "S2\n" } : { [`${id === "S1" ? "a" : "c"}/${id}.txt`]: `${id}\n` },
         commit: `Work on ${id}`,
       }),
       0,
-      async (id) => (id === "S2" ? mergedS1() : undefined),
+      async (id) => (id === "S2" ? commitOutsideTheRun() : undefined),
     );
 
     const report = await run();
@@ -416,8 +424,8 @@ describe("factory run with several subtasks", () => {
     expect(stateOf(report, "S1")?.state).toBe("merged");
     expect(stateOf(report, "S2")).toMatchObject({
       state: "blocked",
-      conflictFiles: ["tests/shared.test.ts"],
-      reason: `Its merge into ${BRANCH} conflicts in tests/shared.test.ts.`,
+      conflictFiles: ["b/shared.txt"],
+      reason: `Its merge into ${BRANCH} conflicts in b/shared.txt.`,
     });
     expect(stateOf(report, "S2")?.attempts).toHaveLength(1);
     expect(stateOf(report, "S3")).toMatchObject({
@@ -427,10 +435,10 @@ describe("factory run with several subtasks", () => {
     expect([...observer.order].sort()).toEqual(["S1", "S2"]);
     expect(runner.workers.filter((worker) => worker.attempts.length > 0)).toHaveLength(2);
     expect(target.github.pullRequests[0]?.draft).toBe(true);
-    expect(target.github.pullRequests[0]?.body).toContain("**S2** (A2): blocked. Its merge into factory/42-greeting conflicts in tests/shared.test.ts.");
+    expect(target.github.pullRequests[0]?.body).toContain("**S2** (A2): blocked. Its merge into factory/42-greeting conflicts in b/shared.txt.");
     const onDisk = JSON.parse(await readFile(report.runLogPath, "utf8")) as RunLog;
-    expect(onDisk.subtasks.find((subtask) => subtask.id === "S2")?.conflictFiles).toEqual(["tests/shared.test.ts"]);
-    expect(await git(target.repoDir, "show", `${BRANCH}:tests/shared.test.ts`)).toBe("S1");
+    expect(onDisk.subtasks.find((subtask) => subtask.id === "S2")?.conflictFiles).toEqual(["b/shared.txt"]);
+    expect(await git(target.repoDir, "show", `${BRANCH}:b/shared.txt`)).toBe("outside");
   });
 
   it("should pause without starting the next subtasks when a worker reaches the plan limit, leaving them pending", async () => {

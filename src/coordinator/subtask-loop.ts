@@ -4,7 +4,7 @@ import type { AgentKind, AttemptLimits, AttemptResult } from "../workers/types.t
 import { outcomeFailure, gateFailure, type AttemptFailure } from "./failures.ts";
 import type { GateDecision } from "./gate.ts";
 import type { Clock } from "./ports.ts";
-import type { AttemptRecord, SubtaskRecord } from "./run-log.ts";
+import type { AttemptRecord, CarriedLoopRecord, SubtaskRecord } from "./run-log.ts";
 import type { ScopeExtensionDecision } from "./scope-extension.ts";
 import { agentTokens, stopReason, type StopLimits, type StopReason } from "./stop-rules.ts";
 import { parseWorkerReport } from "./worker-report.ts";
@@ -18,11 +18,12 @@ export interface SubtaskLoop {
   agent: RoleChoice;
   prompt: string;
   record: SubtaskRecord;
+  carried?: CarriedLoopRecord;
   limits: LoopLimits;
   runStartedAt: Date;
   runTokens: () => number;
   attempt: (prompt: string, limits: AttemptLimits) => Promise<AttemptResult>;
-  gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | null>;
+  gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | EnvironmentHit | null>;
   extendScope: (requested: string[]) => ScopeExtensionDecision;
   save: () => Promise<void>;
   paused: () => boolean;
@@ -35,25 +36,33 @@ export interface PlanLimitHit {
   resetsAt?: Date;
 }
 
+export interface EnvironmentHit {
+  kind: "environment";
+  reason: string;
+}
+
 export type LoopResult =
-  | { kind: "accepted" }
+  | { kind: "accepted"; budget: CarriedLoopRecord }
   | { kind: "blocked"; stop: StopReason; lastFailure?: string }
   | { kind: "reported"; type: "scope" | "design-question"; reason: string }
   | { kind: "paused"; limit?: PlanLimitHit }
+  | { kind: "environment"; reason: string }
   | { kind: "interrupted" };
 
-export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
+export async function attemptSubtask(loop: SubtaskLoop): Promise<LoopResult> {
   const { clock, record } = loop;
-  const carried = record.carriedLoop;
+  const carried = loop.carried ?? record.carriedLoop;
   delete record.carriedLoop;
   const first = carried?.firstAttempt ?? record.attempts.length;
   const startedAt = new Date(clock.now().getTime() - (carried?.elapsedMs ?? 0));
   const result = await attemptsUntilDone(loop, startedAt, first);
-  if (result.kind !== "accepted") record.carriedLoop = { firstAttempt: first, elapsedMs: clock.now().getTime() - startedAt.getTime() };
+  const budget = { firstAttempt: first, elapsedMs: clock.now().getTime() - startedAt.getTime() };
+  if (result.kind === "accepted") return { kind: "accepted", budget };
+  record.carriedLoop = budget;
   return result;
 }
 
-async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: number): Promise<LoopResult> {
+async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: number): Promise<LoopResult | { kind: "accepted" }> {
   const { clock, record, limits } = loop;
   const earlier = record.attempts.slice(first).flatMap((attempt) => (attempt.failure ? [attempt.failure] : []));
   const signatures = earlier.map((failure) => failure.signature);
@@ -115,7 +124,10 @@ async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: numb
       await loop.save();
       const decision = await loop.gate(number);
       if (decision === null) return { kind: "interrupted" };
-      if ("kind" in decision) return pause(loop, decision);
+      if ("kind" in decision) {
+        if (decision.kind === "environment") return { kind: "environment", reason: decision.reason };
+        return pause(loop, decision);
+      }
       if (decision.accepted) return { kind: "accepted" };
       if (decision.rejections.some((rejection) => rejection.kind !== "verifier")) record.gateRejections += 1;
       if (decision.rejections.some((rejection) => rejection.kind === "verifier")) record.verifierRejections += 1;
@@ -131,7 +143,7 @@ async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: numb
   }
 }
 
-async function pause(loop: SubtaskLoop, limit?: PlanLimitHit): Promise<LoopResult> {
+async function pause(loop: SubtaskLoop, limit?: PlanLimitHit): Promise<Exclude<LoopResult, { kind: "accepted" }>> {
   loop.record.state = "pending";
   await loop.save();
   return limit === undefined ? { kind: "paused" } : { kind: "paused", limit };

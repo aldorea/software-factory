@@ -7,7 +7,7 @@ export interface InteractiveLaunch {
   env: Record<string, string>;
 }
 
-export function runInteractive(launch: InteractiveLaunch): Promise<number> {
+export function launchInteractive(launch: InteractiveLaunch): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn(launch.command, launch.args, {
       cwd: launch.cwd,

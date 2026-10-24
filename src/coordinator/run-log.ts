@@ -66,7 +66,7 @@ export interface GateRecord {
 }
 
 export interface BlockRecord {
-  type: StopType | "scope" | "design-question";
+  type: StopType | "scope" | "design-question" | "environment";
   reason: string;
   lastFailure?: string;
 }
@@ -109,6 +109,7 @@ export interface VerificationRecord {
   checks: CheckRecord[];
   criteria: CriterionRecord[];
   humanCriteria: HumanCriterionRecord[];
+  environment?: string;
 }
 
 export interface PullRequestRecord {

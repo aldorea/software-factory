@@ -10,9 +10,19 @@ export interface Check {
   command: string;
 }
 
+export interface AppConfig {
+  start: string;
+  ready?: string;
+  readyTimeoutMs?: number;
+}
+
 export interface AppStart {
   start: string;
+  ready?: string;
+  readyTimeoutMs: number;
 }
+
+export const DEFAULT_READY_TIMEOUT_MS = 60_000;
 
 export interface EvidenceCommands {
   playwright?: string;
@@ -52,7 +62,7 @@ export interface RunLimits {
 export interface FactoryConfig {
   image: string;
   checks: Check[];
-  app?: AppStart;
+  app?: AppConfig;
   evidence?: EvidenceCommands;
   environment: (worker: WorkerEnvironmentContext) => Record<string, string>;
   protectedPaths: string[];
@@ -101,11 +111,7 @@ export function resolveConfig(value: unknown): ConfigResult {
 
   const checks = readChecks(value.checks, problems);
 
-  let app: AppStart | undefined;
-  if (value.app !== undefined) {
-    if (isRecord(value.app) && isNonEmptyString(value.app.start)) app = { start: value.app.start };
-    else problems.push("app.start must be a non-empty string");
-  }
+  const app = readApp(value.app, problems);
 
   const evidence = readEvidence(value.evidence, problems);
 
@@ -151,6 +157,28 @@ function readChecks(value: unknown, problems: string[]): Check[] {
     problems.push(`checks[${index}] must have a non-empty name and command`);
     return [];
   });
+}
+
+function readApp(value: unknown, problems: string[]): AppStart | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value) || !isNonEmptyString(value.start)) {
+    problems.push("app.start must be a non-empty string");
+    return undefined;
+  }
+  for (const key of Object.keys(value)) {
+    if (!["start", "ready", "readyTimeoutMs"].includes(key)) problems.push(`app.${key} is not a known setting`);
+  }
+  const app: AppStart = { start: value.start, readyTimeoutMs: DEFAULT_READY_TIMEOUT_MS };
+  if (value.ready !== undefined) {
+    if (isNonEmptyString(value.ready)) app.ready = value.ready;
+    else problems.push("app.ready must be a non-empty command that exits zero once the app serves");
+  }
+  if (value.readyTimeoutMs !== undefined) {
+    const timeout = value.readyTimeoutMs;
+    if (typeof timeout === "number" && Number.isFinite(timeout) && timeout > 0) app.readyTimeoutMs = timeout;
+    else problems.push("app.readyTimeoutMs must be a positive number");
+  }
+  return app;
 }
 
 function readEvidence(value: unknown, problems: string[]): EvidenceCommands {

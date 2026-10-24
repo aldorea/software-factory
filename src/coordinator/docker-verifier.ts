@@ -1,9 +1,9 @@
-import type { RoleChoice } from "../config/config.ts";
+import type { ResolvedConfig, RoleChoice } from "../config/config.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
-import { loadConfig } from "../config/load.ts";
-import { credentialProblem, CREDENTIAL_VARIABLES } from "../config/roles.ts";
+import { CREDENTIAL_VARIABLES } from "../config/roles.ts";
 import type { AgentKind, AttemptOutcome } from "../workers/types.ts";
 import { askVerifier } from "../workers/verifier.ts";
+import type { Clock } from "./ports.ts";
 import type { Verifier, VerifierAnswer, VerifierQuestion } from "./verifier.ts";
 
 export const QUESTION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -13,23 +13,26 @@ export interface VerifierSetup {
   role: RoleChoice;
   env: Record<string, string>;
   idleTimeoutMs: number;
+  clock: Clock;
 }
 
 export function configuredVerifier(
-  repoDir: string,
+  config: ResolvedConfig,
   role: RoleChoice,
   credentials: Partial<Record<AgentKind, string>>,
+  clock: Clock,
 ): Verifier {
   return {
     async judge(question) {
-      const config = await loadConfig(repoDir);
+      const variable = CREDENTIAL_VARIABLES[role.agent];
       const credential = credentials[role.agent];
-      if (!credential) throw new Error(credentialProblem("verifier", role, credentials) ?? "");
+      if (!credential) throw new Error(`${variable} is not set; the ${role.agent} verifier needs it`);
       return dockerVerifier({
         image: config.image,
         role,
-        env: { [CREDENTIAL_VARIABLES[role.agent]]: credential },
+        env: { [variable]: credential },
         idleTimeoutMs: config.limits.attemptIdleTimeoutMs,
+        clock,
       }).judge(question);
     },
   };
@@ -51,7 +54,7 @@ export function dockerVerifier(setup: VerifierSetup): Verifier {
         model: setup.role.model,
         prompt,
         logPath: question.logPath,
-        limits: { deadline: new Date(Date.now() + QUESTION_TIMEOUT_MS), idleTimeoutMs: setup.idleTimeoutMs },
+        limits: { deadline: new Date(setup.clock.now().getTime() + QUESTION_TIMEOUT_MS), idleTimeoutMs: setup.idleTimeoutMs },
       });
       return answerFrom(result.outcome);
     },

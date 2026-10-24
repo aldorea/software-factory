@@ -6,9 +6,12 @@ import { ghGitHub } from "../github/gh.ts";
 import { macosNotifier } from "../notify/macos.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import { DockerWorkerRunner } from "../workers/docker-runner.ts";
+import { dockerProblem } from "../workers/docker.ts";
 import { askRoleInTerminal } from "./ask-role.ts";
-import { runInteractive } from "./launch.ts";
+import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
+
+const clock = { now: () => new Date() };
 
 const credentials = Object.fromEntries(
   AGENT_KINDS.flatMap((kind) => {
@@ -20,14 +23,15 @@ const credentials = Object.fromEntries(
 process.exitCode = await main(process.argv.slice(2), {
   cwd: process.cwd(),
   factoryRoot: join(import.meta.dirname, "..", ".."),
-  clock: { now: () => new Date() },
+  clock,
   github: (repoDir) => ghGitHub({ repoDir }),
   runner: () => new DockerWorkerRunner(),
-  verifier: (repoDir, role) => configuredVerifier(repoDir, role, credentials),
+  verifier: (config, role) => configuredVerifier(config, role, credentials, clock),
   notifier: macosNotifier(),
   credentials,
+  docker: () => dockerProblem(),
   ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: askRoleInTerminal } : {}),
-  launch: runInteractive,
+  launch: launchInteractive,
   out: (text) => process.stdout.write(`${text}\n`),
   err: (text) => process.stderr.write(`${text}\n`),
 });

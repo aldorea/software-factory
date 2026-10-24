@@ -2,7 +2,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../commands/approve.ts";
 import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
-import type { Role, RoleChoice } from "../config/config.ts";
+import type { ResolvedConfig, Role, RoleChoice } from "../config/config.ts";
 import { loadConfig } from "../config/load.ts";
 import { chooseRole, parseRoleFlag, ROLES, type ChosenRole } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
@@ -28,9 +28,10 @@ export interface CliEnv {
   clock: Clock;
   github(repoDir: string): GitHub;
   runner(): WorkerRunner;
-  verifier(repoDir: string, role: RoleChoice): Verifier;
+  verifier(config: ResolvedConfig, role: RoleChoice): Verifier;
   notifier: Notifier;
   credentials: Partial<Record<AgentKind, string>>;
+  docker(): Promise<string | null>;
   ask?: (question: RoleQuestion) => Promise<RoleChoice>;
   launch(launch: InteractiveLaunch): Promise<number>;
   out(text: string): void;
@@ -117,6 +118,11 @@ function parseCommand(args: string[]): Command | null {
 }
 
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
+  const dockerIssue = await env.docker();
+  if (dockerIssue !== null) {
+    env.err(`factory: ${dockerIssue}`);
+    return 1;
+  }
   const config = await loadConfig(repoDir);
   const defaults = resumeDefaults(await latestRunLog(join(repoDir, ".factory", "logs"), issue), config.roles);
   const roles: Partial<Record<Role, RoleChoice>> = {};
@@ -132,7 +138,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     { repoDir, issue, credentials: env.credentials, roles },
     {
       runner: env.runner(),
-      verifier: env.verifier(repoDir, roles.verifier as RoleChoice),
+      verifier: env.verifier(config, roles.verifier as RoleChoice),
       github: env.github(repoDir),
       notifier: env.notifier,
       clock: env.clock,
