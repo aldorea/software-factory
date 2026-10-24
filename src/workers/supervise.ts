@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 
 export type StopReason = "exited" | "idle-timeout" | "deadline" | "completion-grace";
 
-export interface SupervisedRun {
+export interface SupervisedProcess {
   stopReason: StopReason;
   exitCode: number | null;
   stderrTail: string;
@@ -29,7 +29,7 @@ export interface SuperviseOptions {
 const STDERR_TAIL_BYTES = 4000;
 const STREAM_DRAIN_MS = 2000;
 
-export async function supervise(options: SuperviseOptions): Promise<SupervisedRun> {
+export async function supervise(options: SuperviseOptions): Promise<SupervisedProcess> {
   await mkdir(dirname(options.logPath), { recursive: true });
   const log = createWriteStream(options.logPath, { flags: "a" });
   const child = spawn(options.command, options.args, {

@@ -7,9 +7,9 @@ import {
   isClaudeFinalLine,
   type ClaudeStreamState,
 } from "../../src/workers/claude-code.ts";
-import type { SupervisedRun } from "../../src/workers/supervise.ts";
+import type { SupervisedProcess } from "../../src/workers/supervise.ts";
 
-const exited: SupervisedRun = { stopReason: "exited", exitCode: 0, stderrTail: "" };
+const exited: SupervisedProcess = { stopReason: "exited", exitCode: 0, stderrTail: "" };
 
 const rateLimit = (status: string, fiveHour: number, sevenDay: number) =>
   JSON.stringify({

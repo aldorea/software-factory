@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runOk } from "../../src/workers/sh.ts";
+import { execOk } from "../../src/workers/sh.ts";
 import { askVerifier } from "../../src/workers/verifier.ts";
 
 const IMAGE = "software-factory/worker:dev";
@@ -22,7 +22,7 @@ async function ask(prompt: string) {
 }
 
 async function verifierContainers(): Promise<string> {
-  return (await runOk("docker", ["ps", "-a", "--filter", "name=factory-verifier-", "--format", "{{.Names}}"])).trim();
+  return (await execOk("docker", ["ps", "-a", "--filter", "name=factory-verifier-", "--format", "{{.Names}}"])).trim();
 }
 
 describe.skipIf(!process.env.FACTORY_DOCKER_TESTS || !OPENCODE_KEY)("Verifier in Docker", { timeout: 180_000 }, () => {

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import type { ExecResult } from "./types.ts";
 
-export function run(
+export function exec(
   command: string,
   args: string[],
   options: { cwd?: string; timeoutMs?: number } = {},
@@ -22,12 +22,12 @@ export function run(
   });
 }
 
-export async function runOk(
+export async function execOk(
   command: string,
   args: string[],
   options: { cwd?: string; timeoutMs?: number } = {},
 ): Promise<string> {
-  const result = await run(command, args, options);
+  const result = await exec(command, args, options);
   if (result.exitCode !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed (${result.exitCode}): ${result.stderr.trim()}`);
   }
