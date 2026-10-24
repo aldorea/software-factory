@@ -23,6 +23,7 @@ interface SubtaskDefinition {
   id: string;
   scope: string[];
   dependsOn?: string[];
+  testChanges?: string[];
 }
 
 interface TargetOptions {
@@ -66,7 +67,7 @@ function specAndIssue(options: TargetOptions): { spec: string; issueBody: string
     criteria: [criterionOf(definition.id)],
     scope: definition.scope,
     dependsOn: definition.dependsOn ?? [],
-    testChanges: [],
+    testChanges: definition.testChanges ?? [],
   });
   const criteria = Object.fromEntries(
     definitions.map((definition) => [criterionOf(definition.id), { evidence: "request", level: "subtask" }]),
@@ -219,7 +220,7 @@ describe("factory run with a base subtask", () => {
 
     await run();
 
-    const gate = runner.workers.find((worker) => worker.spec.id.endsWith("-B-gate"));
+    const gate = runner.workers.find((worker) => worker.spec.id.includes("-B-gate-"));
     expect(gate?.execs).toEqual([
       { command: "true", exitCode: 0 },
       { command: "true # A1", exitCode: 0 },
@@ -240,7 +241,7 @@ describe("factory run with a base subtask", () => {
     const report = await run();
 
     expect(report.result).toBe("draft");
-    expect(observer.order).toEqual(["B"]);
+    expect([...new Set(observer.order)]).toEqual(["B"]);
     expect(stateOf(report, "B")?.state).toBe("blocked");
     for (const id of ["S1", "S2"]) {
       expect(stateOf(report, id)).toMatchObject({
@@ -348,11 +349,11 @@ describe("factory run with several subtasks", () => {
 
     await run();
 
-    const envOf = (suffix: string) => runner.workers.find((worker) => worker.spec.id.endsWith(suffix))?.spec.env;
+    const envOf = (suffix: string) => runner.workers.find((worker) => worker.spec.id.includes(suffix))?.spec.env;
     expect(envOf("42-S1")).toMatchObject({ E2E_PORT: "4000", DATABASE_URL: "postgres://neon/S1" });
     expect(envOf("42-S2")).toMatchObject({ E2E_PORT: "4001", DATABASE_URL: "postgres://neon/S2" });
-    expect(envOf("-S1-gate")).toEqual({ E2E_PORT: "4000", DATABASE_URL: "postgres://neon/S1" });
-    expect(envOf("-S2-gate")).toEqual({ E2E_PORT: "4001", DATABASE_URL: "postgres://neon/S2" });
+    expect(envOf("-S1-gate-")).toEqual({ E2E_PORT: "4000", DATABASE_URL: "postgres://neon/S1" });
+    expect(envOf("-S2-gate-")).toEqual({ E2E_PORT: "4001", DATABASE_URL: "postgres://neon/S2" });
     expect(envOf("-verification")).toMatchObject({ E2E_PORT: "4000" });
   });
 
@@ -369,7 +370,7 @@ describe("factory run with several subtasks", () => {
     const report = await run();
 
     expect(report.result).toBe("draft");
-    expect(observer.order.sort()).toEqual(["S1", "S3"]);
+    expect([...new Set(observer.order)].sort()).toEqual(["S1", "S3"]);
     expect(stateOf(report, "S1")?.state).toBe("blocked");
     expect(stateOf(report, "S3")?.state).toBe("merged");
     expect(stateOf(report, "S2")).toMatchObject({
@@ -390,8 +391,8 @@ describe("factory run with several subtasks", () => {
 
   it("should block the run on a merge conflict, record the conflicting files, and hand the conflict to no agent", async () => {
     const subtasks = [
-      { id: "S1", scope: ["a/"] },
-      { id: "S2", scope: ["b/"] },
+      { id: "S1", scope: ["a/"], testChanges: ["tests/shared.test.ts"] },
+      { id: "S2", scope: ["b/"], testChanges: ["tests/shared.test.ts"] },
       { id: "S3", scope: ["c/"], dependsOn: ["S1"] },
     ];
     const target = await targetRepo({ subtasks, maxParallel: 2 });
@@ -401,7 +402,7 @@ describe("factory run with several subtasks", () => {
     const { run, runner, observer } = observed(
       target,
       (id) => ({
-        files: { "shared.txt": `${id}\n`, ...(id === "S3" ? { "c/S3.txt": "S3\n" } : {}) },
+        files: { "tests/shared.test.ts": `${id}\n`, ...(id === "S3" ? { "c/S3.txt": "S3\n" } : {}) },
         commit: `Work on ${id}`,
       }),
       0,
@@ -414,8 +415,8 @@ describe("factory run with several subtasks", () => {
     expect(stateOf(report, "S1")?.state).toBe("merged");
     expect(stateOf(report, "S2")).toMatchObject({
       state: "blocked",
-      conflictFiles: ["shared.txt"],
-      reason: `Its merge into ${BRANCH} conflicts in shared.txt.`,
+      conflictFiles: ["tests/shared.test.ts"],
+      reason: `Its merge into ${BRANCH} conflicts in tests/shared.test.ts.`,
     });
     expect(stateOf(report, "S2")?.attempts).toHaveLength(1);
     expect(stateOf(report, "S3")).toMatchObject({
@@ -425,10 +426,10 @@ describe("factory run with several subtasks", () => {
     expect([...observer.order].sort()).toEqual(["S1", "S2"]);
     expect(runner.workers.filter((worker) => worker.attempts.length > 0)).toHaveLength(2);
     expect(target.github.pullRequests[0]?.draft).toBe(true);
-    expect(target.github.pullRequests[0]?.body).toContain("**S2** (A2): blocked. Its merge into factory/42-greeting conflicts in shared.txt.");
+    expect(target.github.pullRequests[0]?.body).toContain("**S2** (A2): blocked. Its merge into factory/42-greeting conflicts in tests/shared.test.ts.");
     const onDisk = JSON.parse(await readFile(report.runLogPath, "utf8")) as RunLog;
-    expect(onDisk.subtasks.find((subtask) => subtask.id === "S2")?.conflictFiles).toEqual(["shared.txt"]);
-    expect(await git(target.repoDir, "show", `${BRANCH}:shared.txt`)).toBe("S1");
+    expect(onDisk.subtasks.find((subtask) => subtask.id === "S2")?.conflictFiles).toEqual(["tests/shared.test.ts"]);
+    expect(await git(target.repoDir, "show", `${BRANCH}:tests/shared.test.ts`)).toBe("S1");
   });
 
   it("should pause without starting the next subtasks when a worker reaches the plan limit, leaving them pending", async () => {

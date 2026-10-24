@@ -97,18 +97,31 @@ describe("the run record written by factory run", () => {
 
     expect(report.log.workerLayerFailures).toEqual([]);
     expect(report.log.friction).toEqual({
-      blocks: { scope: 0, "design-question": 0, patience: 0, limit: 0, environment: 0 },
+      blocks: { scope: 0, "design-question": 0, patience: 1, limit: 0, environment: 0 },
       scopeExtensions: 0,
-      gateRejections: 1,
+      gateRejections: 3,
       verifierRejections: 0,
       integrationConflicts: 0,
     });
   });
 
-  it("should count the block of a subtask by its type", async () => {
+  it("should count the block of a subtask by its type, patience for attempts that keep ending the same way", async () => {
     const target = await targetRepo();
 
     const report = await harness(target, () => ({ outcome: { kind: "deadline" } })).run();
+
+    expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "patience" });
+    expect(report.log.friction.blocks).toEqual({ scope: 0, "design-question": 0, patience: 1, limit: 0, environment: 0 });
+  });
+
+  it("should count the block of a subtask by a hard limit as a limit", async () => {
+    const target = await targetRepo({ config: CONFIG.replace("  roles:", "  limits: { subtaskWallClockMs: 1000 },\n  roles:") });
+    const h = harness(target, () => {
+      h.clock.advance(2000);
+      return { outcome: { kind: "deadline" } };
+    });
+
+    const report = await h.run();
 
     expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "limit" });
     expect(report.log.friction.blocks).toEqual({ scope: 0, "design-question": 0, patience: 0, limit: 1, environment: 0 });
@@ -176,7 +189,7 @@ describe("the run record written by factory run", () => {
   it("should keep the checks of the gate when closing its worker fails, and record the failure of the cleanup", async () => {
     const target = await targetRepo();
     const { run } = harness(target, writesHello, {
-      close: (spec) => (spec.id.endsWith("-gate") ? new Error("git worktree remove failed") : undefined),
+      close: (spec) => (spec.id.includes("-gate") ? new Error("git worktree remove failed") : undefined),
     });
 
     const report = await run();
