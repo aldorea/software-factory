@@ -6,7 +6,7 @@ import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
-import { FakeWorkerRunner, type AttemptScript } from "../fakes/worker-runner.ts";
+import { FakeWorkerRunner, type AttemptScript, type WorkerFaults } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 export const temp = tempDirs();
@@ -26,25 +26,29 @@ export const ISSUE_BODY = [
   "",
 ].join("\n");
 
-export const SPEC = [
-  "# Spec #42",
-  "",
-  "One subtask writes the greeting.",
-  "",
-  "```json factory-spec",
-  JSON.stringify(
-    {
-      files: { A1: ["src/greeting.txt"] },
-      base: null,
-      subtasks: [{ id: "S1", criteria: ["A1"], scope: ["src/"], dependsOn: [], testChanges: [] }],
-      criteria: { A1: { evidence: "request", level: "subtask" } },
+export function specText(data: object): string {
+  return ["# Spec #42", "", "One subtask writes the greeting.", "", "```json factory-spec", JSON.stringify(data, null, 2), "```", ""].join("\n");
+}
+
+export const SPEC = specText({
+  files: { A1: ["src/greeting.txt"] },
+  base: null,
+  subtasks: [{ id: "S1", criteria: ["A1"], scope: ["src/"], dependsOn: [], testChanges: [] }],
+  criteria: { A1: { evidence: "request", level: "subtask" } },
+});
+
+export const WITH_HUMAN_CRITERION = {
+  issueBody: ISSUE_BODY.replace("A1 The greeting says hello.", "A1 The greeting says hello.\n- [ ] A2 The greeting looks friendly."),
+  spec: specText({
+    files: { A1: ["src/greeting.txt"], A2: ["src/greeting.txt"] },
+    base: null,
+    subtasks: [{ id: "S1", criteria: ["A1", "A2"], scope: ["src/"], dependsOn: [], testChanges: [] }],
+    criteria: {
+      A1: { evidence: "request", level: "subtask" },
+      A2: { evidence: "human", level: "integration", reason: "Looks are subjective" },
     },
-    null,
-    2,
-  ),
-  "```",
-  "",
-].join("\n");
+  }),
+};
 
 export const CONFIG = `
 export default {
@@ -101,8 +105,8 @@ export async function targetRepo(options: { config?: string | null; issueBody?: 
   return { repoDir, remoteDir, github };
 }
 
-export function harness(target: Target, script: AttemptScript) {
-  const runner = new FakeWorkerRunner(script);
+export function harness(target: Target, script: AttemptScript, faults: WorkerFaults = {}) {
+  const runner = new FakeWorkerRunner(script, faults);
   const notifier = new FakeNotifier();
   const clock = new FakeClock("2026-10-24T08:00:00.000Z");
   const request: RunRequest = {

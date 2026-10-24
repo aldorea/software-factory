@@ -25,6 +25,8 @@ function resultLine(log: RunLog): string {
   const blocked = log.subtasks.filter((subtask) => subtask.state !== "merged").map((subtask) => subtask.id);
   if (blocked.length > 0) failed.push(`subtasks not merged: ${blocked.join(", ")}`);
   if (log.verification && !log.verification.passed) failed.push("the integrated verification failed");
+  const layer = log.workerLayerFailures.length;
+  if (layer > 0) failed.push(`${layer} failure${layer === 1 ? "" : "s"} of the worker layer, not of the design`);
   return `Draft: ${failed.join("; ")}.`;
 }
 
