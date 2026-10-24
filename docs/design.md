@@ -71,6 +71,14 @@ Each criterion has one type of evidence:
 - **Request:** a request to an endpoint and the comparison of its response with the response the spec expects.
 - **Human:** only for a visual or subjective criterion that the refinement cannot convert, with the reason in the spec. The factory attaches Playwright screenshots or a short video. The PR lists these criteria apart and unchecked: I validate them in my review.
 
+The coordinator publishes these attachments on the **evidence branch** `factory-evidence/<n>`, because a path under `.factory/logs/` is outside git and a reviewer on GitHub cannot open it:
+
+- After the integrated verification, the coordinator, on the host, commits the attachments of each human criterion under `<run-id>/<criterion-id>/` and pushes the branch as it pushes the integration branch. No container pushes.
+- The branch has no common history with `main` and is never merged.
+- A run adds a commit on top of the branch and never rewrites the earlier ones. The PR links each human criterion to its files at the pushed commit, so the links keep working after later runs. Images render inline.
+- A run with no attachments does not create the branch.
+- A failure to publish is recorded in `run.json` (`evidence.failure`), stated in the PR, and keeps the PR a draft.
+
 A "human" criterion with no reason in the spec means that the refinement is not finished.
 
 `.factory/config.ts` gives the Playwright and request commands with the placeholder `{{id}}` for the criterion ID (the test or request carries the ID in its title) and the folder where Playwright leaves its screenshots and videos. A criterion whose type has no command in the config stops the run before any worker starts.
