@@ -10,10 +10,34 @@ A personal factory that takes a GitHub issue of a TypeScript repo and returns a 
 
 ## Hard rules
 
-- Agents run only on subscriptions: the Claude Code CLI with a `setup-token` token, and the OpenCode CLI with an OpenCode Go key and `opencode-go/` models ([ADR 0001](docs/adr/0001-subscriptions-only.md)).
+- Agents run only on subscriptions: today the Claude Code CLI with a `setup-token` token, and the OpenCode CLI with an OpenCode Go key and `opencode-go/` models ([ADR 0001](docs/adr/0001-subscriptions-only.md)). They are interchangeable: the developer chooses the agent and model of each role before a run ([ADR 0003](docs/adr/0003-interchangeable-agents.md)). Do not remove or degrade the support of an agent.
 - The worker layer is our own code; Sandcastle is read for reference only ([ADR 0002](docs/adr/0002-own-worker-layer.md)).
 - The coordinator stays deterministic: every LLM call happens in a worker or in the independent verifier.
 - A container receives only what the design lists for it. Host secrets (`.env`, `~/.ssh`, the `gh` session) stay on the host, and only the coordinator pushes and opens pull requests.
+
+## Code, comments and tests
+
+### Code
+
+- Keep decisions in pure functions that take the time (`now`) as a parameter, and keep I/O (processes, Docker, git, files) in separate modules.
+- Return what can happen to an agent as data, in a discriminated union such as `AttemptOutcome`. Throw only for broken preconditions and failures of the environment. Swallow errors only on cleanup paths.
+- Start processes with `execFile` or `spawn` and an array of arguments; never interpolate a value into a shell string. Secrets travel only in an env file with mode `0600`, removed in a `finally`.
+- Do not relax the options of `tsconfig.json`, and do not add a runtime dependency without a reason the developer accepts.
+- When code can check a hard rule, it checks it and fails closed, as `openCodeArgs` refuses a model outside `opencode-go/`.
+- In code, `run` names only the glossary's Run. A process or a Docker command is not a run.
+
+### Comments
+
+- No comments in the code. The reason for a behaviour that is not obvious goes in the name of a test that pins it.
+
+### Tests
+
+- Every decision that fails closed has a test that runs with no Docker and no subscription.
+- No mocks of processes, git or the file system: use real processes and temporary repos. The only test double is the fake `WorkerRunner` of the design.
+- The stream lines of an agent in a test come from a real log. When the version of a CLI changes in `docker/Dockerfile`, capture them again.
+- Name tests in should notation, `it("should …")`, stating the behaviour and, when it is not obvious, why.
+- Do not weaken or delete an existing test to make a change pass without saying so in the commit.
+- A test removes what it creates: temporary directories, worktrees and containers.
 
 ## Verify a change
 
