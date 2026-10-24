@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
 import type { GitHub } from "../../src/github/github.ts";
 import { ghGitHub } from "../../src/github/gh.ts";
@@ -69,22 +70,39 @@ async function targetRepo(spec: string, config: string | null = CONFIG): Promise
   return dir;
 }
 
+async function mainRepo(): Promise<string> {
+  const dir = await temp.make("cli-refine-");
+  await execOk("git", ["init", "-q", "-b", "main", dir]);
+  await git(dir, "config", "user.name", "t");
+  await git(dir, "config", "user.email", "t@t");
+  await writeFile(join(dir, "README.md"), "# target\n");
+  await git(dir, "add", ".");
+  await git(dir, "commit", "-q", "-m", "init");
+  return dir;
+}
+
 function cli(cwd: string, github: GitHub = new FakeGitHub([{ number: 42, title: "x", body: issueBody }])) {
   const out: string[] = [];
   const err: string[] = [];
   const runner = new FakeWorkerRunner();
   const notifier = new FakeNotifier();
+  const launches: InteractiveLaunch[] = [];
   const env: CliEnv = {
     cwd,
+    factoryRoot: "/factory",
     clock: new FakeClock("2026-10-24T08:00:00.000Z"),
     github: () => github,
     runner: () => runner,
     notifier,
     credentials: { "claude-code": "token" },
+    launch: async (launch) => {
+      launches.push(launch);
+      return 0;
+    },
     out: (text) => out.push(text),
     err: (text) => err.push(text),
   };
-  return { env, out, err, runner, notifier };
+  return { env, out, err, runner, notifier, launches };
 }
 
 const valid = () => readFile(join(import.meta.dirname, "..", "spec", "fixtures", "valid.md"), "utf8");
@@ -176,6 +194,39 @@ describe("factory CLI", () => {
 
     expect(await main(["deploy", "42"], env)).toBe(2);
     expect(await main(["approve", "forty-two"], env)).toBe(2);
-    expect(err.join("\n")).toContain("usage: factory <approve|validate|run> <issue> [target-repo]");
+    expect(err.join("\n")).toContain("usage: factory <refine|approve|validate|run> <issue> [target-repo]");
+  });
+
+  it("should prepare the worktree and launch the refinement in it, exiting with the code of the session", async () => {
+    const repoDir = await mainRepo();
+    const { env, out, launches } = cli(repoDir, new FakeGitHub([{ number: 42, title: "Saved searches", body: "" }]));
+    env.launch = async (launch) => {
+      launches.push(launch);
+      return 7;
+    };
+
+    expect(await main(["refine", "42"], env)).toBe(7);
+    expect(launches).toHaveLength(1);
+    expect(launches[0]?.cwd).toBe(join(repoDir, ".factory", "worktrees", "42-saved-searches"));
+    expect(launches[0]?.args).toContain("/factory:refine 42");
+    expect(out.join("\n")).toContain("Created factory/42-saved-searches");
+  });
+
+  it("should say that it reuses the branch and launch again when the worktree already exists", async () => {
+    const repoDir = await mainRepo();
+    const { env, out, launches } = cli(repoDir, new FakeGitHub([{ number: 42, title: "Saved searches", body: "" }]));
+
+    expect(await main(["refine", "42"], env)).toBe(0);
+    expect(await main(["refine", "42"], env)).toBe(0);
+    expect(launches).toHaveLength(2);
+    expect(out.join("\n")).toContain("Reusing factory/42-saved-searches");
+  });
+
+  it("should not launch when the issue cannot be read", async () => {
+    const { env, err, launches } = cli(await mainRepo(), new FakeGitHub([]));
+
+    expect(await main(["refine", "42"], env)).toBe(1);
+    expect(launches).toHaveLength(0);
+    expect(err.join("\n")).toContain("issue #42 does not exist");
   });
 });

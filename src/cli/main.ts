@@ -1,23 +1,27 @@
 import { resolve } from "node:path";
 import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../commands/approve.ts";
+import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
 import { loadConfig } from "../config/load.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
 import { runIssue } from "../coordinator/run.ts";
 import type { GitHub } from "../github/github.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
+import type { InteractiveLaunch } from "./launch.ts";
 
 export interface CliEnv {
   cwd: string;
+  factoryRoot: string;
   clock: Clock;
   github(repoDir: string): GitHub;
   runner(): WorkerRunner;
   notifier: Notifier;
   credentials: Partial<Record<AgentKind, string>>;
+  launch(launch: InteractiveLaunch): Promise<number>;
   out(text: string): void;
   err(text: string): void;
 }
 
-const COMMANDS = ["approve", "validate", "run"];
+const COMMANDS = ["refine", "approve", "validate", "run"];
 const USAGE = `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`;
 
 export async function main(args: string[], env: CliEnv): Promise<number> {
@@ -28,6 +32,7 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
     return 2;
   }
   const repoDir = resolve(env.cwd, repoArg ?? ".");
+  if (command === "refine") return refine(repoDir, issue, env);
   try {
     if (command === "run") {
       const report = await runIssue(
@@ -55,6 +60,17 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
         : `specs/${issue}.md on ${outcome.branch} is valid`,
     );
     return 0;
+  } catch (error) {
+    env.err(`factory: ${(error as Error).message}`);
+    return 1;
+  }
+}
+
+async function refine(repoDir: string, issue: number, env: CliEnv): Promise<number> {
+  try {
+    const workspace = await prepareRefinement({ repoDir, issue, github: env.github(repoDir) });
+    env.out(`${workspace.created ? "Created" : "Reusing"} ${workspace.branch} in ${workspace.worktree}`);
+    return await env.launch(refineLaunch({ worktree: workspace.worktree, issue, factoryRoot: env.factoryRoot }));
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);
     return 1;

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { addWorktreeForBranch, listWorktrees, removeWorktree } from "../workers/git.ts";
 import { exec, execOk } from "../workers/sh.ts";
 
-export async function integrationBranch(repoDir: string, issue: number): Promise<string> {
+export async function findIntegrationBranch(repoDir: string, issue: number): Promise<string | null> {
   const out = await execOk("git", [
     "-C",
     repoDir,
@@ -13,13 +13,18 @@ export async function integrationBranch(repoDir: string, issue: number): Promise
     `refs/heads/factory/${issue}-*`,
   ]);
   const branches = out.split("\n").filter((line) => line !== "");
-  if (branches.length === 0) {
-    throw new Error(`no integration branch factory/${issue}-<slug> in ${repoDir}; run factory refine ${issue} first`);
-  }
   if (branches.length > 1) {
     throw new Error(`more than one integration branch for issue #${issue}: ${branches.join(", ")}`);
   }
-  return branches[0] as string;
+  return branches[0] ?? null;
+}
+
+export async function integrationBranch(repoDir: string, issue: number): Promise<string> {
+  const branch = await findIntegrationBranch(repoDir, issue);
+  if (branch === null) {
+    throw new Error(`no integration branch factory/${issue}-<slug> in ${repoDir}; run factory refine ${issue} first`);
+  }
+  return branch;
 }
 
 export async function showFile(repoDir: string, ref: string, path: string): Promise<string | null> {
