@@ -165,6 +165,11 @@ The factory does not change the `package.json` of a target repo.
   - its token;
   - the URL of a Neon branch for tests;
   - its own `E2E_PORT`.
+- The independent verifier runs in a container of the same image, created for one question and removed after it:
+  - with no bind mount: it gets the text of the criterion and the test in the prompt;
+  - with only its OpenCode Go key;
+  - with a config that denies every tool, in an empty directory. If OpenCode does not load the config, the run fails closed.
+  - The container is the second barrier: a tool that escaped the config reaches only a container that is removed.
 - No container has:
   - the `.env` of the repo;
   - `~/.ssh`;
@@ -177,7 +182,8 @@ The factory does not change the `package.json` of a target repo.
   - run a command in its environment and get the exit code;
   - read its token usage;
   - detect the error of the plan limit;
-  - collect its commits.
+  - collect its commits;
+  - ask the independent verifier and get its answer, or an error if it used a tool or gave no answer.
 - **Sandcastle (`mattpocock/sandcastle`) is a design reference only.** We read its documentation and its code to see how it solves a problem before we write ours. We do not install it, run it or copy its code.
 - A toy repo with trivial tasks tests the layer before `askwell`.
 

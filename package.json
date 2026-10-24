@@ -10,8 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:docker": "FACTORY_DOCKER_TESTS=1 vitest run test/docker",
-    "image:build": "docker build -t software-factory/worker:dev --build-arg AGENT_UID=$(id -u) --build-arg AGENT_GID=$(id -g) docker",
-    "test:opencode": "FACTORY_OPENCODE_TESTS=1 vitest run test/host"
+    "image:build": "docker build -t software-factory/worker:dev --build-arg AGENT_UID=$(id -u) --build-arg AGENT_GID=$(id -g) docker"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

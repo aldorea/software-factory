@@ -209,7 +209,7 @@ async function prepareWorktree(spec: WorkerSpec): Promise<{ worktreePath: string
   return { worktreePath, created: true };
 }
 
-function toEnvFile(env: Record<string, string>): string {
+export function toEnvFile(env: Record<string, string>): string {
   return Object.entries(env)
     .map(([key, value]) => {
       if (value.includes("\n")) throw new Error(`Env value of ${key} has a newline`);
