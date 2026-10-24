@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { emptyUsage } from "./agent-adapter.ts";
 import { toEnvFile } from "./docker-runner.ts";
 import {
   applyOpenCodeLine,
@@ -88,7 +89,7 @@ export async function askVerifier(request: VerifierRequest): Promise<AttemptResu
 
     return {
       outcome: verifierOutcome(state, supervised, listing),
-      usage: { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0 },
+      usage: emptyUsage(),
       logPath: request.logPath,
       startedAt,
       endedAt: new Date(),

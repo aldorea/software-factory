@@ -1,5 +1,6 @@
-import type { AttemptOutcome } from "./types.ts";
+import { emptyUsage, type AgentAdapter } from "./agent-adapter.ts";
 import type { SupervisedProcess } from "./supervise.ts";
+import type { AttemptOutcome } from "./types.ts";
 
 export const SUBSCRIPTION_PROVIDER = "opencode-go";
 
@@ -85,3 +86,21 @@ export function openCodeOutcome(state: OpenCodeStreamState, supervised: Supervis
     exitCode: supervised.exitCode,
   };
 }
+
+export const openCodeAdapter: AgentAdapter = {
+  kind: "opencode",
+  processName: "opencode",
+  capabilities: { readsTokenUsage: false, detectsPlanLimit: false, deniesEveryTool: true },
+  command: (model) => openCodeArgs(model),
+  createStream() {
+    let state = initialOpenCodeState();
+    return {
+      onLine(line) {
+        state = applyOpenCodeLine(state, line);
+      },
+      usage: emptyUsage,
+      plan: () => undefined,
+      outcome: (supervised) => openCodeOutcome(state, supervised),
+    };
+  },
+};
