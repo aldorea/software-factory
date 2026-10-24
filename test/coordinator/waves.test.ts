@@ -53,6 +53,7 @@ export default {
     verifier: { agent: "opencode", model: "opencode-go/kimi-k2" },
   },
   agents: { "claude-code": { maxParallel: ${options.maxParallel ?? 1} } },
+  evidence: { request: "true # {{id}}" },
 };
 `;
 }
@@ -219,7 +220,10 @@ describe("factory run with a base subtask", () => {
     await run();
 
     const gate = runner.workers.find((worker) => worker.spec.id.endsWith("-B-gate"));
-    expect(gate?.execs).toEqual([{ command: "true", exitCode: 0 }]);
+    expect(gate?.execs).toEqual([
+      { command: "true", exitCode: 0 },
+      { command: "true # A1", exitCode: 0 },
+    ]);
     expect(runner.workers.indexOf(gate as NonNullable<typeof gate>)).toBeLessThan(
       runner.workers.findIndex((worker) => worker.spec.id === "42-S1"),
     );

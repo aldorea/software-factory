@@ -59,16 +59,27 @@ export interface FakeWorkerRecord {
 
 export type AttemptScript = (call: AttemptCall) => ScriptedAttempt | Promise<ScriptedAttempt>;
 
+export interface WorkerFaults {
+  start?: (spec: WorkerSpec) => Error | undefined;
+  attempt?: (call: AttemptCall) => Error | undefined;
+  close?: (spec: WorkerSpec) => Error | undefined;
+}
+
 export class FakeWorkerRunner implements WorkerRunner {
   readonly workers: FakeWorkerRecord[] = [];
 
-  constructor(private readonly script: AttemptScript = () => ({})) {}
+  constructor(
+    private readonly script: AttemptScript = () => ({}),
+    private readonly faults: WorkerFaults = {},
+  ) {}
 
   async start(spec: WorkerSpec): Promise<Worker> {
+    const startFault = this.faults.start?.(spec);
+    if (startFault) throw startFault;
     const worktreePath = await prepareWorktree(spec);
     const record: FakeWorkerRecord = { spec, worktreePath, attempts: [], execs: [], closed: false };
     this.workers.push(record);
-    return new FakeWorker(record, await mergeBase(spec.repoDir, spec.baseRef, spec.branch), this.script);
+    return new FakeWorker(record, await mergeBase(spec.repoDir, spec.baseRef, spec.branch), this.script, this.faults);
   }
 }
 
@@ -77,6 +88,7 @@ class FakeWorker implements Worker {
     private readonly record: FakeWorkerRecord,
     private readonly baseSha: string,
     private readonly script: AttemptScript,
+    private readonly faults: WorkerFaults,
   ) {}
 
   get spec(): WorkerSpec {
@@ -90,6 +102,8 @@ class FakeWorker implements Worker {
   async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
     const call: AttemptCall = { spec: this.spec, agent, prompt, limits, number: this.record.attempts.length + 1 };
     this.record.attempts.push(call);
+    const attemptFault = this.faults.attempt?.(call);
+    if (attemptFault) throw attemptFault;
     const startedAt = new Date();
     const scripted = await this.script(call);
     for (const [path, content] of Object.entries(scripted.files ?? {})) {
@@ -125,11 +139,11 @@ class FakeWorker implements Worker {
 
   async close(): Promise<CloseResult> {
     this.record.closed = true;
-    if (await isClean(this.worktreePath)) {
-      await removeWorktree(this.spec.repoDir, this.worktreePath);
-      return {};
-    }
-    return { preservedWorktreePath: this.worktreePath };
+    const clean = await isClean(this.worktreePath);
+    if (clean) await removeWorktree(this.spec.repoDir, this.worktreePath);
+    const closeFault = this.faults.close?.(this.spec);
+    if (closeFault) throw closeFault;
+    return clean ? {} : { preservedWorktreePath: this.worktreePath };
   }
 }
 

@@ -100,6 +100,12 @@ describe("dependencyProblem", () => {
     expect(dependencyProblem(subtask("S3", ["c/"], ["S2"]), states)).toBe("It depends on S2, which did not start.");
   });
 
+  it("should say which dependency was interrupted by a failure of the worker layer", () => {
+    const states = new Map([["S1", "interrupted" as const]]);
+
+    expect(dependencyProblem(subtask("S2", ["b/"], ["S1"]), states)).toBe("It depends on S1, which was interrupted.");
+  });
+
   it("should name every dependency that did not merge", () => {
     const states = new Map([
       ["S1", "blocked" as const],

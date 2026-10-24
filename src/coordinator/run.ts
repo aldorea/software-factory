@@ -13,11 +13,15 @@ import {
 import type { Issue, PullRequest } from "../github/github.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { criteriaText, issueCriteria } from "../spec/issue.ts";
-import { parseSpec, validateSpec, type Subtask } from "../spec/spec.ts";
+import { parseSpec, validateSpec, type Spec, type Subtask } from "../spec/spec.ts";
+import { emptyUsage } from "../workers/agent-adapter.ts";
 import { missingRequirements } from "../workers/agents.ts";
+import { inStage, WorkerLayerError } from "../workers/failures.ts";
 import { revParse } from "../workers/git.ts";
 import type { AgentKind, AttemptResult } from "../workers/types.ts";
-import { approvalProblem, gateDecision, runId as makeRunId, runResult } from "./decisions.ts";
+import { approvalProblem, gateDecision, runId as makeRunId, runResult, verificationPassed } from "./decisions.ts";
+import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
+import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
 import { dependencyProblem, schedule, type Schedule } from "./schedule.ts";
@@ -26,11 +30,13 @@ import {
   RUN_LOG_VERSION,
   writeRunLog,
   type AttemptRecord,
+  type BlockType,
   type CheckRecord,
   type RunLog,
   type SubtaskRecord,
   type SubtaskState,
 } from "./run-log.ts";
+import { applyTotals, emptyCost, emptyFriction } from "./run-totals.ts";
 
 export const CREDENTIAL_VARIABLES: Record<AgentKind, string> = {
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN",
@@ -58,16 +64,18 @@ interface Prepared {
   config: ResolvedConfig;
   issue: Issue;
   branch: string;
-  subtasks: Subtask[];
+  spec: Spec;
   plan: Schedule;
   maxParallel: number;
+  humanCriteria: string[];
   workers: RoleChoice;
   credential: string;
 }
 
 export async function runIssue(request: RunRequest, ports: RunPorts): Promise<RunReport> {
   const prepared = await prepare(request, ports);
-  const { config, issue, branch, subtasks, plan, maxParallel, workers } = prepared;
+  const { config, issue, branch, spec, plan, maxParallel, workers, humanCriteria } = prepared;
+  const subtasks = plan.base ? [plan.base, ...spec.subtasks] : spec.subtasks;
   const startedAt = ports.clock.now();
   const id = makeRunId(request.issue, startedAt);
   const runDir = join(request.repoDir, ".factory", "logs", id);
@@ -81,6 +89,11 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
         branch: subtaskBranch(branch, subtask.id),
         state: "pending",
         attempts: [],
+        usage: emptyUsage(),
+        gateRejections: 0,
+        verifierRejections: 0,
+        conflicts: 0,
+        scopeExtensions: [],
       },
     ]),
   );
@@ -91,37 +104,87 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     integrationBranch: branch,
     startedAt: startedAt.toISOString(),
     result: "running",
-    agents: { workers },
+    agents: { workers, verifier: config.roles.verifier, changes: [] },
+    criteria: { passing: [], blocked: [], human: humanCriteria, pending: [] },
+    cost: emptyCost(),
+    friction: emptyFriction(),
+    workerLayerFailures: [],
     subtasks: subtasks.map((subtask) => records.get(subtask.id) as SubtaskRecord),
   };
-  const save = () => writeRunLog(runLogPath, log);
+  const saveLock = new Lock();
+  const save = () =>
+    saveLock.exclusive(async () => {
+      applyTotals(log, ports.clock.now());
+      await writeRunLog(runLogPath, log);
+    });
   await save();
 
   const gitLock = new Lock();
-  const checksOn = async (label: string, sha: string, context: WorkerEnvironmentContext) => {
+
+  const noteFailure = async (error: unknown, subtaskId: string | null) => {
+    if (!(error instanceof WorkerLayerError)) throw error;
+    log.workerLayerFailures.push({
+      kind: error.kind,
+      stage: error.stage,
+      subtask: subtaskId,
+      message: error.message,
+      at: ports.clock.now().toISOString(),
+    });
+    await save();
+  };
+
+  const checksOn = async (
+    label: string,
+    sha: string,
+    context: WorkerEnvironmentContext,
+    plan: EvidencePlan,
+    subtaskId: string | null,
+  ) => {
     const checkBranch = `factory-check/${id}/${label}`;
     const env = environment(config, context);
-    const worker = await gitLock.exclusive(async () => {
-      await createBranchAt(request.repoDir, checkBranch, sha);
-      return ports.runner
-        .start({ id: `${id}-${label}`, repoDir: request.repoDir, baseRef: checkBranch, branch: checkBranch, image: config.image, env, logDir: runDir })
-        .catch(async (error: unknown) => {
-          await deleteBranch(request.repoDir, checkBranch).catch(() => undefined);
-          throw error;
-        });
-    });
-    const checks: CheckRecord[] = [];
+    const started = await gitLock
+      .exclusive(async () => {
+        await createBranchAt(request.repoDir, checkBranch, sha);
+        return inStage("start", () =>
+          ports.runner.start({ id: `${id}-${label}`, repoDir: request.repoDir, baseRef: checkBranch, branch: checkBranch, image: config.image, env, logDir: runDir }),
+        );
+      })
+      .then(
+        (worker) => ({ worker }),
+        async (error: unknown) => {
+          await gitLock.exclusive(() => deleteBranch(request.repoDir, checkBranch)).catch(() => undefined);
+          await noteFailure(error, subtaskId);
+          return { worker: null };
+        },
+      );
+    if (started.worker === null) return null;
+    const { worker } = started;
+    let checks: CheckRecord[] | null = [];
+    let evidence: EvidenceResult = { criteria: [], human: [] };
     let preserved = false;
     try {
       for (const check of config.checks) {
-        const result = await worker.exec(check.command);
+        const result = await inStage("exec", () => worker.exec(check.command));
         checks.push({ name: check.name, command: check.command, exitCode: result.exitCode, passed: result.exitCode === 0 });
       }
+      evidence = await runEvidence(worker, plan, {
+        app: config.app,
+        commands: config.evidence,
+        attachmentsDir: join(runDir, "attachments"),
+      });
+    } catch (error) {
+      checks = null;
+      await noteFailure(error, subtaskId);
     } finally {
-      preserved = (await gitLock.exclusive(() => worker.close())).preservedWorktreePath !== undefined;
+      try {
+        preserved = (await gitLock.exclusive(() => inStage("close", () => worker.close()))).preservedWorktreePath !== undefined;
+      } catch (error) {
+        await noteFailure(error, subtaskId);
+      }
     }
     if (!preserved) await gitLock.exclusive(() => deleteBranch(request.repoDir, checkBranch));
-    return checks;
+    if (checks === null) return null;
+    return { checks, ...evidence };
   };
 
   let conflicted = false;
@@ -146,36 +209,62 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       await save();
       return;
     }
-    const attempt = await runWorker(request, ports, prepared, subtask, record, runDir, startedAt, slot, gitLock);
-    record.attempts.push(attemptRecord(1, attempt));
+    record.state = "working";
+    await save();
+    const worked = await runWorker(request, ports, prepared, subtask, record, runDir, startedAt, slot, gitLock);
+    const unclassified = worked.failures.find((failure) => !(failure instanceof WorkerLayerError));
+    if (unclassified !== undefined) throw unclassified;
+    for (const failure of worked.failures) await noteFailure(failure, record.id);
+    const attempt = worked.result;
+    if (attempt !== null) record.attempts.push(attemptRecord(1, attempt, workers));
+    if (attempt === null) {
+      record.state = "interrupted";
+      record.reason = "A failure of the worker layer stopped it before its attempt ended.";
+    } else record.state = attempt.outcome.kind === "completed" ? "gating" : "pending";
     await save();
 
-    if (attempt.outcome.kind === "completed") {
+    if (attempt?.outcome.kind === "completed") {
       const sha = await revParse(request.repoDir, record.branch);
-      const checks = await checksOn(`${subtask.id}-gate`, sha, { purpose: "gate", subtask: subtask.id, slot });
-      const decision = gateDecision(checks);
-      record.gate = { sha, ...decision, checks };
-      if (!decision.accepted) {
-        record.state = "blocked";
-        record.reason = `The gate rejected it: ${decision.reasons.join("; ")}.`;
+      const gated = await checksOn(
+        `${subtask.id}-gate`,
+        sha,
+        { purpose: "gate", subtask: subtask.id, slot },
+        gatePlan(spec, subtask.criteria, config.evidence),
+        record.id,
+      );
+      if (gated === null) {
+        record.state = "interrupted";
+        record.reason = "A failure of the worker layer stopped its gate.";
       } else {
-        const merged = await gitLock.exclusive(() =>
-          withBranchWorktree(request.repoDir, branch, (worktree) =>
-            mergeBranch(worktree, record.branch, mergeMessage(request.issue, subtask.id)),
-          ),
-        );
-        if (merged.kind === "merged") record.state = "merged";
-        else {
-          conflicted = true;
+        const { checks, criteria } = gated;
+        const decision = gateDecision(checks, criteria);
+        record.gate = { sha, ...decision, checks, criteria };
+        if (!decision.accepted) {
+          record.gateRejections += 1;
           record.state = "blocked";
-          record.conflictFiles = merged.files;
-          record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
+          record.reason = `The gate rejected it: ${decision.reasons.join("; ")}.`;
+        } else {
+          const merged = await gitLock.exclusive(() =>
+            withBranchWorktree(request.repoDir, branch, (worktree) =>
+              mergeBranch(worktree, record.branch, mergeMessage(request.issue, subtask.id)),
+            ),
+          );
+          if (merged.kind === "merged") record.state = "merged";
+          else {
+            conflicted = true;
+            record.conflicts += 1;
+            record.conflictFiles = merged.files;
+            record.state = "blocked";
+            record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
+          }
         }
       }
-    } else if (attempt.outcome.kind === "plan-limit") {
+    } else if (attempt?.outcome.kind === "plan-limit") {
       log.pauseReason = `the plan limit of ${workers.agent} was reached: ${attempt.outcome.message}`;
-    } else {
+    } else if (attempt !== null) {
       record.state = "blocked";
+      const blockType = blockTypeOf(attempt.outcome);
+      if (blockType !== undefined) record.blockType = blockType;
       record.reason = `Its attempt ended with ${attempt.outcome.kind}${outcomeDetail(attempt) ? `: ${outcomeDetail(attempt)}` : ""}.`;
     }
     await save();
@@ -185,8 +274,17 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   if (log.pauseReason === undefined) {
     const sha = await revParse(request.repoDir, branch);
-    const checks = await checksOn("verification", sha, { purpose: "verification", subtask: null, slot: 0 });
-    log.verification = { sha, passed: checks.every((check) => check.passed), checks };
+    const verified = await checksOn(
+      "verification",
+      sha,
+      { purpose: "verification", subtask: null, slot: 0 },
+      integrationPlan(spec, config.evidence),
+      null,
+    );
+    if (verified !== null) {
+      const { checks, criteria, human } = verified;
+      log.verification = { sha, passed: verificationPassed(checks, criteria), checks, criteria, humanCriteria: human };
+    }
   }
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();
@@ -227,8 +325,12 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
     protectedPaths: config.protectedPaths,
   });
   if (problems.length > 0) throw new Error(`${specPath} is invalid: ${problems.join("; ")}`);
+  const missingEvidence = evidenceProblems(parsed.spec, config.evidence);
+  if (missingEvidence.length > 0) throw new Error(`${specPath} cannot be verified: ${missingEvidence.join("; ")}`);
+  const humanCriteria = Object.entries(parsed.spec.criteria)
+    .filter(([, evidence]) => evidence.evidence === "human")
+    .map(([id]) => id);
   const plan = schedule(parsed.spec);
-  const subtasks = plan.base ? [plan.base, ...parsed.spec.subtasks] : parsed.spec.subtasks;
 
   const workers = request.workers ?? config.roles.workers;
   const missing = missingRequirements(workers.agent, "workers");
@@ -238,7 +340,12 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
     throw new Error(`${CREDENTIAL_VARIABLES[workers.agent]} is not set; the ${workers.agent} workers need it`);
   }
   const maxParallel = config.agents[workers.agent].maxParallel;
-  return { config, issue, branch, subtasks, plan, maxParallel, workers, credential };
+  return { config, issue, branch, spec: parsed.spec, plan, maxParallel, humanCriteria, workers, credential };
+}
+
+interface Worked {
+  result: AttemptResult | null;
+  failures: unknown[];
 }
 
 async function runWorker(
@@ -251,31 +358,47 @@ async function runWorker(
   startedAt: Date,
   slot: number,
   gitLock: Lock,
-): Promise<AttemptResult> {
+): Promise<Worked> {
   const { config, issue, branch, workers, credential } = prepared;
-  const worker = await gitLock.exclusive(() =>
-    ports.runner.start({
-      id: `${request.issue}-${subtask.id}`,
-      repoDir: request.repoDir,
-      baseRef: branch,
-      branch: record.branch,
-      image: config.image,
-      env: {
-        ...environment(config, { purpose: "worker", subtask: subtask.id, slot }),
-        [CREDENTIAL_VARIABLES[workers.agent]]: credential,
-      },
-      logDir: runDir,
-    }),
-  );
+  const failures: unknown[] = [];
+  const worker = await gitLock
+    .exclusive(() =>
+      inStage("start", () =>
+        ports.runner.start({
+          id: `${request.issue}-${subtask.id}`,
+          repoDir: request.repoDir,
+          baseRef: branch,
+          branch: record.branch,
+          image: config.image,
+          env: {
+            ...environment(config, { purpose: "worker", subtask: subtask.id, slot }),
+            [CREDENTIAL_VARIABLES[workers.agent]]: credential,
+          },
+          logDir: runDir,
+        }),
+      ),
+    )
+    .catch((error: unknown) => {
+    failures.push(error);
+    return null;
+  });
+  if (worker === null) return { result: null, failures };
+  let result: AttemptResult | null = null;
   try {
     const prompt = await workerPrompt(issue, subtask, config);
-    return await worker.attempt({ kind: workers.agent, model: workers.model }, prompt, {
-      deadline: new Date(startedAt.getTime() + config.limits.subtaskWallClockMs),
-      idleTimeoutMs: config.limits.attemptIdleTimeoutMs,
-    });
-  } finally {
-    await gitLock.exclusive(() => worker.close());
+    result = await inStage("attempt", () =>
+      worker.attempt({ kind: workers.agent, model: workers.model }, prompt, {
+        deadline: new Date(startedAt.getTime() + config.limits.subtaskWallClockMs),
+        idleTimeoutMs: config.limits.attemptIdleTimeoutMs,
+      }),
+    );
+  } catch (error) {
+    failures.push(error);
   }
+  await gitLock.exclusive(() => inStage("close", () => worker.close())).catch((error: unknown) => {
+    failures.push(error);
+  });
+  return { result, failures };
 }
 
 function environment(config: ResolvedConfig, context: WorkerEnvironmentContext): Record<string, string> {
@@ -318,10 +441,17 @@ function outcomeDetail(result: AttemptResult): string | undefined {
   return undefined;
 }
 
-function attemptRecord(number: number, result: AttemptResult): AttemptRecord {
+function blockTypeOf(outcome: AttemptResult["outcome"]): BlockType | undefined {
+  if (outcome.kind === "deadline" || outcome.kind === "idle-timeout") return "limit";
+  if (outcome.kind === "agent-error") return "environment";
+  return undefined;
+}
+
+function attemptRecord(number: number, result: AttemptResult, agent: RoleChoice): AttemptRecord {
   const detail = outcomeDetail(result);
   return {
     number,
+    agent,
     outcome: result.outcome.kind,
     ...(detail !== undefined ? { detail } : {}),
     usage: result.usage,

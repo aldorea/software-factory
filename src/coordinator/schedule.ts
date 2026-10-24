@@ -28,11 +28,16 @@ export function schedule(spec: Spec): Schedule {
   return { base: spec.base, waves };
 }
 
+const UNMET_STATE: Partial<Record<SubtaskState, string>> = {
+  blocked: "is blocked",
+  interrupted: "was interrupted",
+};
+
 export function dependencyProblem(subtask: Subtask, states: ReadonlyMap<string, SubtaskState>): string | null {
   const unmet = subtask.dependsOn.flatMap((dep) => {
     const state = states.get(dep);
     if (state === undefined || state === "merged") return [];
-    return [`${dep}, which ${state === "blocked" ? "is blocked" : "did not start"}`];
+    return [`${dep}, which ${UNMET_STATE[state] ?? "did not start"}`];
   });
   if (unmet.length === 0) return null;
   return `It depends on ${unmet.join(", and ")}.`;
