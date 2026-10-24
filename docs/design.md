@@ -184,23 +184,18 @@ The factory does not change the `package.json` of a target repo.
   - detect the error of the plan limit;
   - collect its commits;
   - ask the independent verifier and get its answer, or an error if it used a tool or gave no answer.
-- **Sandcastle (`mattpocock/sandcastle`) is a design reference only.** We read its documentation and its code to see how it solves a problem before we write ours. We do not install it, run it or copy its code.
+- Sandcastle (`mattpocock/sandcastle`) is a design reference only: see [ADR 0002](adr/0002-own-worker-layer.md).
 - A toy repo with trivial tasks tests the layer before `askwell`.
 
 ### Agents and authentication
 
-Only subscriptions, no paid API calls.
+Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-only.md) for the options this rules out.
 
 | Role | Agent | Authentication |
 |---|---|---|
 | Refinement | Claude Code CLI, interactive, on the host | My Claude session |
 | Base subtask and workers | Claude Code CLI, in Docker | `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Max 5x) |
 | Independent verifier | OpenCode CLI, in Docker | OpenCode Go key, with Extra Usage off. Only models of the `opencode-go/` provider: `opencode/` is the pay-per-use Console |
-
-These are not used:
-
-- **Mastra and the Claude Agent SDK.** They need a paid API key, or a Claude.ai sign-in in a third-party app, which Anthropic does not permit.
-- **Claude models through OpenCode.** Anthropic and OpenCode both forbid it.
 
 ### Parallelism
 
