@@ -1,4 +1,4 @@
-import type { TokenUsage } from "../workers/types.ts";
+import type { AgentKind, TokenUsage } from "../workers/types.ts";
 
 export type StopType = "patience" | "subtask-wall-clock" | "subtask-tokens" | "run-wall-clock" | "run-tokens";
 
@@ -25,6 +25,10 @@ export interface StopInput {
 
 export function countedTokens(usage: TokenUsage): number {
   return usage.inputTokens + usage.cacheCreationInputTokens + usage.outputTokens;
+}
+
+export function agentTokens(attempts: { agent: { agent: AgentKind }; usage: TokenUsage }[], agent: AgentKind): number {
+  return attempts.filter((attempt) => attempt.agent.agent === agent).reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
 }
 
 export function stopReason(input: StopInput, limits: StopLimits): StopReason | null {

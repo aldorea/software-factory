@@ -1,4 +1,14 @@
+import type { Role, RoleChoice } from "../config/config.ts";
 import type { AgentChangeRecord, RunLog, SubtaskRecord } from "./run-log.ts";
+
+export function resumeDefaults(
+  previous: RunLog | null,
+  configured: Partial<Record<Role, RoleChoice>>,
+): Partial<Record<Role, RoleChoice>> {
+  if (previous === null || previous.result !== "paused") return configured;
+  const verifier = previous.agents.verifier ?? configured.verifier;
+  return { workers: previous.agents.workers, ...(verifier !== undefined ? { verifier } : {}) };
+}
 
 export interface ResumeInput {
   fresh: RunLog;

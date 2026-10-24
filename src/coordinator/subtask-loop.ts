@@ -6,7 +6,7 @@ import type { GateDecision } from "./gate.ts";
 import type { Clock } from "./ports.ts";
 import type { AttemptRecord, SubtaskRecord } from "./run-log.ts";
 import type { ScopeExtensionDecision } from "./scope-extension.ts";
-import { countedTokens, stopReason, type StopLimits, type StopReason } from "./stop-rules.ts";
+import { agentTokens, stopReason, type StopLimits, type StopReason } from "./stop-rules.ts";
 import { parseWorkerReport } from "./worker-report.ts";
 
 export interface LoopLimits extends StopLimits {
@@ -44,12 +44,12 @@ export type LoopResult =
 
 export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
   const { clock, record } = loop;
-  const carried = record.pausedLoop;
-  delete record.pausedLoop;
+  const carried = record.carriedLoop;
+  delete record.carriedLoop;
   const first = carried?.firstAttempt ?? record.attempts.length;
   const startedAt = new Date(clock.now().getTime() - (carried?.elapsedMs ?? 0));
   const result = await attemptsUntilDone(loop, startedAt, first);
-  if (result.kind === "paused") record.pausedLoop = { firstAttempt: first, elapsedMs: clock.now().getTime() - startedAt.getTime() };
+  if (result.kind !== "accepted") record.carriedLoop = { firstAttempt: first, elapsedMs: clock.now().getTime() - startedAt.getTime() };
   return result;
 }
 
@@ -66,7 +66,7 @@ async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: numb
       {
         signatures,
         subtaskElapsedMs: now.getTime() - startedAt.getTime(),
-        subtaskTokens: subtaskTokens(record.attempts.slice(first)),
+        subtaskTokens: agentTokens(record.attempts.slice(first), loop.agent.agent),
         runElapsedMs: now.getTime() - loop.runStartedAt.getTime(),
         runTokens: loop.runTokens(),
       },
@@ -151,10 +151,6 @@ function coveredFailure(paths: string[]): AttemptFailure {
 async function retryPrompt(base: string, failure: AttemptFailure): Promise<string> {
   const section = renderTemplate(await readPromptTemplate("retry"), { failure: failure.description });
   return `${base}\n\n${section}`;
-}
-
-function subtaskTokens(attempts: AttemptRecord[]): number {
-  return attempts.reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
 }
 
 function attemptRecord(number: number, result: AttemptResult, agent: RoleChoice): AttemptRecord {

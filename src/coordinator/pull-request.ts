@@ -1,6 +1,7 @@
 import type { Issue } from "../github/github.ts";
 import { criteriaText } from "../spec/issue.ts";
-import type { CheckRecord, CriterionRecord, HumanCriterionRecord, RunLog, SubtaskRecord } from "./run-log.ts";
+import type { RoleChoice } from "../config/config.ts";
+import type { AgentChangeRecord, CheckRecord, CriterionRecord, HumanCriterionRecord, RunLog, SubtaskRecord } from "./run-log.ts";
 
 export interface PullRequestText {
   title: string;
@@ -15,10 +16,35 @@ export function renderPullRequest(issue: Issue, log: RunLog): PullRequestText {
     ...scopeExtensionSections(log),
     verificationSection(log),
     ...criteriaSections(issue, log),
-    `## Agents\n\n- Workers: ${log.agents.workers.agent}, model ${log.agents.workers.model}`,
+    agentsSection(log),
     `Run \`${log.runId}\`: \`.factory/logs/${log.runId}/run.json\``,
   ];
   return { title: `${issue.title} (#${issue.number})`, body: `${sections.join("\n\n")}\n` };
+}
+
+const ROLE_NAMES: Record<AgentChangeRecord["role"], string> = {
+  workers: "the workers",
+  verifier: "the independent verifier",
+};
+
+function agentsSection(log: RunLog): string {
+  const { workers, verifier, changes } = log.agents;
+  const lines = [
+    `- Workers: ${choiceText(workers)}`,
+    ...(verifier ? [`- Independent verifier: ${choiceText(verifier)}`] : []),
+    ...changes.map(
+      (change) => `- On resume at ${change.at}, ${ROLE_NAMES[change.role]} changed from ${choiceText(change.from)} to ${choiceText(change.to)}`,
+    ),
+  ];
+  const shared =
+    verifier !== undefined && verifier.agent === workers.agent && verifier.model === workers.model
+      ? ["\nThe independent verifier used the same model as the workers: its independence rests on its clean context alone."]
+      : [];
+  return [`## Agents\n\n${lines.join("\n")}`, ...shared].join("\n");
+}
+
+function choiceText(choice: RoleChoice): string {
+  return `${choice.agent}, model ${choice.model}`;
 }
 
 function resultLine(log: RunLog): string {

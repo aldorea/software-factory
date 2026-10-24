@@ -125,7 +125,7 @@ function harness(target: Target, script: AttemptScript) {
   const clock = new FakeClock("2026-10-24T08:00:00.000Z");
   const run = () =>
     runIssue(
-      { repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": "token" } },
+      { repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": "token", opencode: "key" } },
       { runner, verifier: new FakeVerifier(), github: target.github, notifier: new FakeNotifier(), clock },
     );
   return { runner, run };
