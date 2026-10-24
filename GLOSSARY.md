@@ -34,7 +34,11 @@ The deterministic program that drives a run: it schedules subtasks, applies the 
 _Avoid_: orchestrator
 
 **Agent**:
-The CLI that runs inside a worker or the independent verifier: Claude Code or OpenCode.
+A CLI that runs on a subscription and does the work of a role: today Claude Code or OpenCode Go.
+
+**Role**:
+What an agent acts as in the factory: the refinement, the workers of a run, or the independent verifier. The developer chooses the agent and the model of each role before a command starts.
+_Avoid_: stage
 
 **Worker**:
 An agent that implements one subtask in its own container, on its own branch.
@@ -92,7 +96,7 @@ A criterion whose evidence is the developer's review, allowed only for a visual 
 The coordinator's own verification of a subtask on its branch before it merges, independent of what the worker reports.
 
 **Independent verifier**:
-An agent with a clean context that receives only a criterion and its test, judges whether the test proves the criterion, and tries to refute it.
+An agent with its own clean context that receives only a criterion and its test, judges whether the test proves the criterion, and tries to refute it. It never shares a context with the workers, even when it runs the same agent and model.
 _Avoid_: reviewer, judge
 
 **Integrated verification**:
@@ -118,8 +122,8 @@ The state of a subtask that stopped, with its reason and its last failure. The s
 _Avoid_: failed
 
 **Plan limit**:
-The usage cap of the Claude subscription, per window (`five_hour`, `seven_day`), that Claude Code reports in each attempt. Reaching it pauses the run.
+The usage cap of the subscription of one of the agents of a run, per window of that subscription. Reaching it pauses the run.
 
 **Paused**:
-The state of a run that reached the Claude plan limit. It is not a failure: no worker starts and no patience or wall clock is spent until the developer resumes it.
+The state of a run that reached the plan limit of one of its agents. It is not a failure: no worker starts and no patience or wall clock is spent until the developer resumes it.
 _Avoid_: blocked, failed

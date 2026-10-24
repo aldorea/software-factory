@@ -22,6 +22,8 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 
 The developer starts each command. Nothing starts on its own.
 
+Before `factory run` starts, the developer chooses the agent and the model of each role: the workers and the independent verifier. The choice comes from the flags (`--worker-agent`, `--verifier-agent`); else, in a terminal, from a prompt with the default of `.factory/config.ts` already selected; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
+
 ## Flow
 
 1. **Refine.** `claude` runs in an interactive session in the terminal, on the host, in the worktree of the issue. A refinement skill reads the issue and the code, writes the technical part, and asks only the open decisions (product, ambiguities, doubtful criteria), in rounds, each with a recommended answer. At the end it:
@@ -74,7 +76,7 @@ A "human" criterion with no reason in the spec means that the refinement is not 
 ### Who writes the tests
 
 - **Request checks:** the base subtask writes them, because it fixes the contracts. The workers cannot change them.
-- **Playwright tests:** the worker writes them. At the gate, an independent verifier (OpenCode, clean context) gets only the text of the criterion and the test, checks that the test proves the criterion, and tries to refute it.
+- **Playwright tests:** the worker writes them. At the gate, an independent verifier, in its own clean context, gets only the text of the criterion and the test, checks that the test proves the criterion, and tries to refute it.
 - **Existing tests:** a change to a test file that existed before the run is rejected unless I authorize it.
 
 ### Two levels
@@ -103,20 +105,23 @@ Its checks and criteria pass and the gate accepts it.
 | Wall clock, per run | 6 h | Coordinator |
 | Tokens, per run | 8 M | Coordinator |
 
+- The token limits are set per agent in `.factory/config.ts`, because each provider counts tokens differently. The values above are the initial ones for Claude Code; each other agent gets its own initial values, calibrated in the pilot. A run that changes the agent of its workers on resume counts the tokens of each agent against that agent's limit. The wall clock and patience do not depend on the agent.
 - Patience and the hard limits are different rules. Patience stops a loop with no progress. A hard limit stops a loop that progresses too slowly or costs too much.
 - A worker cannot change its own limits.
 - A stopped subtask is `blocked`, with the reason and the last failure. The subtasks that do not depend on it go on.
 
 ### Plan limit
 
-When the Claude plan limit is reached, the run **pauses**. It is not a failure:
+When the plan limit of any agent of the run is reached (the workers' or the independent verifier's), the run **pauses**. It is not a failure:
 
 - No new worker starts, and the pause spends no patience.
 - The wall clock does not count the time in pause.
 - The draft PR gives the reason. I start the run again after the limit resets.
-- `maxParallel` goes down by one.
+- The `maxParallel` of that agent goes down by one.
 
-Claude Code reports the plan usage in its `stream-json` output: a `rate_limit_event` gives the status and the utilization of each window (`five_hour`, `seven_day`) with its reset time. The worker layer records it in each attempt.
+When I resume a paused run, `factory run` asks again for the agent and the model of each role, with the previous choice selected. I may change them: patience keeps counting, because the error signature does not depend on the agent.
+
+Each agent's adapter reads its plan usage. Claude Code reports it in its `stream-json` output: a `rate_limit_event` gives the status and the utilization of each window (`five_hour`, `seven_day`) with its reset time. The worker layer records it in each attempt.
 
 ### Blocks during a run
 
@@ -135,6 +140,8 @@ A macOS notification links to the PR when a run ends, pauses or blocks.
 - **All criteria pass** (except the "human" ones): the coordinator marks the PR "ready for review". Only the coordinator does this.
 - **Anything else:** a draft PR with the real state: the evidence of the criteria that pass, each blocked subtask with its reason and its last failure, and what it needs to continue.
 
+The PR names the agent and the model of each role, and any change on resume. When the independent verifier used the same model as the workers, the PR says so in one line: its independence then rests on its clean context alone.
+
 The issue, `specs/<n>.md` and the PR are the records. A new session starts again from them, not from a conversation.
 
 ## Architecture
@@ -143,7 +150,7 @@ The issue, `specs/<n>.md` and the PR are the records. A new session starts again
 
 - **`software-factory`** (this repo): the coordinator, the gates, the worker layer, the skills (refinement, independent verifier), the prompts and the `factory` CLI. It takes the target repo as an argument.
 - **Each target repo:** a `.factory/` folder:
-  - `config.ts`: checks, app start, e2e commands, environment, protected paths, `maxParallel`. It uses the types that this repo exports.
+  - `config.ts`: checks, app start, e2e commands, environment, protected paths, the default agent and model of each role, and per agent its token limits and `maxParallel`. It uses the types that this repo exports.
   - `Dockerfile`: the image of the workers of that repo.
   - `.env.example`, and `.env` in `.gitignore`.
   - `logs/` and `worktrees/`, in `.gitignore`.
@@ -167,8 +174,9 @@ The factory does not change the `package.json` of a target repo.
   - its own `E2E_PORT`.
 - The independent verifier runs in a container of the same image, created for one question and removed after it:
   - with no bind mount: it gets the text of the criterion and the test in the prompt;
-  - with only its OpenCode Go key;
-  - with a config that denies every tool, in an empty directory. If OpenCode does not load the config, the run fails closed.
+  - with its own clean context, never shared with the workers, even when it runs their agent and model;
+  - with only the credential of its agent;
+  - with every tool denied, in an empty directory. For OpenCode, a config denies them; if OpenCode does not load the config, the run fails closed.
   - The container is the second barrier: a tool that escaped the config reaches only a container that is removed.
 - No container has:
   - the `.env` of the repo;
@@ -184,18 +192,26 @@ The factory does not change the `package.json` of a target repo.
   - detect the error of the plan limit;
   - collect its commits;
   - ask the independent verifier and get its answer, or an error if it used a tool or gave no answer.
+- Each agent has an adapter in the layer. An agent can serve as the workers only if its adapter reads its token usage and detects its plan limit, and as the independent verifier only if every tool can be denied to it with a fail-closed check. An agent that misses one is not offered for that role.
 - Sandcastle (`mattpocock/sandcastle`) is a design reference only: see [ADR 0002](adr/0002-own-worker-layer.md).
 - A toy repo with trivial tasks tests the layer before `askwell`.
 
 ### Agents and authentication
 
-Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-only.md) for the options this rules out.
+Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-only.md) for the conditions an agent must meet and the options this rules out. The agents are interchangeable: I choose the agent and the model of each role before a run (see [Commands](#commands) and [ADR 0003](adr/0003-interchangeable-agents.md)).
 
-| Role | Agent | Authentication |
-|---|---|---|
-| Refinement | Claude Code CLI, interactive, on the host | My Claude session |
-| Base subtask and workers | Claude Code CLI, in Docker | `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Max 5x) |
-| Independent verifier | OpenCode CLI, in Docker | OpenCode Go key, with Extra Usage off. Only models of the `opencode-go/` provider: `opencode/` is the pay-per-use Console |
+| Agent | Authentication |
+|---|---|
+| Claude Code CLI | In Docker: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Max 5x). On the host, for the refinement: my Claude session |
+| OpenCode CLI | OpenCode Go key, with Extra Usage off. Only models of the `opencode-go/` provider: `opencode/` is the pay-per-use Console |
+
+| Role | Agents it can use |
+|---|---|
+| Refinement | Claude Code, interactive, on the host |
+| Base subtask and workers | Claude Code or OpenCode Go, in Docker. OpenCode Go once its adapter reads its token usage and detects its plan limit |
+| Independent verifier | OpenCode Go, in Docker: the only agent today whose tools can be denied with a fail-closed check |
+
+The workers and the independent verifier may use the same agent and the same model. Each still runs in its own container with its own clean context.
 
 Verified on 2026-10-24:
 
@@ -204,14 +220,16 @@ Verified on 2026-10-24:
 
 ### Parallelism
 
+Each agent has its own `maxParallel` and ceiling, because each runs on its own subscription.
+
 | Setting | Rule |
 |---|---|
 | `maxParallel` at the start | 1 |
-| Up by one | After 3 runs in a row with no failure of the worker layer |
-| Ceiling | 2 Claude workers. 3 only after several runs with 2 and no pause for the plan limit |
-| Down by one | On each pause for the plan limit |
+| Up by one | After 3 runs in a row of that agent with no failure of the worker layer |
+| Ceiling | Claude Code: 2 workers, 3 only after several runs with 2 and no pause for its plan limit. Other agents: an initial value, calibrated in the pilot |
+| Down by one | On each pause for the plan limit of that agent |
 
-The independent verifier (OpenCode) does not count for this ceiling.
+The independent verifier does not count for this ceiling.
 
 ### Git
 
@@ -223,7 +241,8 @@ The independent verifier (OpenCode) does not count for this ceiling.
 Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 
 - **Result:** ready, draft with blocks, or paused. The criteria that pass, the blocked ones and the human ones.
-- **Cost:** tokens per subtask and per run, attempts per subtask, wall clock with no pauses.
+- **Agents:** the agent and the model of each role, and any change on resume.
+- **Cost:** tokens per subtask and per run, per agent, attempts per subtask, wall clock with no pauses.
 - **Friction:**
   - blocks by type (scope, design question, patience, limit, environment);
   - automatic scope extensions;
@@ -238,4 +257,4 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 - **Logs:** the path to the raw log of each attempt.
 - **Quality, after the merge:** changes I made at review, and escapes (bugs that the verification did not find).
 
-`factory stats` summarizes these files for a repo.
+`factory stats` summarizes these files for a repo, per agent as well, to compare the subscriptions.
