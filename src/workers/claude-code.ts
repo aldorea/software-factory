@@ -1,5 +1,6 @@
-import type { AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
+import { emptyUsage, type AgentAdapter } from "./agent-adapter.ts";
 import type { SupervisedProcess } from "./supervise.ts";
+import type { AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
 
 export function claudeCodeArgs(model: string): string[] {
   return [
@@ -25,10 +26,6 @@ export interface ClaudeStreamState {
     text: string;
     apiErrorStatus: number | null;
   };
-}
-
-export function emptyUsage(): TokenUsage {
-  return { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0 };
 }
 
 export function initialClaudeState(): ClaudeStreamState {
@@ -68,6 +65,25 @@ export function applyClaudeLine(state: ClaudeStreamState, line: string): ClaudeS
 
   return state;
 }
+
+export const claudeCodeAdapter: AgentAdapter = {
+  kind: "claude-code",
+  processName: "claude",
+  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: false },
+  command: claudeCodeArgs,
+  isFinalLine: isClaudeFinalLine,
+  createStream() {
+    let state = initialClaudeState();
+    return {
+      onLine(line) {
+        state = applyClaudeLine(state, line);
+      },
+      usage: () => state.usage,
+      plan: () => state.plan,
+      outcome: (supervised) => claudeOutcome(state, supervised),
+    };
+  },
+};
 
 const PLAN_LIMIT_TEXT = /usage limit|limit reached|rate limit/i;
 
