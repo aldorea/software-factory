@@ -10,6 +10,8 @@ import { askRoleInTerminal } from "./ask-role.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
 
+const clock = { now: () => new Date() };
+
 const credentials = Object.fromEntries(
   AGENT_KINDS.flatMap((kind) => {
     const value = process.env[CREDENTIAL_VARIABLES[kind]];
@@ -20,10 +22,10 @@ const credentials = Object.fromEntries(
 process.exitCode = await main(process.argv.slice(2), {
   cwd: process.cwd(),
   factoryRoot: join(import.meta.dirname, "..", ".."),
-  clock: { now: () => new Date() },
+  clock,
   github: (repoDir) => ghGitHub({ repoDir }),
   runner: () => new DockerWorkerRunner(),
-  verifier: (repoDir, role) => configuredVerifier(repoDir, role, credentials),
+  verifier: (config, role) => configuredVerifier(config, role, credentials, clock),
   notifier: macosNotifier(),
   credentials,
   ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: askRoleInTerminal } : {}),

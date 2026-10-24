@@ -2,7 +2,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../commands/approve.ts";
 import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
-import type { Role, RoleChoice } from "../config/config.ts";
+import type { ResolvedConfig, Role, RoleChoice } from "../config/config.ts";
 import { loadConfig } from "../config/load.ts";
 import { chooseRole, parseRoleFlag, ROLES, type ChosenRole } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
@@ -28,7 +28,7 @@ export interface CliEnv {
   clock: Clock;
   github(repoDir: string): GitHub;
   runner(): WorkerRunner;
-  verifier(repoDir: string, role: RoleChoice): Verifier;
+  verifier(config: ResolvedConfig, role: RoleChoice): Verifier;
   notifier: Notifier;
   credentials: Partial<Record<AgentKind, string>>;
   ask?: (question: RoleQuestion) => Promise<RoleChoice>;
@@ -132,7 +132,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     { repoDir, issue, credentials: env.credentials, roles },
     {
       runner: env.runner(),
-      verifier: env.verifier(repoDir, roles.verifier as RoleChoice),
+      verifier: env.verifier(config, roles.verifier as RoleChoice),
       github: env.github(repoDir),
       notifier: env.notifier,
       clock: env.clock,

@@ -20,6 +20,7 @@ const verifier = () =>
     role: { agent: "opencode", model: FREE_GO_MODEL },
     env: { OPENCODE_API_KEY: OPENCODE_KEY ?? "" },
     idleTimeoutMs: 90_000,
+    clock: { now: () => new Date() },
   });
 
 async function ask(question: { criterion: string; test: string }) {

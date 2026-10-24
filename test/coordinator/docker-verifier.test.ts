@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { answerFrom, dockerVerifier } from "../../src/coordinator/docker-verifier.ts";
+import { resolveConfig, type ResolvedConfig } from "../../src/config/config.ts";
+import { answerFrom, configuredVerifier, dockerVerifier } from "../../src/coordinator/docker-verifier.ts";
+import { FakeClock } from "../fakes/clock.ts";
 
 describe("answerFrom the outcome of the verifier agent", () => {
   it("should accept when the answer starts with ACCEPT", () => {
@@ -50,7 +52,26 @@ describe("answerFrom the outcome of the verifier agent", () => {
 describe("dockerVerifier", () => {
   it("should refuse an agent that cannot deny every tool, before any container starts", () => {
     expect(() =>
-      dockerVerifier({ image: "x", role: { agent: "claude-code", model: "sonnet" }, env: {}, idleTimeoutMs: 1000 }),
+      dockerVerifier({ image: "x", role: { agent: "claude-code", model: "sonnet" }, env: {}, idleTimeoutMs: 1000, clock }),
     ).toThrow("claude-code cannot serve the verifier");
   });
 });
+
+describe("configuredVerifier", () => {
+  it("should name the missing credential of the verifier, never fail with an empty message", async () => {
+    const config = resolved();
+    const verifier = configuredVerifier(config, { agent: "opencode", model: "opencode-go/kimi-k2" }, {}, clock);
+
+    await expect(verifier.judge({ id: "A1", criterion: "c", test: "t", logPath: "/dev/null" })).rejects.toThrow(
+      "OPENCODE_API_KEY is not set; the opencode verifier needs it",
+    );
+  });
+});
+
+const clock = new FakeClock("2026-10-24T08:00:00.000Z");
+
+function resolved(): ResolvedConfig {
+  const result = resolveConfig({ image: "x", checks: [{ name: "c", command: "true" }], environment: () => ({}), protectedPaths: [] });
+  if (!result.ok) throw new Error(result.problems.join("; "));
+  return result.config;
+}
