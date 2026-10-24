@@ -238,7 +238,7 @@ function overlaps(a: string, b: string): boolean {
   return shorter.every((part, index) => longer[index] === part);
 }
 
-function firstOverlap(a: string[], b: string[]): [string, string] | null {
+export function firstOverlap(a: string[], b: string[]): [string, string] | null {
   for (const left of a) {
     for (const right of b) {
       if (overlaps(left, right)) return [left, right];
