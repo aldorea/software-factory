@@ -25,6 +25,7 @@ function cli(cwd: string) {
     verifier: () => new FakeVerifier(),
     notifier: new FakeNotifier(),
     credentials: {},
+    docker: async () => null,
     launch: async () => 0,
     out: (text) => out.push(text),
     err: (text) => err.push(text),

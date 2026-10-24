@@ -6,6 +6,7 @@ import { ghGitHub } from "../github/gh.ts";
 import { macosNotifier } from "../notify/macos.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import { DockerWorkerRunner } from "../workers/docker-runner.ts";
+import { dockerProblem } from "../workers/docker.ts";
 import { askRoleInTerminal } from "./ask-role.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
@@ -28,6 +29,7 @@ process.exitCode = await main(process.argv.slice(2), {
   verifier: (config, role) => configuredVerifier(config, role, credentials, clock),
   notifier: macosNotifier(),
   credentials,
+  docker: () => dockerProblem(),
   ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: askRoleInTerminal } : {}),
   launch: launchInteractive,
   out: (text) => process.stdout.write(`${text}\n`),

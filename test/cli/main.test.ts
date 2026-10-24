@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,6 +9,7 @@ import { parseRunLog } from "../../src/coordinator/run-log.ts";
 import type { GitHub } from "../../src/github/github.ts";
 import { ghGitHub } from "../../src/github/gh.ts";
 import { readApproval } from "../../src/spec/approval.ts";
+import { dockerProblem } from "../../src/workers/docker.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
@@ -104,6 +106,7 @@ function cli(
     verifier: () => new FakeVerifier(),
     notifier,
     credentials: { "claude-code": "token", opencode: "key" },
+    docker: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
@@ -304,6 +307,19 @@ describe("factory CLI", () => {
 
     expect(await main(["approve", "7"], env)).toBe(1);
     expect(err.join("\n")).toContain("no integration branch factory/7-<slug>");
+  });
+
+  it("should exit non-zero with a clear message, before any worker starts, when Docker is not available", async () => {
+    const repoDir = await runnableRepo();
+    const { env, err, runner } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    const code = await main(["run", "42"], { ...env, docker: () => dockerProblem("factory-test-no-such-docker") });
+
+    expect(code).toBe(1);
+    expect(err.join("\n")).toContain("factory: Docker is not available");
+    expect(runner.workers).toHaveLength(0);
+    expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
   });
 
   it("should exit non-zero with a clear message when gh is missing", async () => {
