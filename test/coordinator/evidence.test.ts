@@ -202,7 +202,7 @@ describe("criterion evidence at the integrated verification", () => {
 
     const report = await run();
 
-    expect(report.log.subtasks[0]?.state).toBe("merged");
+    expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "patience" });
     expect(report.log.verification?.passed).toBe(false);
     expect(report.log.verification?.criteria.map((criterion) => [criterion.id, criterion.passed])).toEqual([
       ["A1", true],
@@ -210,7 +210,7 @@ describe("criterion evidence at the integrated verification", () => {
     ]);
     expect(report.result).toBe("draft");
     expect(target.github.pullRequests[0]?.draft).toBe(true);
-    expect(target.github.pullRequests[0]?.body).toContain("Draft: the integrated verification failed (criteria not passing: A2).");
+    expect(target.github.pullRequests[0]?.body).toContain("the integrated verification failed (criteria not passing: A2).");
   });
 
   it("should start the app of the config before it runs the evidence", async () => {

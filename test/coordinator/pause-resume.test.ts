@@ -215,6 +215,35 @@ describe("factory run on a paused or partially done run", () => {
     expect(resumed.log.subtasks[0]?.block?.type).toBe("subtask-wall-clock");
   });
 
+  it("should not count the tests written by subtasks merged before the pause as tests that existed before the run", async () => {
+    const target = await targetRepo({
+      ...TWO_SUBTASKS,
+      spec: specText({
+        files: { A1: ["src/greeting.txt"], A2: ["lib/farewell.txt"] },
+        base: null,
+        subtasks: [
+          { id: "S1", criteria: ["A1"], scope: ["src/", "tests/greeting.test.ts"], dependsOn: [], testChanges: [] },
+          { id: "S2", criteria: ["A2"], scope: ["lib/", "tests/"], dependsOn: ["S1"], testChanges: [] },
+        ],
+        criteria: { A1: { evidence: "request", level: "subtask" }, A2: { evidence: "request", level: "subtask" } },
+      }),
+    });
+    const first = factory(target, (call) =>
+      isS1(call)
+        ? { files: { "src/greeting.txt": "hello\n", "tests/greeting.test.ts": "hello\n" } }
+        : { outcome: { kind: "plan-limit", message: "limit" } },
+    );
+    expect((await first.run()).result).toBe("paused");
+
+    const second = factory(target, () => ({ files: { "lib/farewell.txt": "bye\n", "tests/greeting.test.ts": "hello, bye\n" } }), {
+      at: "2026-10-24T14:00:00.000Z",
+    });
+    const resumed = await second.run();
+
+    expect(resumed.log.subtasks[1]?.gate?.reasons).toEqual([]);
+    expect(resumed.result).toBe("ready");
+  });
+
   it("should keep the scope extended before the pause, in the gate and in the prompt", async () => {
     const target = await targetRepo();
     const first = factory(target, (call) =>

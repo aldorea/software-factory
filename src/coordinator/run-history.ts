@@ -22,6 +22,23 @@ export async function mergedSubtasks(repoDir: string, branch: string): Promise<S
   );
 }
 
+export async function runBaseSha(repoDir: string, branch: string): Promise<string> {
+  const out = await execOk("git", [
+    "-C",
+    repoDir,
+    "log",
+    "--merges",
+    "--reverse",
+    `--format=%H%x09%(trailers:key=${SUBTASK_TRAILER},valueonly,separator=%x2C)`,
+    branch,
+  ]);
+  const firstMerge = out
+    .split("\n")
+    .map((line) => line.split("\t"))
+    .find(([, subtasks]) => subtasks !== undefined && subtasks.trim() !== "")?.[0];
+  return (await execOk("git", ["-C", repoDir, "rev-parse", firstMerge === undefined ? branch : `${firstMerge}^1`])).trim();
+}
+
 export async function latestRunLog(logsDir: string, issue: number): Promise<RunLog | null> {
   const entries = await readdir(logsDir).catch(() => [] as string[]);
   const runIds = entries.filter((entry) => entry.startsWith(`${issue}-`)).sort();

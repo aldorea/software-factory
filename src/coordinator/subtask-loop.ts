@@ -44,15 +44,18 @@ export type LoopResult =
 
 export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
   const { clock, record } = loop;
-  const startedAt = new Date(clock.now().getTime() - (record.elapsedMs ?? 0));
-  const result = await attemptsUntilDone(loop, startedAt);
-  record.elapsedMs = clock.now().getTime() - startedAt.getTime();
+  const carried = record.pausedLoop;
+  delete record.pausedLoop;
+  const first = carried?.firstAttempt ?? record.attempts.length;
+  const startedAt = new Date(clock.now().getTime() - (carried?.elapsedMs ?? 0));
+  const result = await attemptsUntilDone(loop, startedAt, first);
+  if (result.kind === "paused") record.pausedLoop = { firstAttempt: first, elapsedMs: clock.now().getTime() - startedAt.getTime() };
   return result;
 }
 
-async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date): Promise<LoopResult> {
+async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: number): Promise<LoopResult> {
   const { clock, record, limits } = loop;
-  const earlier = record.attempts.flatMap((attempt) => (attempt.failure ? [attempt.failure] : []));
+  const earlier = record.attempts.slice(first).flatMap((attempt) => (attempt.failure ? [attempt.failure] : []));
   const signatures = earlier.map((failure) => failure.signature);
   const extensions = record.scopeExtensions.length > 0 ? [await extensionSection(record.scopeExtensions)] : [];
   let last: AttemptFailure | undefined = earlier.at(-1);
@@ -63,7 +66,7 @@ async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date): Promise<Lo
       {
         signatures,
         subtaskElapsedMs: now.getTime() - startedAt.getTime(),
-        subtaskTokens: subtaskTokens(record),
+        subtaskTokens: subtaskTokens(record.attempts.slice(first)),
         runElapsedMs: now.getTime() - loop.runStartedAt.getTime(),
         runTokens: loop.runTokens(),
       },
@@ -150,8 +153,8 @@ async function retryPrompt(base: string, failure: AttemptFailure): Promise<strin
   return `${base}\n\n${section}`;
 }
 
-function subtaskTokens(record: SubtaskRecord): number {
-  return record.attempts.reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
+function subtaskTokens(attempts: AttemptRecord[]): number {
+  return attempts.reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
 }
 
 function attemptRecord(number: number, result: AttemptResult, agent: RoleChoice): AttemptRecord {
