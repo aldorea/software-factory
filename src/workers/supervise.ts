@@ -14,6 +14,7 @@ export interface SupervisedRun {
 export interface SuperviseOptions {
   command: string;
   args: string[];
+  cwd?: string;
   stdin?: string;
   logPath: string;
   deadline: Date;
@@ -26,11 +27,24 @@ export interface SuperviseOptions {
 }
 
 const STDERR_TAIL_BYTES = 4000;
+const STREAM_DRAIN_MS = 2000;
 
 export async function supervise(options: SuperviseOptions): Promise<SupervisedRun> {
   await mkdir(dirname(options.logPath), { recursive: true });
   const log = createWriteStream(options.logPath, { flags: "a" });
-  const child = spawn(options.command, options.args, { stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(options.command, options.args, {
+    cwd: options.cwd,
+    env: options.cwd !== undefined ? { ...process.env, PWD: options.cwd } : process.env,
+    stdio: ["pipe", "pipe", "pipe"],
+    detached: true,
+  });
+  const signalGroup = (signal: NodeJS.Signals) => {
+    try {
+      if (child.pid !== undefined) process.kill(-child.pid, signal);
+    } catch {
+      child.kill(signal);
+    }
+  };
   child.stdin.on("error", () => undefined);
   child.stdin.end(options.stdin ?? "");
 
@@ -48,8 +62,8 @@ export async function supervise(options: SuperviseOptions): Promise<SupervisedRu
     if (options.terminate) {
       await options.terminate().catch(() => undefined);
     }
-    child.kill("SIGTERM");
-    setTimeout(() => child.kill("SIGKILL"), options.graceMs ?? 2000).unref();
+    signalGroup("SIGTERM");
+    setTimeout(() => signalGroup("SIGKILL"), options.graceMs ?? 2000).unref();
   };
 
   const resetIdle = () => {
@@ -92,7 +106,18 @@ export async function supervise(options: SuperviseOptions): Promise<SupervisedRu
 
   const exitCode = await new Promise<number | null>((resolve, reject) => {
     child.on("error", reject);
-    child.on("close", (code) => resolve(code));
+    child.on("exit", (code) => {
+      signalGroup("SIGKILL");
+      const drain = setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        resolve(code);
+      }, STREAM_DRAIN_MS);
+      child.on("close", () => {
+        clearTimeout(drain);
+        resolve(code);
+      });
+    });
   }).finally(() => {
     clearTimeout(deadlineTimer);
     if (idleTimer) clearTimeout(idleTimer);

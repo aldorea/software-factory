@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -24,6 +24,17 @@ async function runNode(
     graceMs: 200,
   });
   return { result, lines, log: await readFile(logPath, "utf8") };
+}
+
+const GRANDCHILD = `const c = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "inherit" }); console.log(c.pid);`;
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 describe("supervise", () => {
@@ -69,6 +80,37 @@ describe("supervise", () => {
     );
     expect(result.stopReason).toBe("exited");
     expect(lines).toEqual(["eof"]);
+  });
+
+  it("runs the process in the given directory, with PWD set to it", async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "supervise-cwd-")));
+    const lines: string[] = [];
+    await supervise({
+      command: process.execPath,
+      args: ["-e", "console.log(process.cwd()); console.log(process.env.PWD)"],
+      cwd: dir,
+      logPath: join(dir, "log"),
+      deadline: new Date(Date.now() + 10_000),
+      idleTimeoutMs: 10_000,
+      onLine: (line) => lines.push(line),
+    });
+    expect(lines).toEqual([dir, dir]);
+  });
+
+  it("stops at the deadline a process whose child keeps the output open", async () => {
+    const started = Date.now();
+    const { result, lines } = await runNode(GRANDCHILD + `setInterval(() => {}, 1000)`, { deadlineMs: 400, idleMs: 5000 });
+    expect(result.stopReason).toBe("deadline");
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(isAlive(Number(lines[0]))).toBe(false);
+  });
+
+  it("returns when the process exits, even if its child keeps the output open", async () => {
+    const started = Date.now();
+    const { result, lines } = await runNode(GRANDCHILD + `process.exit(0)`, { idleMs: 5000 });
+    expect(result).toMatchObject({ stopReason: "exited", exitCode: 0 });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(isAlive(Number(lines[0]))).toBe(false);
   });
 
   it("keeps the tail of stderr", async () => {
