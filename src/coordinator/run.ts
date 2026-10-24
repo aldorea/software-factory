@@ -13,11 +13,13 @@ import {
 import type { Issue, PullRequest } from "../github/github.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { criteriaText, issueCriteria } from "../spec/issue.ts";
-import { parseSpec, validateSpec, type Subtask } from "../spec/spec.ts";
+import { parseSpec, validateSpec, type Spec, type Subtask } from "../spec/spec.ts";
 import { missingRequirements } from "../workers/agents.ts";
 import { revParse } from "../workers/git.ts";
 import type { AgentKind, AttemptResult } from "../workers/types.ts";
-import { approvalProblem, gateDecision, runId as makeRunId, runResult } from "./decisions.ts";
+import { approvalProblem, gateDecision, runId as makeRunId, runResult, verificationPassed } from "./decisions.ts";
+import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
+import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
 import {
@@ -55,6 +57,7 @@ interface Prepared {
   config: ResolvedConfig;
   issue: Issue;
   branch: string;
+  spec: Spec;
   subtask: Subtask;
   workers: RoleChoice;
   credential: string;
@@ -62,7 +65,7 @@ interface Prepared {
 
 export async function runIssue(request: RunRequest, ports: RunPorts): Promise<RunReport> {
   const prepared = await prepare(request, ports);
-  const { config, issue, branch, subtask, workers } = prepared;
+  const { config, issue, branch, spec, subtask, workers } = prepared;
   const startedAt = ports.clock.now();
   const id = makeRunId(request.issue, startedAt);
   const runDir = join(request.repoDir, ".factory", "logs", id);
@@ -87,7 +90,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   const save = () => writeRunLog(runLogPath, log);
   await save();
 
-  const checksOn = async (label: string, sha: string, context: WorkerEnvironmentContext) => {
+  const checksOn = async (label: string, sha: string, context: WorkerEnvironmentContext, plan: EvidencePlan) => {
     const checkBranch = `factory-check/${id}/${label}`;
     const env = environment(config, context);
     await createBranchAt(request.repoDir, checkBranch, sha);
@@ -98,17 +101,23 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
         throw error;
       });
     const checks: CheckRecord[] = [];
+    let evidence: EvidenceResult = { criteria: [], human: [] };
     let preserved = false;
     try {
       for (const check of config.checks) {
         const result = await worker.exec(check.command);
         checks.push({ name: check.name, command: check.command, exitCode: result.exitCode, passed: result.exitCode === 0 });
       }
+      evidence = await runEvidence(worker, plan, {
+        app: config.app,
+        commands: config.evidence,
+        attachmentsDir: join(runDir, "attachments"),
+      });
     } finally {
       preserved = (await worker.close()).preservedWorktreePath !== undefined;
     }
     if (!preserved) await deleteBranch(request.repoDir, checkBranch);
-    return checks;
+    return { checks, ...evidence };
   };
 
   const attempt = await runWorker(request, ports, prepared, record, runDir, startedAt);
@@ -117,9 +126,14 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   if (attempt.outcome.kind === "completed") {
     const sha = await revParse(request.repoDir, record.branch);
-    const checks = await checksOn(`${subtask.id}-gate`, sha, { purpose: "gate", subtask: subtask.id, slot: 0 });
-    const decision = gateDecision(checks);
-    record.gate = { sha, ...decision, checks };
+    const { checks, criteria } = await checksOn(
+      `${subtask.id}-gate`,
+      sha,
+      { purpose: "gate", subtask: subtask.id, slot: 0 },
+      gatePlan(spec, subtask.criteria, config.evidence),
+    );
+    const decision = gateDecision(checks, criteria);
+    record.gate = { sha, ...decision, checks, criteria };
     if (!decision.accepted) {
       record.state = "blocked";
       record.reason = `The gate rejected it: ${decision.reasons.join("; ")}.`;
@@ -143,8 +157,13 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   if (log.pauseReason === undefined) {
     const sha = await revParse(request.repoDir, branch);
-    const checks = await checksOn("verification", sha, { purpose: "verification", subtask: null, slot: 0 });
-    log.verification = { sha, passed: checks.every((check) => check.passed), checks };
+    const { checks, criteria, human } = await checksOn(
+      "verification",
+      sha,
+      { purpose: "verification", subtask: null, slot: 0 },
+      integrationPlan(spec, config.evidence),
+    );
+    log.verification = { sha, passed: verificationPassed(checks, criteria), checks, criteria, humanCriteria: human };
   }
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();
@@ -185,6 +204,8 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
     protectedPaths: config.protectedPaths,
   });
   if (problems.length > 0) throw new Error(`${specPath} is invalid: ${problems.join("; ")}`);
+  const missingEvidence = evidenceProblems(parsed.spec, config.evidence);
+  if (missingEvidence.length > 0) throw new Error(`${specPath} cannot be verified: ${missingEvidence.join("; ")}`);
   const [subtask, ...others] = parsed.spec.subtasks;
   if (parsed.spec.base !== null || subtask === undefined || others.length > 0) {
     throw new Error(`factory run supports only a spec with one subtask and no base subtask for now`);
@@ -197,7 +218,7 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
   if (!credential) {
     throw new Error(`${CREDENTIAL_VARIABLES[workers.agent]} is not set; the ${workers.agent} workers need it`);
   }
-  return { config, issue, branch, subtask, workers, credential };
+  return { config, issue, branch, spec: parsed.spec, subtask, workers, credential };
 }
 
 async function runWorker(

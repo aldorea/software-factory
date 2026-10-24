@@ -1,5 +1,5 @@
 import { criteriaHash, readApproval, technicalHash } from "../spec/approval.ts";
-import type { CheckRecord, RunLog, RunResult } from "./run-log.ts";
+import type { CheckRecord, CriterionRecord, RunLog, RunResult } from "./run-log.ts";
 
 export function approvalProblem(issue: number, specText: string, issueBody: string): string | null {
   const state = readApproval(specText);
@@ -19,11 +19,18 @@ export interface GateDecision {
   reasons: string[];
 }
 
-export function gateDecision(checks: CheckRecord[]): GateDecision {
-  const reasons = checks
-    .filter((check) => !check.passed)
-    .map((check) => `check ${check.name} failed with exit code ${check.exitCode}`);
+export function gateDecision(checks: CheckRecord[], criteria: CriterionRecord[] = []): GateDecision {
+  const reasons = [
+    ...checks.filter((check) => !check.passed).map((check) => `check ${check.name} failed with exit code ${check.exitCode}`),
+    ...criteria
+      .filter((criterion) => !criterion.passed)
+      .map((criterion) => `criterion ${criterion.id} (${criterion.evidence}) failed with exit code ${criterion.exitCode}`),
+  ];
   return { accepted: reasons.length === 0, reasons };
+}
+
+export function verificationPassed(checks: CheckRecord[], criteria: CriterionRecord[]): boolean {
+  return checks.every((check) => check.passed) && criteria.every((criterion) => criterion.passed);
 }
 
 export function runResult(log: Pick<RunLog, "subtasks" | "verification" | "pauseReason">): Exclude<RunResult, "running"> {
