@@ -17,11 +17,12 @@ import { parseSpec, validateSpec, type Spec, type Subtask } from "../spec/spec.t
 import { missingRequirements } from "../workers/agents.ts";
 import { revParse } from "../workers/git.ts";
 import type { AgentKind, AttemptResult } from "../workers/types.ts";
-import { approvalProblem, gateDecision, runId as makeRunId, runResult, verificationPassed } from "./decisions.ts";
+import { approvalProblem, gateDecision, runId as makeRunId, runResult, verificationPassed, verifiedDecision } from "./decisions.ts";
 import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
 import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
+import { judgeTests, NO_JUDGMENT } from "./verifier-run.ts";
 import {
   RUN_LOG_VERSION,
   writeRunLog,
@@ -132,11 +133,23 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       { purpose: "gate", subtask: subtask.id, slot: 0 },
       gatePlan(spec, subtask.criteria, config.evidence),
     );
-    const decision = gateDecision(checks, criteria);
-    record.gate = { sha, ...decision, checks, criteria };
+    const checked = gateDecision(checks, criteria);
+    const judgment = checked.accepted
+      ? await judgeTests(ports.verifier, {
+          repoDir: request.repoDir,
+          integrationBranch: branch,
+          sha,
+          criteria,
+          texts: criteriaText(issue.body),
+          logDir: runDir,
+          label: `${subtask.id}-attempt-1`,
+        })
+      : NO_JUDGMENT;
+    const decision = verifiedDecision(checked, judgment);
+    record.gate = { sha, accepted: decision.accepted, reasons: decision.reasons, checks, criteria, verifier: judgment.records };
     if (!decision.accepted) {
       record.state = "blocked";
-      record.reason = `The gate rejected it: ${decision.reasons.join("; ")}.`;
+      record.reason = `The gate rejected it: ${[...decision.reasons, ...decision.verifierReasons].join("; ")}.`;
     } else {
       const merged = await withBranchWorktree(request.repoDir, branch, (worktree) =>
         mergeBranch(worktree, record.branch, mergeMessage(request.issue, subtask.id)),

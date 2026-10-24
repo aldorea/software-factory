@@ -40,12 +40,20 @@ export interface HumanCriterionRecord {
   attachments: string[];
 }
 
+export interface VerifierRecord {
+  id: string;
+  verdict: "accept" | "refute" | "error";
+  reason?: string;
+  logPath: string;
+}
+
 export interface GateRecord {
   sha: string;
   accepted: boolean;
   reasons: string[];
   checks: CheckRecord[];
   criteria: CriterionRecord[];
+  verifier: VerifierRecord[];
 }
 
 export interface SubtaskRecord {

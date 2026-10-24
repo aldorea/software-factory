@@ -1,5 +1,6 @@
 import type { GitHub } from "../github/github.ts";
 import type { WorkerRunner } from "../workers/types.ts";
+import type { Verifier } from "./verifier.ts";
 
 export interface Clock {
   now(): Date;
@@ -17,6 +18,7 @@ export interface Notifier {
 
 export interface RunPorts {
   runner: WorkerRunner;
+  verifier: Verifier;
   github: GitHub;
   notifier: Notifier;
   clock: Clock;

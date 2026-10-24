@@ -1,5 +1,6 @@
 import { criteriaHash, readApproval, technicalHash } from "../spec/approval.ts";
 import type { CheckRecord, CriterionRecord, RunLog, RunResult } from "./run-log.ts";
+import type { TestJudgment } from "./verifier-run.ts";
 
 export function approvalProblem(issue: number, specText: string, issueBody: string): string | null {
   const state = readApproval(specText);
@@ -27,6 +28,20 @@ export function gateDecision(checks: CheckRecord[], criteria: CriterionRecord[] 
       .map((criterion) => `criterion ${criterion.id} (${criterion.evidence}) failed with exit code ${criterion.exitCode}`),
   ];
   return { accepted: reasons.length === 0, reasons };
+}
+
+export interface VerifiedDecision extends GateDecision {
+  verifierReasons: string[];
+}
+
+export function verifiedDecision(decision: GateDecision, judgment: TestJudgment): VerifiedDecision {
+  const verifierReasons = judgment.records.flatMap((record) => {
+    if (record.verdict === "refute") return [`the verifier refuted the test of ${record.id}: ${record.reason ?? ""}`];
+    if (record.verdict === "error") return [`the verifier gave no usable answer for ${record.id}: ${record.reason ?? ""}`];
+    return [];
+  });
+  const reasons = [...decision.reasons, ...judgment.missingTests];
+  return { accepted: reasons.length === 0 && verifierReasons.length === 0, reasons, verifierReasons };
 }
 
 export function verificationPassed(checks: CheckRecord[], criteria: CriterionRecord[]): boolean {
