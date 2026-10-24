@@ -1,9 +1,9 @@
 import type { RoleChoice } from "../config/config.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { loadConfig } from "../config/load.ts";
+import { credentialProblem, CREDENTIAL_VARIABLES } from "../config/roles.ts";
 import type { AgentKind, AttemptOutcome } from "../workers/types.ts";
 import { askVerifier } from "../workers/verifier.ts";
-import { CREDENTIAL_VARIABLES } from "./run.ts";
 import type { Verifier, VerifierAnswer, VerifierQuestion } from "./verifier.ts";
 
 export const QUESTION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -15,13 +15,16 @@ export interface VerifierSetup {
   idleTimeoutMs: number;
 }
 
-export function configuredVerifier(repoDir: string, credentials: Partial<Record<AgentKind, string>>): Verifier {
+export function configuredVerifier(
+  repoDir: string,
+  role: RoleChoice,
+  credentials: Partial<Record<AgentKind, string>>,
+): Verifier {
   return {
     async judge(question) {
       const config = await loadConfig(repoDir);
-      const role = config.roles.verifier;
       const credential = credentials[role.agent];
-      if (!credential) throw new Error(`${CREDENTIAL_VARIABLES[role.agent]} is not set; the ${role.agent} verifier needs it`);
+      if (!credential) throw new Error(credentialProblem("verifier", role, credentials) ?? "");
       return dockerVerifier({
         image: config.image,
         role,

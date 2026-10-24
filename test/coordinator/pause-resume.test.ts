@@ -54,7 +54,7 @@ function factory(target: Target, script: AttemptScript, options: { at?: string; 
   const clock = new FakeClock(options.at ?? "2026-10-24T08:00:00.000Z");
   const run = () =>
     runIssue(
-      { repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": TOKEN } },
+      { repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": TOKEN, opencode: "key-of-the-host" } },
       { runner, verifier, github: target.github, notifier, clock },
     );
   return { runner, verifier, notifier, clock, run };

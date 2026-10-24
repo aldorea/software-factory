@@ -1,8 +1,10 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
-import { main, type CliEnv } from "../../src/cli/main.ts";
+import { main, type CliEnv, type RoleQuestion } from "../../src/cli/main.ts";
+import type { RoleChoice } from "../../src/config/config.ts";
+import { parseRunLog } from "../../src/coordinator/run-log.ts";
 import type { GitHub } from "../../src/github/github.ts";
 import { ghGitHub } from "../../src/github/gh.ts";
 import { readApproval } from "../../src/spec/approval.ts";
@@ -11,7 +13,7 @@ import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
-import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
+import { FakeWorkerRunner, type AttemptScript } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
@@ -83,10 +85,14 @@ async function mainRepo(): Promise<string> {
   return dir;
 }
 
-function cli(cwd: string, github: GitHub = new FakeGitHub([{ number: 42, title: "x", body: issueBody }])) {
+function cli(
+  cwd: string,
+  github: GitHub = new FakeGitHub([{ number: 42, title: "x", body: issueBody }]),
+  script?: AttemptScript,
+) {
   const out: string[] = [];
   const err: string[] = [];
-  const runner = new FakeWorkerRunner();
+  const runner = new FakeWorkerRunner(script);
   const notifier = new FakeNotifier();
   const launches: InteractiveLaunch[] = [];
   const env: CliEnv = {
@@ -97,7 +103,7 @@ function cli(cwd: string, github: GitHub = new FakeGitHub([{ number: 42, title: 
     runner: () => runner,
     verifier: () => new FakeVerifier(),
     notifier,
-    credentials: { "claude-code": "token" },
+    credentials: { "claude-code": "token", opencode: "key" },
     launch: async (launch) => {
       launches.push(launch);
       return 0;
@@ -109,6 +115,122 @@ function cli(cwd: string, github: GitHub = new FakeGitHub([{ number: 42, title: 
 }
 
 const valid = () => readFile(join(import.meta.dirname, "..", "spec", "fixtures", "valid.md"), "utf8");
+
+async function runnableRepo(config: string = CONFIG): Promise<string> {
+  const repoDir = await targetRepo(ONE_SUBTASK_SPEC, config);
+  const remoteDir = await temp.make("cli-remote-");
+  await execOk("git", ["init", "-q", "--bare", remoteDir]);
+  await git(repoDir, "remote", "add", "origin", remoteDir);
+  await git(repoDir, "branch", "main");
+  return repoDir;
+}
+
+async function lastRunLog(repoDir: string) {
+  const logs = join(repoDir, ".factory", "logs");
+  const runId = (await readdir(logs)).sort().at(-1) ?? "";
+  const parsed = parseRunLog(await readFile(join(logs, runId, "run.json"), "utf8"));
+  if (!parsed.ok) throw new Error(parsed.problem);
+  return parsed.log;
+}
+
+const OPUS: RoleChoice = { agent: "claude-code", model: "opus" };
+const SONNET: RoleChoice = { agent: "claude-code", model: "sonnet" };
+const KIMI: RoleChoice = { agent: "opencode", model: "opencode-go/kimi-k2" };
+const GLM: RoleChoice = { agent: "opencode", model: "opencode-go/glm-4.6" };
+const NO_ROLES = CONFIG.replace(/  roles: \{[\s\S]*?\n  \},\n/, "");
+
+describe("factory run: the choice of the agent of each role", () => {
+  it("should take the agent and the model of each role from the flags over the config default", async () => {
+    const repoDir = await runnableRepo();
+    const { env } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    const code = await main(["run", "42", "--worker-agent", "claude-code:opus", "--verifier-agent=opencode:opencode-go/glm-4.6"], env);
+
+    expect(code).toBe(0);
+    expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, changes: [] });
+  });
+
+  it("should ask in a terminal for each role with no flag, offering only the agents that meet the role and preselecting the config default", async () => {
+    const repoDir = await runnableRepo();
+    const { env } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+    const questions: RoleQuestion[] = [];
+    env.ask = async (question) => {
+      questions.push(question);
+      return GLM;
+    };
+
+    expect(await main(["run", "42", "--worker-agent", "claude-code:opus"], env)).toBe(0);
+
+    expect(questions).toEqual([{ role: "verifier", offered: ["opencode"], preselected: KIMI }]);
+    expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, changes: [] });
+  });
+
+  it("should take the config default with no flag outside a terminal", async () => {
+    const repoDir = await runnableRepo();
+    const { env } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    expect((await lastRunLog(repoDir)).agents).toEqual({ workers: SONNET, verifier: KIMI, changes: [] });
+  });
+
+  it("should refuse to start, with no worker, when neither a flag, a prompt nor the config gives the agent of a role", async () => {
+    const repoDir = await runnableRepo(NO_ROLES);
+    const { env, err, runner } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42", "--worker-agent", "claude-code:sonnet"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("no agent for the verifier: pass --verifier-agent <agent>:<model> or set roles.verifier");
+    expect(runner.workers).toEqual([]);
+  });
+
+  it("should refuse before the run starts an agent asked by flag that misses a requirement of the role", async () => {
+    const repoDir = await runnableRepo();
+    const { env, err, runner } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42", "--worker-agent", "opencode:opencode-go/kimi-k2"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("opencode cannot serve the workers: it misses readsTokenUsage, detectsPlanLimit");
+    expect(runner.workers).toEqual([]);
+  });
+
+  it("should ask again on resume with the previous choice preselected, and record the change", async () => {
+    const repoDir = await runnableRepo();
+    const paused = cli(repoDir, undefined, () => ({ outcome: { kind: "plan-limit", message: "limit" } }));
+    expect(await main(["approve", "42"], paused.env)).toBe(0);
+    expect(await main(["run", "42", "--worker-agent", "claude-code:opus"], paused.env)).toBe(0);
+    expect((await lastRunLog(repoDir)).result).toBe("paused");
+
+    const resumed = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
+    const questions: RoleQuestion[] = [];
+    resumed.env.ask = async (question) => {
+      questions.push(question);
+      return question.role === "workers" ? SONNET : (question.preselected as RoleChoice);
+    };
+    expect(await main(["run", "42"], resumed.env)).toBe(0);
+
+    expect(questions.map((question) => [question.role, question.preselected])).toEqual([
+      ["workers", OPUS],
+      ["verifier", KIMI],
+    ]);
+    expect((await lastRunLog(repoDir)).agents.changes).toEqual([
+      { role: "workers", from: OPUS, to: SONNET, at: "2026-10-24T08:00:00.000Z" },
+    ]);
+  });
+
+  it("should print the usage on a flag that factory run does not know, or a role flag on another command", async () => {
+    const { env, err } = cli(await temp.make("cli-usage-"));
+
+    expect(await main(["run", "42", "--worker", "claude-code"], env)).toBe(2);
+    expect(await main(["approve", "42", "--worker-agent", "claude-code:opus"], env)).toBe(2);
+    expect(err.join("\n")).toContain("usage: factory");
+  });
+});
 
 describe("factory CLI", () => {
   it("should exit zero on a valid spec when validating, taking the target repo from the current directory", async () => {

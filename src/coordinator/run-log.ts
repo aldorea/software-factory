@@ -78,7 +78,7 @@ export interface FollowUpRecord {
   outcome: "merged" | "blocked" | "interrupted" | "paused";
 }
 
-export interface PausedLoopRecord {
+export interface CarriedLoopRecord {
   firstAttempt: number;
   elapsedMs: number;
 }
@@ -94,7 +94,7 @@ export interface SubtaskRecord {
   conflictFiles?: string[];
   followUps?: FollowUpRecord[];
   attempts: AttemptRecord[];
-  pausedLoop?: PausedLoopRecord;
+  carriedLoop?: CarriedLoopRecord;
   usage: TokenUsage;
   gate?: GateRecord;
   gateRejections: number;

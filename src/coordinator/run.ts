@@ -1,6 +1,7 @@
 import { join } from "node:path";
-import type { ResolvedConfig, RoleChoice, WorkerEnvironmentContext } from "../config/config.ts";
+import type { ResolvedConfig, Role, RoleChoice, WorkerEnvironmentContext } from "../config/config.ts";
 import { loadConfig } from "../config/load.ts";
+import { chooseRole, choiceProblems, credentialProblem, CREDENTIAL_VARIABLES, ROLES } from "../config/roles.ts";
 import {
   createBranchAt,
   deleteBranch,
@@ -16,7 +17,6 @@ import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { criteriaText, issueCriteria } from "../spec/issue.ts";
 import { parseSpec, validateSpec, type Spec, type Subtask } from "../spec/spec.ts";
 import { emptyUsage } from "../workers/agent-adapter.ts";
-import { missingRequirements } from "../workers/agents.ts";
 import { inStage, WorkerLayerError } from "../workers/failures.ts";
 import { revParse } from "../workers/git.ts";
 import type { AgentKind } from "../workers/types.ts";
@@ -46,14 +46,9 @@ import {
   type SubtaskState,
 } from "./run-log.ts";
 import { applyTotals, emptyCost, emptyFriction } from "./run-totals.ts";
-import { countedTokens, type StopLimits, type StopType } from "./stop-rules.ts";
+import { agentTokens, type StopLimits, type StopType } from "./stop-rules.ts";
 import { runSubtaskLoop, type LoopResult, type PlanLimitHit } from "./subtask-loop.ts";
 import { judgeTests, NO_JUDGMENT } from "./verifier-run.ts";
-
-export const CREDENTIAL_VARIABLES: Record<AgentKind, string> = {
-  "claude-code": "CLAUDE_CODE_OAUTH_TOKEN",
-  opencode: "OPENCODE_API_KEY",
-};
 
 export const REMOTE = "origin";
 export const PULL_REQUEST_BASE = "main";
@@ -62,7 +57,7 @@ export interface RunRequest {
   repoDir: string;
   issue: number;
   credentials: Partial<Record<AgentKind, string>>;
-  workers?: RoleChoice;
+  roles?: Partial<Record<Role, RoleChoice>>;
 }
 
 export interface RunReport {
@@ -81,12 +76,13 @@ interface Prepared {
   parallelism: ParallelismBounds;
   humanCriteria: string[];
   workers: RoleChoice;
+  verifier: RoleChoice;
   credential: string;
 }
 
 export async function runIssue(request: RunRequest, ports: RunPorts): Promise<RunReport> {
   const prepared = await prepare(request, ports);
-  const { config, issue, branch, spec, plan, parallelism, workers, humanCriteria } = prepared;
+  const { config, issue, branch, spec, plan, parallelism, workers, verifier, humanCriteria } = prepared;
   const subtasks = plan.base ? [plan.base, ...spec.subtasks] : spec.subtasks;
   const now = ports.clock.now();
   const logsDir = join(request.repoDir, ".factory", "logs");
@@ -97,7 +93,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     integrationBranch: branch,
     startedAt: now.toISOString(),
     result: "running",
-    agents: { workers, verifier: config.roles.verifier, changes: [] },
+    agents: { workers, verifier, changes: [] },
     criteria: { passing: [], blocked: [], human: humanCriteria, pending: [] },
     cost: emptyCost(),
     friction: emptyFriction(),
@@ -307,7 +303,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
           })
         : NO_JUDGMENT;
       if (judgment.planLimit !== undefined) {
-        return { kind: "plan-limit", agent: config.roles.verifier.agent, ...judgment.planLimit };
+        return { kind: "plan-limit", agent: verifier.agent, ...judgment.planLimit };
       }
       const decision = verifiedDecision(checked, judgment);
       const reasons = decision.rejections.filter((rejection) => rejection.kind !== "verifier").map((rejection) => rejection.message);
@@ -315,7 +311,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       return decision;
     };
     const runTokens = () =>
-      log.subtasks.flatMap((entry) => entry.attempts).reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
+      agentTokens(log.subtasks.flatMap((entry) => entry.attempts), workers.agent);
 
     record.state = "working";
     await save();
@@ -487,16 +483,39 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
     .map(([id]) => id);
   const plan = schedule(parsed.spec);
 
-  const workers = request.workers ?? config.roles.workers;
-  const missing = missingRequirements(workers.agent, "workers");
-  if (missing.length > 0) throw new Error(`${workers.agent} cannot serve the workers: it misses ${missing.join(", ")}`);
-  const credential = request.credentials[workers.agent];
-  if (!credential) {
-    throw new Error(`${CREDENTIAL_VARIABLES[workers.agent]} is not set; the ${workers.agent} workers need it`);
-  }
+  const asksVerifier = Object.values(parsed.spec.criteria).some((criterion) => criterion.evidence === "playwright");
+  const roles = chosenRoles(request, config, { workers: true, verifier: asksVerifier });
+  const { workers, verifier } = roles;
+  const credential = request.credentials[workers.agent] as string;
   const limits = config.agents[workers.agent];
   const parallelism = { start: limits.maxParallel, ceiling: limits.maxParallelCeiling };
-  return { config, issue, branch, spec: parsed.spec, plan, parallelism, humanCriteria, workers, credential };
+  return { config, issue, branch, spec: parsed.spec, plan, parallelism, humanCriteria, workers, verifier, credential };
+}
+
+function chosenRoles(
+  request: RunRequest,
+  config: ResolvedConfig,
+  needsCredential: Record<Role, boolean>,
+): Record<Role, RoleChoice> {
+  const problems: string[] = [];
+  const roles: Partial<Record<Role, RoleChoice>> = {};
+  for (const role of ROLES) {
+    const chosen = chooseRole({ role, ...optional("flag", request.roles?.[role]), ...optional("fallback", config.roles[role]) });
+    if (!chosen.ok) {
+      problems.push(chosen.problem);
+      continue;
+    }
+    const invalid = choiceProblems(role, chosen.choice);
+    const missing = needsCredential[role] ? credentialProblem(role, chosen.choice, request.credentials) : null;
+    problems.push(...invalid, ...(invalid.length === 0 && missing !== null ? [missing] : []));
+    roles[role] = chosen.choice;
+  }
+  if (problems.length > 0) throw new Error(problems.join("; "));
+  return roles as Record<Role, RoleChoice>;
+}
+
+function optional<K extends string, T>(key: K, value: T | undefined): Partial<Record<K, T>> {
+  return value === undefined ? {} : ({ [key]: value } as Record<K, T>);
 }
 
 interface Worked {
@@ -623,7 +642,7 @@ async function workerPrompt(issue: Issue, subtask: Subtask, config: ResolvedConf
 }
 
 function workerId(issue: number, label: string, record: SubtaskRecord): string {
-  return record.pausedLoop === undefined ? `${issue}-${label}` : `${issue}-${label}-from-${record.attempts.length + 1}`;
+  return record.carriedLoop === undefined ? `${issue}-${label}` : `${issue}-${label}-from-${record.attempts.length + 1}`;
 }
 
 export function subtaskBranch(integration: string, subtaskId: string): string {

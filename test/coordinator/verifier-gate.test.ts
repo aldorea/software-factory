@@ -122,7 +122,7 @@ function harness(
   const verifier = new FakeVerifier(answer);
   const run = () =>
     runIssue(
-      { repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": "token-of-the-host" } },
+      { repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": "token-of-the-host", opencode: "key-of-the-host" } },
       { runner, verifier, github: target.github, notifier: new FakeNotifier(), clock: new FakeClock("2026-10-24T08:00:00.000Z") },
     );
   return { runner, verifier, run };
