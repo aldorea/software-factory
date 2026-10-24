@@ -75,6 +75,9 @@ The branch of a run, `factory/<n>-<slug>`, where each accepted subtask merges an
 **Follow-up task**:
 Work sent back to the subtask that owns a criterion that failed the integrated verification.
 
+**Evidence branch**:
+The branch `factory-evidence/<n>`, with no common history with `main` and never merged, where the coordinator publishes the attachments of the human criteria so that the pull request can link them.
+
 **Run log**:
 The record of a run in `.factory/logs/<run-id>/`, outside git: `run.json` and the raw log of each attempt.
 
