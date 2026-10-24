@@ -3,7 +3,10 @@ import type { SupervisedRun } from "./supervise.ts";
 
 export const SUBSCRIPTION_PROVIDER = "opencode-go";
 
-export function openCodeArgs(model: string, options: { autoApprove: boolean } = { autoApprove: true }): string[] {
+export function openCodeArgs(
+  model: string,
+  options: { autoApprove: boolean; agent?: string } = { autoApprove: true },
+): string[] {
   if (!model.startsWith(`${SUBSCRIPTION_PROVIDER}/`)) {
     throw new Error(`OpenCode model must use the ${SUBSCRIPTION_PROVIDER} provider, got "${model}"`);
   }
@@ -17,6 +20,7 @@ export function openCodeArgs(model: string, options: { autoApprove: boolean } = 
     "--format",
     "json",
     ...(options.autoApprove ? ["--auto"] : []),
+    ...(options.agent !== undefined ? ["--agent", options.agent] : []),
     "-m",
     model,
   ];

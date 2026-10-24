@@ -15,6 +15,20 @@ describe("OpenCode", () => {
     expect(openCodeArgs("opencode-go/glm-5.3", { autoApprove: false })).not.toContain("--auto");
   });
 
+  it("selects the given agent", () => {
+    expect(openCodeArgs("opencode-go/glm-5.3", { autoApprove: false, agent: "verifier" })).toEqual([
+      "opencode",
+      "run",
+      "--standalone",
+      "--format",
+      "json",
+      "--agent",
+      "verifier",
+      "-m",
+      "opencode-go/glm-5.3",
+    ]);
+  });
+
   it("runs a private server, so the key in its environment reaches the provider", () => {
     expect(openCodeArgs("opencode-go/glm-5.3").slice(0, 3)).toEqual(["opencode", "run", "--standalone"]);
   });
