@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DockerWorkerRunner } from "../../src/workers/docker-runner.ts";
-import { runOk } from "../../src/workers/sh.ts";
+import { execOk } from "../../src/workers/sh.ts";
 import type { Worker, WorkerSpec } from "../../src/workers/types.ts";
 
 const IMAGE = "software-factory/worker:dev";
@@ -19,11 +19,11 @@ const identity = {
 
 async function toyRepo(): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), "toy-repo-")));
-  await runOk("git", ["init", "-q", "-b", "main", dir]);
+  await execOk("git", ["init", "-q", "-b", "main", dir]);
   await writeFile(join(dir, "README.md"), "# toy\n");
   await writeFile(join(dir, ".gitignore"), ".factory/\n");
-  await runOk("git", ["-C", dir, "add", "."]);
-  await runOk("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init"]);
+  await execOk("git", ["-C", dir, "add", "."]);
+  await execOk("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init"]);
   return dir;
 }
 
@@ -82,7 +82,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     const closed = await worker.close();
     expect(closed.preservedWorktreePath).toBeUndefined();
     expect(existsSync(worker.worktreePath)).toBe(false);
-    const onHost = await runOk("git", ["-C", s.repoDir, "show", "factory/commits:hello.txt"]);
+    const onHost = await execOk("git", ["-C", s.repoDir, "show", "factory/commits:hello.txt"]);
     expect(onHost).toBe("hi\n");
   });
 
@@ -99,7 +99,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     const worker = await runner.start(await spec("claude-no-auth"));
     open.push(worker);
 
-    const attempt = await worker.runAgent({ kind: "claude-code", model: "claude-haiku-5-5" }, "Reply OK.", {
+    const attempt = await worker.attempt({ kind: "claude-code", model: "claude-haiku-5-5" }, "Reply OK.", {
       deadline: new Date(Date.now() + 60_000),
       idleTimeoutMs: 30_000,
     });
@@ -108,7 +108,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
   });
 
   it("removes a leftover container with the same name", async () => {
-    await runOk("docker", ["run", "-d", "--name", "factory-leftover", IMAGE]);
+    await execOk("docker", ["run", "-d", "--name", "factory-leftover", IMAGE]);
     const worker = await runner.start(await spec("leftover"));
     open.push(worker);
 
@@ -144,7 +144,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
   it("refuses a directory in the worktree path that git does not know, and leaves it as it is", async () => {
     const s = await spec("orphan");
     const orphan = join(s.repoDir, ".factory", "worktrees", "orphan");
-    await runOk("mkdir", ["-p", orphan]);
+    await execOk("mkdir", ["-p", orphan]);
     await writeFile(join(orphan, "mine.txt"), "keep\n");
 
     await expect(runner.start(s)).rejects.toThrow(/does not know it as a worktree/);
@@ -155,7 +155,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     const worker = await runner.start(await spec("resources", { cpus: "1", memory: "512m" }));
     open.push(worker);
 
-    const inspect = await runOk("docker", [
+    const inspect = await execOk("docker", [
       "inspect",
       "--format",
       "{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}",
@@ -175,7 +175,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
 
     const attempts = await Promise.all(
       workers.map((worker) =>
-        worker.runAgent(
+        worker.attempt(
           { kind: "claude-code", model: "claude-haiku-5-5" },
           "Create a file hello.txt that contains the line hi, then commit it with the message hello. Do nothing else.",
           { deadline: new Date(Date.now() + 300_000), idleTimeoutMs: 120_000 },
@@ -197,7 +197,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     );
     open.push(worker);
 
-    const attempt = await worker.runAgent(
+    const attempt = await worker.attempt(
       { kind: "opencode", model: "opencode-go/beam-free" },
       "Reply with the single word OK.",
       { deadline: new Date(Date.now() + 120_000), idleTimeoutMs: 90_000 },

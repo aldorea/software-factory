@@ -70,7 +70,7 @@ export interface CloseResult {
 export interface Worker {
   readonly spec: WorkerSpec;
   readonly worktreePath: string;
-  runAgent(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult>;
+  attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult>;
   exec(command: string, options?: { timeoutMs?: number }): Promise<ExecResult>;
   commits(): Promise<string[]>;
   close(): Promise<CloseResult>;

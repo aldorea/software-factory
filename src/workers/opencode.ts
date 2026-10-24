@@ -1,5 +1,5 @@
 import type { AttemptOutcome } from "./types.ts";
-import type { SupervisedRun } from "./supervise.ts";
+import type { SupervisedProcess } from "./supervise.ts";
 
 export const SUBSCRIPTION_PROVIDER = "opencode-go";
 
@@ -73,15 +73,15 @@ function errorMessage(error: unknown): string {
   return JSON.stringify(error);
 }
 
-export function openCodeOutcome(state: OpenCodeStreamState, run: SupervisedRun): AttemptOutcome {
-  if (run.stopReason === "deadline") return { kind: "deadline" };
-  if (run.stopReason === "idle-timeout") return { kind: "idle-timeout" };
-  if (state.error === undefined && (run.exitCode === 0 || run.stopReason === "completion-grace")) {
+export function openCodeOutcome(state: OpenCodeStreamState, supervised: SupervisedProcess): AttemptOutcome {
+  if (supervised.stopReason === "deadline") return { kind: "deadline" };
+  if (supervised.stopReason === "idle-timeout") return { kind: "idle-timeout" };
+  if (state.error === undefined && (supervised.exitCode === 0 || supervised.stopReason === "completion-grace")) {
     return { kind: "completed", summary: state.lastText };
   }
   return {
     kind: "agent-error",
-    message: state.error ?? (run.stderrTail || "OpenCode ended with no output"),
-    exitCode: run.exitCode,
+    message: state.error ?? (supervised.stderrTail || "OpenCode ended with no output"),
+    exitCode: supervised.exitCode,
   };
 }

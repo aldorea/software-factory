@@ -1,5 +1,5 @@
 import type { AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
-import type { SupervisedRun } from "./supervise.ts";
+import type { SupervisedProcess } from "./supervise.ts";
 
 export function claudeCodeArgs(model: string): string[] {
   return [
@@ -71,9 +71,9 @@ export function applyClaudeLine(state: ClaudeStreamState, line: string): ClaudeS
 
 const PLAN_LIMIT_TEXT = /usage limit|limit reached|rate limit/i;
 
-export function claudeOutcome(state: ClaudeStreamState, run: SupervisedRun): AttemptOutcome {
-  if (run.stopReason === "deadline") return { kind: "deadline" };
-  if (run.stopReason === "idle-timeout") return { kind: "idle-timeout" };
+export function claudeOutcome(state: ClaudeStreamState, supervised: SupervisedProcess): AttemptOutcome {
+  if (supervised.stopReason === "deadline") return { kind: "deadline" };
+  if (supervised.stopReason === "idle-timeout") return { kind: "idle-timeout" };
 
   const result = state.result;
   const planRejected = state.plan?.status === "rejected";
@@ -86,7 +86,7 @@ export function claudeOutcome(state: ClaudeStreamState, run: SupervisedRun): Att
     const resetsAt = planResumeAt(state.plan);
     return {
       kind: "plan-limit",
-      message: result?.text || run.stderrTail || "plan limit reached",
+      message: result?.text || supervised.stderrTail || "plan limit reached",
       ...(resetsAt ? { resetsAt } : {}),
     };
   }
@@ -97,8 +97,8 @@ export function claudeOutcome(state: ClaudeStreamState, run: SupervisedRun): Att
 
   return {
     kind: "agent-error",
-    message: result?.text || run.stderrTail || "the agent ended with no result",
-    exitCode: run.exitCode,
+    message: result?.text || supervised.stderrTail || "the agent ended with no result",
+    exitCode: supervised.exitCode,
   };
 }
 

@@ -22,7 +22,7 @@ import {
   revParse,
 } from "./git.ts";
 import { applyOpenCodeLine, initialOpenCodeState, openCodeArgs, openCodeOutcome } from "./opencode.ts";
-import { run, runOk } from "./sh.ts";
+import { exec, execOk } from "./sh.ts";
 import { supervise } from "./supervise.ts";
 import type {
   AgentSpec,
@@ -38,7 +38,7 @@ import type {
 export class DockerWorkerRunner implements WorkerRunner {
   async start(spec: WorkerSpec): Promise<Worker> {
     const container = `factory-${spec.id.replace(/[^a-zA-Z0-9_.-]/g, "-")}`;
-    await run("docker", ["rm", "-f", container]);
+    await exec("docker", ["rm", "-f", container]);
 
     const { worktreePath, created } = await prepareWorktree(spec);
     const baseSha = await mergeBase(spec.repoDir, spec.baseRef, spec.branch);
@@ -53,7 +53,7 @@ export class DockerWorkerRunner implements WorkerRunner {
         ...(spec.cpus !== undefined ? ["--cpus", spec.cpus] : []),
         ...(spec.memory !== undefined ? ["--memory", spec.memory] : []),
       ];
-      const runArgs = [
+      const containerArgs = [
         "run",
         "-d",
         "--init",
@@ -68,12 +68,12 @@ export class DockerWorkerRunner implements WorkerRunner {
         spec.image,
       ];
       try {
-        await runUntilVisible(runArgs, container, worktreePath, spec.branch);
+        await startUntilVisible(containerArgs, container, worktreePath, spec.branch);
       } finally {
         await rm(envFile, { force: true });
       }
     } catch (error) {
-      await run("docker", ["rm", "-f", container]);
+      await exec("docker", ["rm", "-f", container]);
       await rm(secretsDir, { recursive: true, force: true });
       if (created) await removeWorktree(spec.repoDir, worktreePath).catch(() => undefined);
       throw error;
@@ -94,20 +94,20 @@ class DockerWorker implements Worker {
     private readonly secretsDir: string,
   ) {}
 
-  async runAgent(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
+  async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
     this.attempts += 1;
     const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${this.attempts}.jsonl`);
     const startedAt = new Date();
-    const exec = (args: string[]) => ["exec", "-i", this.container, ...args];
+    const dockerExec = (args: string[]) => ["exec", "-i", this.container, ...args];
     const terminate = (pattern: string) => async () => {
-      await run("docker", ["exec", this.container, "pkill", "-KILL", "-f", pattern]);
+      await exec("docker", ["exec", this.container, "pkill", "-KILL", "-f", pattern]);
     };
 
     if (agent.kind === "claude-code") {
       let state = initialClaudeState();
-      const runResult = await supervise({
+      const supervised = await supervise({
         command: "docker",
-        args: exec(claudeCodeArgs(agent.model)),
+        args: dockerExec(claudeCodeArgs(agent.model)),
         stdin: prompt,
         logPath,
         deadline: limits.deadline,
@@ -119,7 +119,7 @@ class DockerWorker implements Worker {
         terminate: terminate("claude"),
       });
       return {
-        outcome: claudeOutcome(state, runResult),
+        outcome: claudeOutcome(state, supervised),
         usage: state.usage,
         ...(state.plan ? { plan: state.plan } : {}),
         logPath,
@@ -129,9 +129,9 @@ class DockerWorker implements Worker {
     }
 
     let state = initialOpenCodeState();
-    const runResult = await supervise({
+    const supervised = await supervise({
       command: "docker",
-      args: exec(openCodeArgs(agent.model)),
+      args: dockerExec(openCodeArgs(agent.model)),
       stdin: prompt,
       logPath,
       deadline: limits.deadline,
@@ -142,7 +142,7 @@ class DockerWorker implements Worker {
       terminate: terminate("opencode"),
     });
     return {
-      outcome: openCodeOutcome(state, runResult),
+      outcome: openCodeOutcome(state, supervised),
       usage: { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0 },
       logPath,
       startedAt,
@@ -151,7 +151,7 @@ class DockerWorker implements Worker {
   }
 
   exec(command: string, options: { timeoutMs?: number } = {}): Promise<ExecResult> {
-    return run("docker", ["exec", this.container, "sh", "-c", command], options);
+    return exec("docker", ["exec", this.container, "sh", "-c", command], options);
   }
 
   commits(): Promise<string[]> {
@@ -159,7 +159,7 @@ class DockerWorker implements Worker {
   }
 
   async close(): Promise<CloseResult> {
-    await run("docker", ["rm", "-f", this.container]);
+    await exec("docker", ["rm", "-f", this.container]);
     await rm(this.secretsDir, { recursive: true, force: true });
     if (await isClean(this.worktreePath)) {
       await removeWorktree(this.spec.repoDir, this.worktreePath);
@@ -171,8 +171,8 @@ class DockerWorker implements Worker {
 
 const MOUNT_VISIBLE_TIMEOUT_MS = 15_000;
 
-async function runUntilVisible(
-  runArgs: string[],
+async function startUntilVisible(
+  containerArgs: string[],
   container: string,
   worktreePath: string,
   branch: string,
@@ -180,11 +180,11 @@ async function runUntilVisible(
   const deadline = Date.now() + MOUNT_VISIBLE_TIMEOUT_MS;
   let last = "";
   while (Date.now() < deadline) {
-    await runOk("docker", runArgs);
-    const head = await run("docker", ["exec", container, "git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD"]);
+    await execOk("docker", containerArgs);
+    const head = await exec("docker", ["exec", container, "git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD"]);
     if (head.exitCode === 0 && head.stdout.trim() === branch) return;
     last = head.stderr.trim() || head.stdout.trim();
-    await run("docker", ["rm", "-f", container]);
+    await exec("docker", ["rm", "-f", container]);
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   throw new Error(`The container does not see ${worktreePath} on ${branch}: ${last}`);

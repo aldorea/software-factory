@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toEnvFile } from "./docker-runner.ts";
 import { applyOpenCodeLine, initialOpenCodeState, openCodeArgs, openCodeOutcome } from "./opencode.ts";
-import { run, runOk } from "./sh.ts";
+import { exec, execOk } from "./sh.ts";
 import { supervise } from "./supervise.ts";
 import type { AttemptLimits, AttemptOutcome, AttemptResult } from "./types.ts";
 
@@ -39,11 +39,11 @@ export async function askVerifier(request: VerifierRequest): Promise<AttemptResu
     const envFile = join(secretsDir, "env");
     await writeFile(envFile, toEnvFile(request.env), { mode: 0o600 });
     try {
-      await runOk("docker", ["run", "-d", "--init", "--name", container, "--env-file", envFile, request.image]);
+      await execOk("docker", ["run", "-d", "--init", "--name", container, "--env-file", envFile, request.image]);
     } finally {
       await rm(envFile, { force: true });
     }
-    await runOk("docker", [
+    await execOk("docker", [
       "exec",
       container,
       "sh",
@@ -54,7 +54,7 @@ export async function askVerifier(request: VerifierRequest): Promise<AttemptResu
     ]);
 
     let state = initialOpenCodeState();
-    const runResult = await supervise({
+    const supervised = await supervise({
       command: "docker",
       args: [
         "exec",
@@ -74,22 +74,22 @@ export async function askVerifier(request: VerifierRequest): Promise<AttemptResu
         state = applyOpenCodeLine(state, line);
       },
       terminate: async () => {
-        await run("docker", ["exec", container, "pkill", "-KILL", "-f", "opencode"]);
+        await exec("docker", ["exec", container, "pkill", "-KILL", "-f", "opencode"]);
       },
     });
 
-    const listing = await runOk("docker", ["exec", container, "ls", "-A", WORKDIR]);
+    const listing = await execOk("docker", ["exec", container, "ls", "-A", WORKDIR]);
     const leftovers = listing.split("\n").filter((name) => name !== "" && name !== CONFIG_FILE);
-    const answered = openCodeOutcome(state, runResult);
+    const answered = openCodeOutcome(state, supervised);
     const outcome: AttemptOutcome =
       leftovers.length > 0
         ? {
             kind: "agent-error",
             message: `The verifier changed its directory despite the deny-all config: ${leftovers.join(", ")}`,
-            exitCode: runResult.exitCode,
+            exitCode: supervised.exitCode,
           }
         : answered.kind === "completed" && answered.summary.trim() === ""
-          ? { kind: "agent-error", message: "The verifier gave no answer", exitCode: runResult.exitCode }
+          ? { kind: "agent-error", message: "The verifier gave no answer", exitCode: supervised.exitCode }
           : answered;
 
     return {
@@ -100,7 +100,7 @@ export async function askVerifier(request: VerifierRequest): Promise<AttemptResu
       endedAt: new Date(),
     };
   } finally {
-    await run("docker", ["rm", "-f", container]);
+    await exec("docker", ["rm", "-f", container]);
     await rm(secretsDir, { recursive: true, force: true });
   }
 }

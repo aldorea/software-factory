@@ -1,28 +1,28 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { run, runOk } from "./sh.ts";
+import { exec, execOk } from "./sh.ts";
 
 const NO_CONFIG_WRITE = ["-c", "branch.autoSetupMerge=false", "-c", "push.autoSetupRemote=false"];
 
 export async function revParse(repoDir: string, ref: string): Promise<string> {
-  return (await runOk("git", ["-C", repoDir, "rev-parse", ref])).trim();
+  return (await execOk("git", ["-C", repoDir, "rev-parse", ref])).trim();
 }
 
 export async function addWorktree(repoDir: string, path: string, branch: string, baseSha: string): Promise<void> {
-  await runOk("git", [...NO_CONFIG_WRITE, "-C", repoDir, "worktree", "add", "-b", branch, path, baseSha]);
+  await execOk("git", [...NO_CONFIG_WRITE, "-C", repoDir, "worktree", "add", "-b", branch, path, baseSha]);
 }
 
 export async function addWorktreeForBranch(repoDir: string, path: string, branch: string): Promise<void> {
-  await runOk("git", [...NO_CONFIG_WRITE, "-C", repoDir, "worktree", "add", path, branch]);
+  await execOk("git", [...NO_CONFIG_WRITE, "-C", repoDir, "worktree", "add", path, branch]);
 }
 
 export async function branchExists(repoDir: string, branch: string): Promise<boolean> {
-  const result = await run("git", ["-C", repoDir, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+  const result = await exec("git", ["-C", repoDir, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
   return result.exitCode === 0;
 }
 
 export async function mergeBase(repoDir: string, a: string, b: string): Promise<string> {
-  return (await runOk("git", ["-C", repoDir, "merge-base", a, b])).trim();
+  return (await execOk("git", ["-C", repoDir, "merge-base", a, b])).trim();
 }
 
 export interface WorktreeEntry {
@@ -31,7 +31,7 @@ export interface WorktreeEntry {
 }
 
 export async function listWorktrees(repoDir: string): Promise<WorktreeEntry[]> {
-  const out = await runOk("git", ["-C", repoDir, "worktree", "list", "--porcelain"]);
+  const out = await execOk("git", ["-C", repoDir, "worktree", "list", "--porcelain"]);
   const entries: WorktreeEntry[] = [];
   for (const block of out.split("\n\n")) {
     const lines = block.split("\n");
@@ -44,15 +44,15 @@ export async function listWorktrees(repoDir: string): Promise<WorktreeEntry[]> {
 }
 
 export async function isClean(worktreePath: string): Promise<boolean> {
-  return (await runOk("git", ["-C", worktreePath, "status", "--porcelain"])).trim() === "";
+  return (await execOk("git", ["-C", worktreePath, "status", "--porcelain"])).trim() === "";
 }
 
 export async function removeWorktree(repoDir: string, path: string): Promise<void> {
-  await runOk("git", ["-C", repoDir, "worktree", "remove", path]);
+  await execOk("git", ["-C", repoDir, "worktree", "remove", path]);
 }
 
 export async function commitsSince(repoDir: string, baseSha: string, branch: string): Promise<string[]> {
-  const out = await runOk("git", ["-C", repoDir, "rev-list", "--reverse", `${baseSha}..${branch}`]);
+  const out = await execOk("git", ["-C", repoDir, "rev-list", "--reverse", `${baseSha}..${branch}`]);
   return out.split("\n").filter((line) => line !== "");
 }
 
