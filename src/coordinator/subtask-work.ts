@@ -171,11 +171,15 @@ async function gate(context: RunContext, request: GateRequest): Promise<GateDeci
 function extendScope(context: RunContext, subtask: Subtask, requested: string[]): ScopeExtensionDecision {
   const { plan, config } = context.prepared;
   const scope = entryOf(context.scopes, subtask.id, "scope");
+  const isBase = subtask.id === plan.base?.id;
   const decision = decideScopeExtension({
     requested,
     scope,
     waveScopes: waveScopes(plan, subtask.id, context.scopes),
-    protectedPaths: protectedFor(subtask.id === plan.base?.id, config.protectedPaths),
+    protectedPaths: protectedFor(isBase, config.protectedPaths),
+    existingTestPaths: context.existingTestPaths,
+    authorizedTestChanges: subtask.testChanges,
+    requestCheckPaths: isBase ? [] : context.requestChecks,
   });
   if (decision.kind === "extend") {
     scope.push(...decision.paths);

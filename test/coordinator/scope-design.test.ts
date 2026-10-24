@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
@@ -148,6 +148,24 @@ describe("factory run: scope extension requests", () => {
       scopeExtensions: [],
     });
     expect(target.github.pullRequests[0]?.body).toContain("It needs package.json, which is a protected path.");
+  });
+
+  it("should block at once a request for a test that existed before the run, instead of extending the scope and failing at the gate", async () => {
+    const target = await targetRepo();
+    await git(target.repoDir, "switch", "-q", BRANCH);
+    await writeFile(join(target.repoDir, "old.test.ts"), "export const old = 1;\n");
+    await git(target.repoDir, "add", ".");
+    await git(target.repoDir, "commit", "-q", "-m", "Existing test");
+    await git(target.repoDir, "switch", "-q", "main");
+    const { run, runner } = harness(target, () => ({
+      outcome: { kind: "completed", summary: `${SCOPE_REQUEST_MARKER} old.test.ts` },
+    }));
+
+    const report = await run();
+
+    expect(runner.workers[0]?.attempts).toHaveLength(1);
+    expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "scope", scopeExtensions: [] });
+    expect(report.log.subtasks[0]?.reason).toContain("a test that existed before the run");
   });
 
   it("should treat the .factory folder as protected, because a worker cannot change the limits of its own run", async () => {

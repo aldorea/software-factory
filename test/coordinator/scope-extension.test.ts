@@ -7,9 +7,46 @@ function input(overrides: Partial<ScopeExtensionInput> = {}): ScopeExtensionInpu
     scope: ["src/"],
     waveScopes: [],
     protectedPaths: ["package.json", ".factory"],
+    existingTestPaths: new Set(),
+    authorizedTestChanges: [],
+    requestCheckPaths: [],
     ...overrides,
   };
 }
+
+describe("decideScopeExtension of fixed tests", () => {
+  it("should block a test file that existed before the run, because the gate would reject its change on every attempt", () => {
+    const decision = decideScopeExtension(input({ requested: ["tests/old.test.ts"], existingTestPaths: new Set(["tests/old.test.ts"]) }));
+
+    expect(decision).toEqual({
+      kind: "block",
+      reason: "It needs tests/old.test.ts, a test that existed before the run and that the spec does not authorize it to change.",
+    });
+  });
+
+  it("should extend the scope with a test that existed before the run when the spec authorizes its change", () => {
+    const decision = decideScopeExtension(
+      input({
+        requested: ["tests/old.test.ts"],
+        existingTestPaths: new Set(["tests/old.test.ts"]),
+        authorizedTestChanges: ["tests/old.test.ts"],
+      }),
+    );
+
+    expect(decision).toEqual({ kind: "extend", paths: ["tests/old.test.ts"] });
+  });
+
+  it("should block a request check, because only the base subtask writes it", () => {
+    const decision = decideScopeExtension(
+      input({ requested: ["requests/a1.request.test.ts"], requestCheckPaths: ["requests/a1.request.test.ts"] }),
+    );
+
+    expect(decision).toEqual({
+      kind: "block",
+      reason: "It needs requests/a1.request.test.ts, a request check that only the base subtask writes.",
+    });
+  });
+});
 
 describe("decideScopeExtension", () => {
   it("should extend the scope with a free file that no protected path covers", () => {

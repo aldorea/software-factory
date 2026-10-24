@@ -10,6 +10,9 @@ export interface ScopeExtensionInput {
   scope: string[];
   waveScopes: WaveScope[];
   protectedPaths: string[];
+  existingTestPaths: ReadonlySet<string>;
+  authorizedTestChanges: string[];
+  requestCheckPaths: string[];
 }
 
 export type ScopeExtensionDecision =
@@ -29,6 +32,14 @@ export function decideScopeExtension(input: ScopeExtensionInput): ScopeExtension
     }
     if (input.protectedPaths.some((entry) => overlaps(entry, path))) {
       refusals.push(`It needs ${path}, which is a protected path.`);
+      continue;
+    }
+    if (input.requestCheckPaths.some((entry) => covers(entry, path))) {
+      refusals.push(`It needs ${path}, a request check that only the base subtask writes.`);
+      continue;
+    }
+    if (input.existingTestPaths.has(path) && !input.authorizedTestChanges.some((entry) => covers(entry, path))) {
+      refusals.push(`It needs ${path}, a test that existed before the run and that the spec does not authorize it to change.`);
       continue;
     }
     const owner = input.waveScopes.find((other) => other.scope.some((entry) => overlaps(entry, path)));
