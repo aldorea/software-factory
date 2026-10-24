@@ -56,7 +56,9 @@ function resultLine(log: RunLog): string {
   const failed: string[] = [];
   const blocked = log.subtasks.filter((subtask) => subtask.state !== "merged").map((subtask) => subtask.id);
   if (blocked.length > 0) failed.push(`subtasks not merged: ${blocked.join(", ")}`);
-  if (log.verification && !log.verification.passed) {
+  if (log.verification?.environment !== undefined) {
+    failed.push(`the integrated verification failed: ${log.verification.environment}`);
+  } else if (log.verification && !log.verification.passed) {
     const failing = log.verification.criteria.filter((criterion) => !criterion.passed).map((criterion) => criterion.id);
     failed.push(
       `the integrated verification failed${failing.length > 0 ? ` (criteria not passing: ${failing.join(", ")})` : ""}`,
@@ -91,7 +93,10 @@ function scopeExtensionSections(log: RunLog): string[] {
 
 function verificationSection(log: RunLog): string {
   if (!log.verification) return "## Integrated verification\n\nNot run.";
-  const lines = log.verification.checks.map(checkLine);
+  const lines = [
+    ...log.verification.checks.map(checkLine),
+    ...(log.verification.environment !== undefined ? [`- [ ] The app: ${log.verification.environment}`] : []),
+  ];
   return `## Integrated verification on \`${log.verification.sha.slice(0, 12)}\`\n\n${lines.join("\n")}`;
 }
 

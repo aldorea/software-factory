@@ -28,7 +28,11 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
       delete log.verification;
       break;
     }
-    const { checks, criteria, human } = verified;
+    const { checks, criteria, human, appProblem } = verified;
+    if (appProblem !== undefined) {
+      log.verification = { sha, passed: false, checks, criteria, humanCriteria: human, environment: appProblem };
+      break;
+    }
     const passed = verificationPassed(checks, criteria);
     log.verification = { sha, passed, checks, criteria, humanCriteria: human };
     if (passed || context.conflicted) break;

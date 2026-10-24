@@ -4,11 +4,15 @@ import type { AppStart, EvidenceCommands } from "../config/config.ts";
 import type { Worker } from "../workers/types.ts";
 import { evidenceCommand, type EvidencePlan } from "./evidence.ts";
 import type { CriterionRecord, HumanCriterionRecord } from "./run-log.ts";
+import { formatDuration } from "./stop-rules.ts";
 
 export interface EvidenceResult {
   criteria: CriterionRecord[];
   human: HumanCriterionRecord[];
+  appProblem?: string;
 }
+
+export const READY_POLL_MS = 250;
 
 export interface EvidenceContext {
   app: AppStart | undefined;
@@ -18,7 +22,8 @@ export interface EvidenceContext {
 
 export async function collectEvidence(worker: Worker, plan: EvidencePlan, context: EvidenceContext): Promise<EvidenceResult> {
   if (plan.criteria.length === 0 && plan.human.length === 0) return { criteria: [], human: [] };
-  if (context.app) await startApp(worker, context.app);
+  const appProblem = context.app ? await startApp(worker, context.app) : null;
+  if (appProblem !== null) return { criteria: [], human: [], appProblem };
   const criteria: CriterionRecord[] = [];
   for (const item of plan.criteria) {
     const result = await worker.exec(item.command);
@@ -37,9 +42,25 @@ export async function collectEvidence(worker: Worker, plan: EvidencePlan, contex
   return { criteria, human };
 }
 
-async function startApp(worker: Worker, app: AppStart): Promise<void> {
-  const result = await worker.exec(`(${app.start}) >/dev/null 2>&1 &`);
-  if (result.exitCode !== 0) throw new Error(`the app did not start: ${app.start} exited with ${result.exitCode}`);
+async function startApp(worker: Worker, app: AppStart): Promise<string | null> {
+  const started = await worker.exec(`(${app.start}) >/dev/null 2>&1 &`);
+  if (started.exitCode !== 0) return `the app did not start: ${app.start} exited with ${started.exitCode}`;
+  if (app.ready === undefined) return null;
+  const polls = Math.max(1, Math.ceil(app.readyTimeoutMs / READY_POLL_MS));
+  for (let poll = 1; poll <= polls; poll += 1) {
+    if (await isReady(worker, app.ready, app.readyTimeoutMs)) return null;
+    if (poll < polls) await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS));
+  }
+  return `the app did not become ready: ${app.ready} kept failing for ${formatDuration(app.readyTimeoutMs)}`;
+}
+
+async function isReady(worker: Worker, ready: string, readyTimeoutMs: number): Promise<boolean> {
+  try {
+    return (await worker.exec(ready, { timeoutMs: readyTimeoutMs })).exitCode === 0;
+  } catch (error) {
+    if ((error as { killed?: boolean }).killed === true) return false;
+    throw error;
+  }
 }
 
 async function captureAttachments(worker: Worker, id: string, context: EvidenceContext): Promise<string[]> {

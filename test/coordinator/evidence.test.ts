@@ -60,6 +60,7 @@ interface ConfigOptions {
   playwright?: string | null;
   request?: string | null;
   app?: string;
+  ready?: string;
 }
 
 function configSource(options: ConfigOptions = {}): string {
@@ -74,7 +75,7 @@ export default {
     ${request === null ? "" : `request: ${JSON.stringify(request)},`}
     attachments: "test-results",
   },
-  ${options.app === undefined ? "" : `app: { start: ${JSON.stringify(options.app)} },`}
+  ${options.app === undefined ? "" : `app: { start: ${JSON.stringify(options.app)}${options.ready === undefined ? "" : `, ready: ${JSON.stringify(options.ready)}, readyTimeoutMs: 1500`} },`}
   environment: () => ({}),
   protectedPaths: ["package.json"],
   roles: {
@@ -224,6 +225,59 @@ describe("criterion evidence at the integrated verification", () => {
 
     expect(report.result).toBe("ready");
     expect(report.log.verification?.criteria.find((criterion) => criterion.id === "A2")?.passed).toBe(true);
+  });
+});
+
+describe("the app of the config before the evidence", () => {
+  it("should poll the readiness command of the app before it runs the evidence, because a started app may not serve yet", async () => {
+    const marker = '"$PWD.app-ready"';
+    const target = await targetRepo(
+      configSource({ app: `sleep 0.4; touch ${marker}`, ready: `test -f ${marker}`, request: `test -f ${marker} # {{id}}` }),
+    );
+    const { run } = harness(target, writes());
+
+    const report = await run();
+
+    expect(report.log.verification?.criteria.find((criterion) => criterion.id === "A2")?.passed).toBe(true);
+    expect(report.result).toBe("ready");
+  });
+
+  it("should block the subtask by the environment, as data and not as a thrown error, when the app does not become ready at the gate", async () => {
+    const target = await targetRepo(configSource({ app: "true", ready: "false" }));
+    const { run, runner } = harness(target, writes());
+
+    const report = await run();
+
+    expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "environment", block: { type: "environment" } });
+    expect(report.log.subtasks[0]?.reason).toContain("the app did not become ready: false kept failing");
+    expect(runner.workers.filter((worker) => worker.spec.id.endsWith("-S1"))[0]?.attempts).toHaveLength(1);
+    expect(report.log.friction.blocks.environment).toBe(1);
+    expect(report.result).toBe("draft");
+  });
+
+  it("should block the subtask by the environment when the start command of the app cannot even be launched", async () => {
+    const target = await targetRepo(configSource({ app: "fi" }));
+    const { run } = harness(target, writes());
+
+    const report = await run();
+
+    expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "environment" });
+    expect(report.log.subtasks[0]?.reason).toContain("the app did not start: fi exited with 2");
+  });
+
+  it("should record a failed integrated verification with the reason when the app does not become ready on the integration branch", async () => {
+    const target = await targetRepo(
+      configSource({ app: "true", ready: "git rev-parse --abbrev-ref HEAD | grep -qv verification" }),
+    );
+    const { run } = harness(target, writes());
+
+    const report = await run();
+
+    expect(report.log.subtasks[0]?.state).toBe("merged");
+    expect(report.log.verification).toMatchObject({ passed: false, criteria: [] });
+    expect(report.log.verification?.environment).toContain("the app did not become ready");
+    expect(report.result).toBe("draft");
+    expect(target.github.pullRequests[0]?.body).toContain("the app did not become ready");
   });
 });
 

@@ -17,7 +17,7 @@ import { SUBTASK_TRAILER } from "./run-history.ts";
 import type { SubtaskRecord } from "./run-log.ts";
 import { decideScopeExtension, type ScopeExtensionDecision } from "./scope-extension.ts";
 import { agentTokens } from "./stop-rules.ts";
-import { attemptSubtask, type LoopResult, type PlanLimitHit } from "./subtask-loop.ts";
+import { attemptSubtask, type EnvironmentHit, type LoopResult, type PlanLimitHit } from "./subtask-loop.ts";
 import {
   applyMerge,
   applySettlement,
@@ -119,7 +119,7 @@ interface GateRequest {
   followUp: boolean;
 }
 
-async function gate(context: RunContext, request: GateRequest): Promise<GateDecision | PlanLimitHit | null> {
+async function gate(context: RunContext, request: GateRequest): Promise<GateDecision | PlanLimitHit | EnvironmentHit | null> {
   const { repoDir } = context.request;
   const { branch, spec, config, issue, plan, verifier } = context.prepared;
   const { subtask, record, label, attempt } = request;
@@ -132,6 +132,10 @@ async function gate(context: RunContext, request: GateRequest): Promise<GateDeci
     subtaskId: record.id,
   });
   if (gated === null) return null;
+  if (gated.appProblem !== undefined) {
+    record.gate = { sha, accepted: false, reasons: [gated.appProblem], checks: gated.checks, criteria: [], verifier: [] };
+    return { kind: "environment", reason: `The app of the config failed at the gate: ${gated.appProblem}.` };
+  }
   const { checks, criteria } = gated;
   const checked = gateDecision({
     changes: await changedPaths(repoDir, branch, sha),
@@ -191,7 +195,7 @@ interface WorkerRequest {
   slot: number;
   workerId: string;
   followUp?: string;
-  gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | null>;
+  gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | EnvironmentHit | null>;
 }
 
 async function workInWorker(context: RunContext, request: WorkerRequest): Promise<Worked> {

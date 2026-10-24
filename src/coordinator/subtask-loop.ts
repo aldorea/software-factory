@@ -22,7 +22,7 @@ export interface SubtaskLoop {
   runStartedAt: Date;
   runTokens: () => number;
   attempt: (prompt: string, limits: AttemptLimits) => Promise<AttemptResult>;
-  gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | null>;
+  gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | EnvironmentHit | null>;
   extendScope: (requested: string[]) => ScopeExtensionDecision;
   save: () => Promise<void>;
   paused: () => boolean;
@@ -35,11 +35,17 @@ export interface PlanLimitHit {
   resetsAt?: Date;
 }
 
+export interface EnvironmentHit {
+  kind: "environment";
+  reason: string;
+}
+
 export type LoopResult =
   | { kind: "accepted" }
   | { kind: "blocked"; stop: StopReason; lastFailure?: string }
   | { kind: "reported"; type: "scope" | "design-question"; reason: string }
   | { kind: "paused"; limit?: PlanLimitHit }
+  | { kind: "environment"; reason: string }
   | { kind: "interrupted" };
 
 export async function attemptSubtask(loop: SubtaskLoop): Promise<LoopResult> {
@@ -115,7 +121,10 @@ async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: numb
       await loop.save();
       const decision = await loop.gate(number);
       if (decision === null) return { kind: "interrupted" };
-      if ("kind" in decision) return pause(loop, decision);
+      if ("kind" in decision) {
+        if (decision.kind === "environment") return { kind: "environment", reason: decision.reason };
+        return pause(loop, decision);
+      }
       if (decision.accepted) return { kind: "accepted" };
       if (decision.rejections.some((rejection) => rejection.kind !== "verifier")) record.gateRejections += 1;
       if (decision.rejections.some((rejection) => rejection.kind === "verifier")) record.verifierRejections += 1;

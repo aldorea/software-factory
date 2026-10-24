@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_LIMITS } from "../../src/config/config.ts";
+import { DEFAULT_LIMITS, DEFAULT_READY_TIMEOUT_MS } from "../../src/config/config.ts";
 import { loadConfig } from "../../src/config/load.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
@@ -42,7 +42,7 @@ describe("loadConfig", () => {
 
     expect(config.image).toBe("askwell-worker:dev");
     expect(config.checks).toEqual([{ name: "typecheck", command: "pnpm typecheck" }]);
-    expect(config.app).toEqual({ start: "pnpm dev" });
+    expect(config.app).toEqual({ start: "pnpm dev", readyTimeoutMs: DEFAULT_READY_TIMEOUT_MS });
     expect(config.protectedPaths).toEqual(["package.json", "pnpm-lock.yaml"]);
     expect(config.roles.workers).toEqual({ agent: "claude-code", model: "sonnet" });
     expect(config.environment({ purpose: "worker", subtask: "S1", slot: 1 })).toEqual({ E2E_PORT: "4001" });
@@ -124,6 +124,32 @@ describe("loadConfig", () => {
 
     expect(error).toContain("- evidence.request must be a command with the {{id}} placeholder for the criterion ID");
     expect(error).toContain("- evidence.attachments must be a folder inside the repo, as a relative path");
+  });
+
+  it("should load the readiness command of the app and default its timeout", async () => {
+    const withReady = VALID.replace('app: { start: "pnpm dev" }', 'app: { start: "pnpm dev", ready: "curl -sf localhost:3000" }');
+
+    expect((await loadConfig(await repoWithConfig(withReady))).app).toEqual({
+      start: "pnpm dev",
+      ready: "curl -sf localhost:3000",
+      readyTimeoutMs: DEFAULT_READY_TIMEOUT_MS,
+    });
+    expect((await loadConfig(await repoWithConfig(VALID))).app).toEqual({ start: "pnpm dev", readyTimeoutMs: DEFAULT_READY_TIMEOUT_MS });
+  });
+
+  it("should refuse an empty readiness command, a timeout that is not positive and an unknown app setting", async () => {
+    const dir = await repoWithConfig(
+      VALID.replace('app: { start: "pnpm dev" }', 'app: { start: "pnpm dev", ready: " ", readyTimeoutMs: 0, port: 3000 }'),
+    );
+
+    const error = await loadConfig(dir).then(
+      () => "",
+      (caught: Error) => caught.message,
+    );
+
+    expect(error).toContain("- app.ready must be a non-empty command that exits zero once the app serves");
+    expect(error).toContain("- app.readyTimeoutMs must be a positive number");
+    expect(error).toContain("- app.port is not a known setting");
   });
 
   it("should load the config again after it changes in the same process", async () => {

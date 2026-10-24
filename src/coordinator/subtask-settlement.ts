@@ -23,6 +23,8 @@ export function settleLoop(loop: LoopResult | null): LoopSettlement {
       return { kind: "merge" };
     case "interrupted":
       return { kind: "interrupted", reason: INTERRUPTED_IN_GATE };
+    case "environment":
+      return { kind: "blocked", block: { type: "environment", reason: loop.reason } };
     case "reported":
       return { kind: "blocked", block: { type: loop.type, reason: loop.reason } };
     case "paused":
@@ -77,7 +79,7 @@ export function blockSubtask(record: SubtaskRecord, block: BlockRecord): void {
 }
 
 export function blockTypeOf(type: BlockRecord["type"]): BlockType {
-  if (type === "scope" || type === "design-question" || type === "patience") return type;
+  if (type === "scope" || type === "design-question" || type === "patience" || type === "environment") return type;
   return "limit";
 }
 
