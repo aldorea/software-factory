@@ -26,13 +26,13 @@ async function verifierContainers(): Promise<string> {
 }
 
 describe.skipIf(!process.env.FACTORY_DOCKER_TESTS || !OPENCODE_KEY)("Verifier in Docker", { timeout: 180_000 }, () => {
-  it("answers with text and removes its container", async () => {
+  it("should answer with text and remove its container", async () => {
     const result = await ask("Reply with the single word OK.");
     expect(result.outcome, result.logPath).toEqual({ kind: "completed", summary: "OK" });
     expect(await verifierContainers()).toBe("");
   });
 
-  it("cannot use a tool, and an attempt is not an answer", async () => {
+  it("should not use a tool, and should not count an attempt as an answer", async () => {
     const result = await ask("Use your shell tool to run: touch probe.txt . Then reply DONE.");
     expect(result.outcome.kind, result.logPath).not.toBe("completed");
     expect(result.outcome).not.toMatchObject({ message: expect.stringMatching(/changed its directory|Agent not found/) });

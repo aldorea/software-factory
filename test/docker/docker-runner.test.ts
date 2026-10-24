@@ -49,7 +49,7 @@ afterEach(async () => {
 describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeout: 360_000 }, () => {
   const runner = new DockerWorkerRunner();
 
-  it("runs git inside the container on the worker branch, as the host user", async () => {
+  it("should run git inside the container on the worker branch, as the host user", async () => {
     const worker = await runner.start(await spec("git-inside"));
     open.push(worker);
 
@@ -59,7 +59,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect(uid.stdout.trim()).toBe(String(process.getuid?.()));
   });
 
-  it("passes only the given environment", async () => {
+  it("should pass only the given environment", async () => {
     const worker = await runner.start(await spec("env-only"));
     open.push(worker);
 
@@ -70,7 +70,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect(ssh.exitCode).not.toBe(0);
   });
 
-  it("collects the commits made in the container and removes a clean worktree", async () => {
+  it("should collect the commits made in the container and remove a clean worktree", async () => {
     const s = await spec("commits");
     const worker = await runner.start(s);
 
@@ -86,7 +86,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect(onHost).toBe("hi\n");
   });
 
-  it("keeps a dirty worktree on close", async () => {
+  it("should keep a dirty worktree on close", async () => {
     const worker = await runner.start(await spec("dirty"));
     await worker.exec("echo wip > wip.txt");
 
@@ -95,7 +95,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect(await readFile(join(worker.worktreePath, "wip.txt"), "utf8")).toBe("wip\n");
   });
 
-  it("reports an agent error when Claude Code has no credentials", async () => {
+  it("should report an agent error when Claude Code has no credentials", async () => {
     const worker = await runner.start(await spec("claude-no-auth"));
     open.push(worker);
 
@@ -107,7 +107,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect(existsSync(attempt.logPath)).toBe(true);
   });
 
-  it("removes a leftover container with the same name", async () => {
+  it("should remove a leftover container with the same name", async () => {
     await execOk("docker", ["run", "-d", "--name", "factory-leftover", IMAGE]);
     const worker = await runner.start(await spec("leftover"));
     open.push(worker);
@@ -115,7 +115,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect((await worker.exec("true")).exitCode).toBe(0);
   });
 
-  it("reuses the worktree that a dirty close kept", async () => {
+  it("should reuse the worktree that a dirty close kept", async () => {
     const s = await spec("reuse-dirty");
     const first = await runner.start(s);
     await first.exec("echo wip > wip.txt");
@@ -127,7 +127,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect((await second.exec("cat wip.txt")).stdout).toBe("wip\n");
   });
 
-  it("resumes a branch with no worktree and keeps counting its commits from the base", async () => {
+  it("should resume a branch with no worktree and keep counting its commits from the base", async () => {
     const s = await spec("resume-branch");
     const first = await runner.start(s);
     await first.exec("echo one > one.txt && git add one.txt && git commit -q -m one");
@@ -141,7 +141,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect(await second.commits()).toHaveLength(2);
   });
 
-  it("refuses a directory in the worktree path that git does not know, and leaves it as it is", async () => {
+  it("should refuse a directory in the worktree path that git does not know, and leave it as it is", async () => {
     const s = await spec("orphan");
     const orphan = join(s.repoDir, ".factory", "worktrees", "orphan");
     await execOk("mkdir", ["-p", orphan]);
@@ -151,7 +151,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect(await readFile(join(orphan, "mine.txt"), "utf8")).toBe("keep\n");
   });
 
-  it("applies the cpu and memory limits", async () => {
+  it("should apply the cpu and memory limits", async () => {
     const worker = await runner.start(await spec("resources", { cpus: "1", memory: "512m" }));
     open.push(worker);
 
@@ -164,7 +164,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     expect(inspect.trim()).toBe(`${1e9} ${512 * 1024 * 1024}`);
   });
 
-  it.skipIf(!CLAUDE_TOKEN)("runs two Claude Code workers at once with one subscription token", async () => {
+  it.skipIf(!CLAUDE_TOKEN)("should run two Claude Code workers at once with one subscription token", async () => {
     const token = { CLAUDE_CODE_OAUTH_TOKEN: CLAUDE_TOKEN ?? "" };
     const workers = await Promise.all(
       ["claude-a", "claude-b"].map(async (id) =>
@@ -191,7 +191,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     }
   });
 
-  it.skipIf(!OPENCODE_KEY)("runs OpenCode Go in a container with the key in its environment", async () => {
+  it.skipIf(!OPENCODE_KEY)("should run OpenCode Go in a container with the key in its environment", async () => {
     const worker = await runner.start(
       await spec("opencode-go", { env: { ...identity, OPENCODE_API_KEY: OPENCODE_KEY ?? "" } }),
     );

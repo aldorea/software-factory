@@ -38,24 +38,24 @@ function isAlive(pid: number): boolean {
 }
 
 describe("supervise", () => {
-  it("collects lines and the exit code", async () => {
+  it("should collect lines and the exit code", async () => {
     const { result, lines, log } = await superviseNode(`console.log("a"); console.log("b"); process.exit(3)`);
     expect(result).toMatchObject({ stopReason: "exited", exitCode: 3 });
     expect(lines).toEqual(["a", "b"]);
     expect(log).toBe("a\nb\n");
   });
 
-  it("stops a silent process at the idle timeout", async () => {
+  it("should stop a silent process at the idle timeout", async () => {
     const { result } = await superviseNode(`setInterval(() => {}, 1000)`, { idleMs: 300 });
     expect(result.stopReason).toBe("idle-timeout");
   });
 
-  it("stops a busy process at the deadline", async () => {
+  it("should stop a busy process at the deadline", async () => {
     const { result } = await superviseNode(`setInterval(() => console.log("tick"), 50)`, { deadlineMs: 400, idleMs: 5000 });
     expect(result.stopReason).toBe("deadline");
   });
 
-  it("stops a process that hangs after its final line", async () => {
+  it("should stop a process that hangs after its final line", async () => {
     const { result, lines } = await superviseNode(`console.log("done"); setInterval(() => {}, 1000)`, {
       finalLine: "done",
     });
@@ -63,7 +63,7 @@ describe("supervise", () => {
     expect(lines).toEqual(["done"]);
   });
 
-  it("writes a large stdin and closes it", async () => {
+  it("should write a large stdin and close it", async () => {
     const prompt = "x".repeat(300 * 1024);
     const { result, lines } = await superviseNode(
       `let n = 0; process.stdin.on("data", (c) => (n += c.length)); process.stdin.on("end", () => console.log(n))`,
@@ -73,7 +73,7 @@ describe("supervise", () => {
     expect(lines).toEqual([String(prompt.length)]);
   });
 
-  it("closes stdin when there is no input, so a reader does not hang", async () => {
+  it("should close stdin when there is no input, so a reader does not hang", async () => {
     const { result, lines } = await superviseNode(
       `process.stdin.resume(); process.stdin.on("end", () => console.log("eof"))`,
       { idleMs: 2000 },
@@ -82,7 +82,7 @@ describe("supervise", () => {
     expect(lines).toEqual(["eof"]);
   });
 
-  it("runs the process in the given directory, with PWD set to it", async () => {
+  it("should run the process in the given directory, with PWD set to it", async () => {
     const dir = await realpath(await mkdtemp(join(tmpdir(), "supervise-cwd-")));
     const lines: string[] = [];
     await supervise({
@@ -97,7 +97,7 @@ describe("supervise", () => {
     expect(lines).toEqual([dir, dir]);
   });
 
-  it("stops at the deadline a process whose child keeps the output open", async () => {
+  it("should stop at the deadline a process whose child keeps the output open", async () => {
     const started = Date.now();
     const { result, lines } = await superviseNode(GRANDCHILD + `setInterval(() => {}, 1000)`, { deadlineMs: 400, idleMs: 5000 });
     expect(result.stopReason).toBe("deadline");
@@ -105,7 +105,7 @@ describe("supervise", () => {
     expect(isAlive(Number(lines[0]))).toBe(false);
   });
 
-  it("returns when the process exits, even if its child keeps the output open", async () => {
+  it("should return when the process exits, even if its child keeps the output open", async () => {
     const started = Date.now();
     const { result, lines } = await superviseNode(GRANDCHILD + `process.exit(0)`, { idleMs: 5000 });
     expect(result).toMatchObject({ stopReason: "exited", exitCode: 0 });
@@ -113,7 +113,7 @@ describe("supervise", () => {
     expect(isAlive(Number(lines[0]))).toBe(false);
   });
 
-  it("keeps the tail of stderr", async () => {
+  it("should keep the tail of stderr", async () => {
     const { result } = await superviseNode(`console.error("broken"); process.exit(1)`);
     expect(result.stderrTail).toContain("broken");
   });

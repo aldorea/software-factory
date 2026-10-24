@@ -23,7 +23,7 @@ async function repo(): Promise<string> {
 }
 
 describe("git worktrees", () => {
-  it("does not write upstream config when it adds a worktree, even if the repo asks for it", async () => {
+  it("should not write upstream config when it adds a worktree, even if the repo asks for it", async () => {
     const dir = await repo();
     await execOk("git", ["-C", dir, "config", "branch.autoSetupMerge", "always"]);
 
@@ -33,7 +33,7 @@ describe("git worktrees", () => {
     expect(upstream.exitCode).not.toBe(0);
   });
 
-  it("lists worktrees with their branches", async () => {
+  it("should list worktrees with their branches", async () => {
     const dir = await repo();
     await addWorktree(dir, join(dir, "wt"), "feature", await revParse(dir, "main"));
 
@@ -43,7 +43,7 @@ describe("git worktrees", () => {
     ]);
   });
 
-  it("adds a worktree for an existing branch and finds the base of its commits", async () => {
+  it("should add a worktree for an existing branch and find the base of its commits", async () => {
     const dir = await repo();
     const base = await revParse(dir, "main");
     await addWorktree(dir, join(dir, "wt"), "feature", base);
