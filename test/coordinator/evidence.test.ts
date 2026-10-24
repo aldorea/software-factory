@@ -7,6 +7,7 @@ import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
+import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner, type AttemptScript } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
@@ -125,7 +126,7 @@ function harness(target: Target, script: AttemptScript) {
   const run = () =>
     runIssue(
       { repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": "token" } },
-      { runner, github: target.github, notifier: new FakeNotifier(), clock },
+      { runner, verifier: new FakeVerifier(), github: target.github, notifier: new FakeNotifier(), clock },
     );
   return { runner, run };
 }
@@ -135,6 +136,7 @@ function writes(results: { A1?: string; A2?: string; greeting?: string } = {}): 
     files: {
       "src/greeting.txt": `${results.greeting ?? "hello"}\n`,
       "e2e/A1.result": `${results.A1 ?? "pass"}\n`,
+      "e2e/greeting.spec.ts": 'test("A1 the greeting page says hello", async () => {});\n',
       "e2e/A3.png": "png-of-the-greeting\n",
       "requests/A2.result": `${results.A2 ?? "pass"}\n`,
     },

@@ -70,7 +70,8 @@ export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
       const decision = await loop.gate(number);
       if (decision === null) return { kind: "interrupted" };
       if (decision.accepted) return { kind: "accepted" };
-      record.gateRejections += 1;
+      if (decision.rejections.some((rejection) => rejection.kind !== "verifier")) record.gateRejections += 1;
+      if (decision.rejections.some((rejection) => rejection.kind === "verifier")) record.verifierRejections += 1;
       record.state = "working";
       failure = gateFailure(decision);
     }

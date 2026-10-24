@@ -8,6 +8,7 @@ import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
+import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner, type AttemptCall, type ScriptedAttempt } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
@@ -175,7 +176,7 @@ function observed(
     return behaviour(id);
   });
   const clock = new FakeClock("2026-10-24T08:00:00.000Z");
-  const ports = { runner, github: target.github, notifier: new FakeNotifier(), clock };
+  const ports = { runner, verifier: new FakeVerifier(), github: target.github, notifier: new FakeNotifier(), clock };
   const run = () => runIssue({ repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": TOKEN } }, ports);
   return { observer, runner, run, clock };
 }

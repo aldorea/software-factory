@@ -6,6 +6,7 @@ import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
+import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner, type AttemptScript, type WorkerFaults } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
@@ -115,8 +116,9 @@ export function harness(target: Target, script: AttemptScript, faults: WorkerFau
     issue: ISSUE,
     credentials: { "claude-code": TOKEN },
   };
-  const run = () => runIssue(request, { runner, github: target.github, notifier, clock });
-  return { runner, notifier, clock, run };
+  const verifier = new FakeVerifier();
+  const run = () => runIssue(request, { runner, verifier, github: target.github, notifier, clock });
+  return { runner, verifier, notifier, clock, run };
 }
 
 export const writesHello: AttemptScript = () => ({ files: { "src/greeting.txt": "hello\n" }, commit: "Write the greeting" });
