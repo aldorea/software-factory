@@ -161,6 +161,11 @@ export interface WorkerLayerFailureRecord {
   at: string;
 }
 
+export interface PauseRecord {
+  agent: AgentKind;
+  at: string;
+}
+
 export interface RunLog {
   version: typeof RUN_LOG_VERSION;
   runId: string;
@@ -171,6 +176,8 @@ export interface RunLog {
   result: RunResult;
   pauseReason?: string;
   resetsAt?: string;
+  pauses?: PauseRecord[];
+  maxParallel?: number;
   agents: AgentsRecord;
   criteria: CriteriaRecord;
   cost: CostRecord;

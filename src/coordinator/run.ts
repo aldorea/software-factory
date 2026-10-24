@@ -30,7 +30,8 @@ import { gateDecision, protectedFor, requestCheckPaths, type GateDecision } from
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
 import { resumedLog } from "./resume.ts";
-import { latestRunLog, mergedSubtasks, runBaseSha, SUBTASK_TRAILER } from "./run-history.ts";
+import { adjustMaxParallel, type ParallelismBounds } from "./parallelism.ts";
+import { latestRunLog, mergedSubtasks, readRunLogs, runBaseSha, SUBTASK_TRAILER } from "./run-history.ts";
 import { dependencyProblem, schedule, type Schedule } from "./schedule.ts";
 import { decideScopeExtension, type ScopeExtensionDecision } from "./scope-extension.ts";
 import { Lock, runSchedule } from "./slots.ts";
@@ -77,7 +78,7 @@ interface Prepared {
   branch: string;
   spec: Spec;
   plan: Schedule;
-  maxParallel: number;
+  parallelism: ParallelismBounds;
   humanCriteria: string[];
   workers: RoleChoice;
   credential: string;
@@ -85,7 +86,7 @@ interface Prepared {
 
 export async function runIssue(request: RunRequest, ports: RunPorts): Promise<RunReport> {
   const prepared = await prepare(request, ports);
-  const { config, issue, branch, spec, plan, maxParallel, workers, humanCriteria } = prepared;
+  const { config, issue, branch, spec, plan, parallelism, workers, humanCriteria } = prepared;
   const subtasks = plan.base ? [plan.base, ...spec.subtasks] : spec.subtasks;
   const now = ports.clock.now();
   const logsDir = join(request.repoDir, ".factory", "logs");
@@ -120,6 +121,8 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     merged: await mergedSubtasks(request.repoDir, branch),
     now,
   });
+  log.maxParallel = adjustMaxParallel((await readRunLogs(logsDir)).logs, workers.agent, parallelism);
+  const maxParallel = log.maxParallel;
   const id = log.runId;
   const startedAt = new Date(Date.parse(log.startedAt) + log.cost.pausedMs);
   const runDir = join(logsDir, id);
@@ -235,6 +238,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   const pauseRun = (limit: PlanLimitHit) => {
     if (log.pauseReason !== undefined) return;
     log.pauseReason = `the plan limit of ${limit.agent} was reached: ${limit.message}`;
+    log.pauses = [...(log.pauses ?? []), { agent: limit.agent, at: ports.clock.now().toISOString() }];
     if (limit.resetsAt !== undefined) log.resetsAt = limit.resetsAt.toISOString();
   };
 
@@ -490,8 +494,9 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
   if (!credential) {
     throw new Error(`${CREDENTIAL_VARIABLES[workers.agent]} is not set; the ${workers.agent} workers need it`);
   }
-  const maxParallel = config.agents[workers.agent].maxParallel;
-  return { config, issue, branch, spec: parsed.spec, plan, maxParallel, humanCriteria, workers, credential };
+  const limits = config.agents[workers.agent];
+  const parallelism = { start: limits.maxParallel, ceiling: limits.maxParallelCeiling };
+  return { config, issue, branch, spec: parsed.spec, plan, parallelism, humanCriteria, workers, credential };
 }
 
 interface Worked {

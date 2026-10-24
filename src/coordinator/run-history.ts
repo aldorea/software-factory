@@ -39,6 +39,26 @@ export async function runBaseSha(repoDir: string, branch: string): Promise<strin
   return (await execOk("git", ["-C", repoDir, "rev-parse", firstMerge === undefined ? branch : `${firstMerge}^1`])).trim();
 }
 
+export interface RunLogs {
+  logs: RunLog[];
+  unreadable: string[];
+}
+
+export async function readRunLogs(logsDir: string): Promise<RunLogs> {
+  const entries = (await readdir(logsDir).catch(() => [] as string[])).sort();
+  const logs: RunLog[] = [];
+  const unreadable: string[] = [];
+  for (const entry of entries) {
+    const text = await readFile(join(logsDir, entry, "run.json"), "utf8").catch(() => null);
+    if (text === null) continue;
+    const parsed = parseRunLog(text);
+    if (parsed.ok) logs.push(parsed.log);
+    else unreadable.push(`${entry}/run.json`);
+  }
+  logs.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+  return { logs, unreadable };
+}
+
 export async function latestRunLog(logsDir: string, issue: number): Promise<RunLog | null> {
   const entries = await readdir(logsDir).catch(() => [] as string[]);
   const runIds = entries.filter((entry) => entry.startsWith(`${issue}-`)).sort();
