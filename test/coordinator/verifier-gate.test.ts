@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { approveSpec } from "../../src/commands/approve.ts";
 import { runIssue } from "../../src/coordinator/run.ts";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
-import type { VerifierAnswer } from "../../src/coordinator/verifier.ts";
+import type { VerifierAnswer, VerifierQuestion } from "../../src/coordinator/verifier.ts";
 import { revParse } from "../../src/workers/git.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
@@ -113,9 +113,13 @@ async function targetRepo(): Promise<Target> {
   return { repoDir, remoteDir, github };
 }
 
-function harness(target: Target, script: AttemptScript, answer: (id: string) => VerifierAnswer = () => ({ kind: "accept" })) {
+function harness(
+  target: Target,
+  script: AttemptScript,
+  answer: (question: VerifierQuestion) => VerifierAnswer = () => ({ kind: "accept" }),
+) {
   const runner = new FakeWorkerRunner(script);
-  const verifier = new FakeVerifier((question) => answer(question.id));
+  const verifier = new FakeVerifier(answer);
   const run = () =>
     runIssue(
       { repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": "token-of-the-host" } },
@@ -156,17 +160,36 @@ describe("the independent verifier at the gate", () => {
     ]);
   });
 
-  it("should reject the subtask with the reason of the verifier when it refutes the test, and not merge it", async () => {
+  it("should feed the reason of the verifier to the next attempt and merge once the verifier accepts the new test", async () => {
     const target = await targetRepo();
-    const integrationBefore = await revParse(target.repoDir, BRANCH);
-    const { run } = harness(target, writesGreetingAndTest, () => ({ kind: "refute", reason: "The test never checks the text." }));
+    const weak = 'test("A1 the greeting page says hello", async () => { expect(1).toBe(1); });\n';
+    const { run, runner } = harness(
+      target,
+      (call) => ({
+        files: { "src/greeting.txt": "hello\n", "tests/greeting.spec.ts": call.number === 1 ? weak : TEST_SOURCE },
+        commit: `Attempt ${call.number}`,
+      }),
+      (question) => (question.test === weak ? { kind: "refute", reason: "Asserts nothing about the page." } : { kind: "accept" }),
+    );
 
     const report = await run();
 
-    expect(report.log.subtasks[0]).toMatchObject({
-      state: "blocked",
-      reason: "The gate rejected it: the verifier refuted the test of A1: The test never checks the text..",
-    });
+    expect(runner.workers[0]?.attempts[1]?.prompt).toContain("the verifier refuted the test of A1: Asserts nothing about the page.");
+    expect(report.log.subtasks[0]).toMatchObject({ state: "merged", verifierRejections: 1, gateRejections: 0 });
+    expect(report.log.friction).toMatchObject({ verifierRejections: 1, gateRejections: 0 });
+    expect(report.result).toBe("ready");
+  });
+
+  it("should block the subtask by patience, without merging it, when the verifier keeps refuting the test", async () => {
+    const target = await targetRepo();
+    const integrationBefore = await revParse(target.repoDir, BRANCH);
+    const { run, verifier } = harness(target, writesGreetingAndTest, () => ({ kind: "refute", reason: "Asserts nothing." }));
+
+    const report = await run();
+
+    expect(verifier.questions).toHaveLength(3);
+    expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "patience", verifierRejections: 3, gateRejections: 0 });
+    expect(report.log.subtasks[0]?.reason).toContain("verifier:A1:refute");
     expect(await revParse(target.repoDir, BRANCH)).toBe(integrationBefore);
     expect(report.result).toBe("draft");
     expect(target.github.pullRequests[0]?.draft).toBe(true);
@@ -178,11 +201,13 @@ describe("the independent verifier at the gate", () => {
 
     const report = await run();
 
-    const gate = (await readRunLog(report.runLogPath)).subtasks[0]?.gate;
+    const log = await readRunLog(report.runLogPath);
+    const gate = log.subtasks[0]?.gate;
     expect(gate).toMatchObject({ accepted: false, reasons: [] });
     expect(gate?.verifier).toEqual([
       { id: "A1", verdict: "refute", reason: "Asserts nothing.", logPath: expect.stringContaining("A1") },
     ]);
+    expect(log.friction).toMatchObject({ verifierRejections: 3, gateRejections: 0 });
   });
 
   it("should reject the subtask when the verifier errors, because the gate fails closed", async () => {
@@ -191,11 +216,10 @@ describe("the independent verifier at the gate", () => {
 
     const report = await run();
 
-    expect(report.log.subtasks[0]).toMatchObject({
-      state: "blocked",
-      reason: "The gate rejected it: the verifier gave no usable answer for A1: The verifier gave no answer.",
-    });
-    expect(report.log.subtasks[0]?.gate?.verifier).toMatchObject([{ id: "A1", verdict: "error" }]);
+    expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", verifierRejections: 3 });
+    expect(report.log.subtasks[0]?.gate?.verifier).toMatchObject([
+      { id: "A1", verdict: "error", reason: "The verifier gave no answer" },
+    ]);
   });
 
   it("should reject the subtask when the verifier itself throws", async () => {
@@ -210,17 +234,17 @@ describe("the independent verifier at the gate", () => {
     expect(report.log.subtasks[0]?.gate?.verifier).toMatchObject([{ id: "A1", verdict: "error", reason: "docker is down" }]);
   });
 
-  it("should reject the subtask without asking the verifier when no changed file carries the ID of a Playwright criterion", async () => {
+  it("should reject the subtask as a gate rejection, without asking the verifier, when no changed file carries the ID of a Playwright criterion", async () => {
     const target = await targetRepo();
     const { run, verifier } = harness(target, () => ({ files: { "src/greeting.txt": "hello\n" }, commit: "Write the greeting" }));
 
     const report = await run();
 
     expect(verifier.questions).toEqual([]);
-    expect(report.log.subtasks[0]).toMatchObject({
-      state: "blocked",
-      reason: "The gate rejected it: criterion A1 (playwright) has no test that carries its ID in the changes of the subtask.",
-    });
+    expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", gateRejections: 3, verifierRejections: 0 });
+    expect(report.log.subtasks[0]?.gate?.reasons).toEqual([
+      "criterion A1 (playwright) has no test that carries its ID in the changes of the subtask",
+    ]);
   });
 
   it("should not ask the verifier when the checks or the criteria already reject the subtask", async () => {

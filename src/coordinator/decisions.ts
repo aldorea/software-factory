@@ -1,5 +1,6 @@
 import { criteriaHash, readApproval, technicalHash } from "../spec/approval.ts";
 import type { CheckRecord, CriterionRecord, RunLog, RunResult } from "./run-log.ts";
+import type { GateDecision, GateRejection } from "./gate.ts";
 import type { TestJudgment } from "./verifier-run.ts";
 
 export function approvalProblem(issue: number, specText: string, issueBody: string): string | null {
@@ -15,33 +16,42 @@ export function approvalProblem(issue: number, specText: string, issueBody: stri
   return `${changed.join(" and ")} since the approval; review the spec and run factory approve ${issue} again`;
 }
 
-export interface GateDecision {
-  accepted: boolean;
-  reasons: string[];
-}
-
-export function gateDecision(checks: CheckRecord[], criteria: CriterionRecord[] = []): GateDecision {
-  const reasons = [
-    ...checks.filter((check) => !check.passed).map((check) => `check ${check.name} failed with exit code ${check.exitCode}`),
-    ...criteria
-      .filter((criterion) => !criterion.passed)
-      .map((criterion) => `criterion ${criterion.id} (${criterion.evidence}) failed with exit code ${criterion.exitCode}`),
+export function verifiedDecision(decision: GateDecision, judgment: TestJudgment): GateDecision {
+  const rejections: GateRejection[] = [
+    ...decision.rejections,
+    ...judgment.missingTests.map((id) => ({
+      kind: "criterion" as const,
+      message: `criterion ${id} (playwright) has no test that carries its ID in the changes of the subtask`,
+      signature: `no-test:${id}`,
+    })),
+    ...judgment.records.flatMap((record): GateRejection[] => {
+      if (record.verdict === "refute") {
+        return [
+          {
+            kind: "verifier",
+            message: `the verifier refuted the test of ${record.id}: ${record.reason ?? ""}`,
+            signature: `verifier:${record.id}:refute`,
+          },
+        ];
+      }
+      if (record.verdict === "error") {
+        return [
+          {
+            kind: "verifier",
+            message: `the verifier gave no usable answer for ${record.id}: ${record.reason ?? ""}`,
+            signature: `verifier:${record.id}:error`,
+          },
+        ];
+      }
+      return [];
+    }),
   ];
-  return { accepted: reasons.length === 0, reasons };
-}
-
-export interface VerifiedDecision extends GateDecision {
-  verifierReasons: string[];
-}
-
-export function verifiedDecision(decision: GateDecision, judgment: TestJudgment): VerifiedDecision {
-  const verifierReasons = judgment.records.flatMap((record) => {
-    if (record.verdict === "refute") return [`the verifier refuted the test of ${record.id}: ${record.reason ?? ""}`];
-    if (record.verdict === "error") return [`the verifier gave no usable answer for ${record.id}: ${record.reason ?? ""}`];
-    return [];
-  });
-  const reasons = [...decision.reasons, ...judgment.missingTests];
-  return { accepted: reasons.length === 0 && verifierReasons.length === 0, reasons, verifierReasons };
+  return {
+    accepted: rejections.length === 0,
+    reasons: rejections.map((rejection) => rejection.message),
+    rejections,
+    signature: rejections.map((rejection) => rejection.signature).join(" | "),
+  };
 }
 
 export function verificationPassed(checks: CheckRecord[], criteria: CriterionRecord[]): boolean {

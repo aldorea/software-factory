@@ -32,12 +32,16 @@ function resultLine(log: RunLog): string {
       `the integrated verification failed${failing.length > 0 ? ` (criteria not passing: ${failing.join(", ")})` : ""}`,
     );
   }
+  const layer = log.workerLayerFailures.length;
+  if (layer > 0) failed.push(`${layer} failure${layer === 1 ? "" : "s"} of the worker layer, not of the design`);
   return `Draft: ${failed.join("; ")}.`;
 }
 
 function subtaskLine(subtask: SubtaskRecord): string {
   const head = `- **${subtask.id}** (${subtask.criteria.join(", ")}): ${subtask.state}`;
-  return subtask.reason ? `${head}. ${subtask.reason}` : head;
+  const reason = subtask.reason ? `${head}. ${subtask.reason}` : head;
+  const lastFailure = subtask.block?.lastFailure;
+  return lastFailure ? `${reason}\n  Last failure: ${lastFailure}` : reason;
 }
 
 function verificationSection(log: RunLog): string {

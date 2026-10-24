@@ -26,7 +26,7 @@ export async function judgeTests(verifier: Verifier, input: JudgmentInput): Prom
     if (criterion.evidence !== "playwright") continue;
     const test = await criterionTest(input.repoDir, input.integrationBranch, input.sha, criterion.id);
     if (test === null) {
-      judgment.missingTests.push(`criterion ${criterion.id} (playwright) has no test that carries its ID in the changes of the subtask`);
+      judgment.missingTests.push(criterion.id);
       continue;
     }
     const logPath = join(input.logDir, `${input.label}-verifier-${criterion.id}.jsonl`);

@@ -169,8 +169,12 @@ describe("criterion evidence at the gate", () => {
 
     expect(report.log.subtasks[0]).toMatchObject({
       state: "blocked",
-      reason: "The gate rejected it: criterion A1 (playwright) failed with exit code 1.",
+      block: {
+        type: "patience",
+        lastFailure: "The gate rejected the work: criterion A1 (playwright) failed with exit code 1",
+      },
     });
+    expect(report.log.subtasks[0]?.reason).toContain("criterion:A1");
     expect(report.result).toBe("draft");
   });
 });
