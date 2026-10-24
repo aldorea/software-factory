@@ -1,6 +1,6 @@
 # Software factory: design
 
-Status: agreed on 2026-10-23, before the first pilot. The pilot in `askwell` calibrates the values marked as initial.
+Status: agreed on 2026-10-23, before the first pilot. The pilot in `askwell` calibrates the values marked as initial. The open questions of the pilot are GitHub issues.
 
 ## Goal
 
@@ -197,6 +197,11 @@ Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-onl
 | Base subtask and workers | Claude Code CLI, in Docker | `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Max 5x) |
 | Independent verifier | OpenCode CLI, in Docker | OpenCode Go key, with Extra Usage off. Only models of the `opencode-go/` provider: `opencode/` is the pay-per-use Console |
 
+Verified on 2026-10-24:
+
+- One `setup-token` token works in 2 containers at the same time.
+- `opencode run --standalone` reads `OPENCODE_API_KEY` from the environment of the container, with no `auth login` and no `auth.json`. With no active Go subscription, the request fails with a 403 and does not fall back to the Console (OpenCode 2.0.16, `opencode-go/beam-free`).
+
 ### Parallelism
 
 | Setting | Rule |
@@ -234,11 +239,3 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 - **Quality, after the merge:** changes I made at review, and escapes (bugs that the verification did not find).
 
 `factory stats` summarizes these files for a repo.
-
-## To verify in the pilot
-
-- [x] OpenCode Go authenticates in a container with no pay-per-use fallback. `opencode run --standalone` reads `OPENCODE_API_KEY` from the environment of the container, with no `auth login` and no `auth.json`. With no active Go subscription, the request fails with a 403 and does not fall back to the Console. Verified on 2026-10-24 with OpenCode 2.0.16 and `opencode-go/beam-free`.
-- [ ] How the Claude Code CLI reports a rejected request at the plan limit. The plan usage is known (`rate_limit_event`); the exact form of a rejection is not seen yet.
-- [x] One `setup-token` token works in 2 containers at the same time. Verified on 2026-10-24 with the Docker test that runs when `CLAUDE_CODE_OAUTH_TOKEN` is set.
-- [ ] The `askwell` image: `pnpm`, Playwright with Chromium, access to Neon branches, one `E2E_PORT` per worker.
-- [ ] The initial values of patience, limits and parallelism.
