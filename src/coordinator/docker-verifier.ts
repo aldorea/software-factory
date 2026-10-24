@@ -57,6 +57,9 @@ export function dockerVerifier(setup: VerifierSetup): Verifier {
 
 export function answerFrom(outcome: AttemptOutcome): VerifierAnswer {
   if (outcome.kind === "agent-error") return { kind: "error", message: outcome.message };
+  if (outcome.kind === "plan-limit") {
+    return { kind: "plan-limit", message: outcome.message, ...(outcome.resetsAt !== undefined ? { resetsAt: outcome.resetsAt } : {}) };
+  }
   if (outcome.kind !== "completed") return { kind: "error", message: `the verifier ended with ${outcome.kind}` };
   const text = outcome.summary.trim();
   if (text === "") return { kind: "error", message: "the verifier gave no answer" };

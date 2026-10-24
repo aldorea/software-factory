@@ -1,6 +1,6 @@
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import type { RoleChoice } from "../config/config.ts";
-import type { AttemptLimits, AttemptResult } from "../workers/types.ts";
+import type { AgentKind, AttemptLimits, AttemptResult } from "../workers/types.ts";
 import { outcomeFailure, gateFailure, type AttemptFailure } from "./failures.ts";
 import type { GateDecision } from "./gate.ts";
 import type { Clock } from "./ports.ts";
@@ -20,14 +20,22 @@ export interface SubtaskLoop {
   runStartedAt: Date;
   runTokens: () => number;
   attempt: (prompt: string, limits: AttemptLimits) => Promise<AttemptResult>;
-  gate: (attempt: number) => Promise<GateDecision | null>;
+  gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | null>;
   save: () => Promise<void>;
+  paused: () => boolean;
+}
+
+export interface PlanLimitHit {
+  kind: "plan-limit";
+  agent: AgentKind;
+  message: string;
+  resetsAt?: Date;
 }
 
 export type LoopResult =
   | { kind: "accepted" }
   | { kind: "blocked"; stop: StopReason; lastFailure?: string }
-  | { kind: "paused"; message: string }
+  | { kind: "paused"; limit?: PlanLimitHit }
   | { kind: "interrupted" };
 
 export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
@@ -36,6 +44,7 @@ export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
   const signatures: string[] = [];
   let last: AttemptFailure | undefined;
   for (let number = 1; ; number += 1) {
+    if (loop.paused()) return pause(loop);
     const now = clock.now();
     const stop = stopReason(
       {
@@ -58,9 +67,13 @@ export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
     record.attempts.push(attempt);
 
     if (result.outcome.kind === "plan-limit") {
-      record.state = "pending";
-      await loop.save();
-      return { kind: "paused", message: result.outcome.message };
+      const resetsAt = result.outcome.resetsAt ?? result.plan?.resetsAt;
+      return pause(loop, {
+        kind: "plan-limit",
+        agent: loop.agent.agent,
+        message: result.outcome.message,
+        ...(resetsAt !== undefined ? { resetsAt } : {}),
+      });
     }
 
     let failure = outcomeFailure(result.outcome);
@@ -69,6 +82,7 @@ export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
       await loop.save();
       const decision = await loop.gate(number);
       if (decision === null) return { kind: "interrupted" };
+      if ("kind" in decision) return pause(loop, decision);
       if (decision.accepted) return { kind: "accepted" };
       if (decision.rejections.some((rejection) => rejection.kind !== "verifier")) record.gateRejections += 1;
       if (decision.rejections.some((rejection) => rejection.kind === "verifier")) record.verifierRejections += 1;
@@ -82,6 +96,12 @@ export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
     }
     await loop.save();
   }
+}
+
+async function pause(loop: SubtaskLoop, limit?: PlanLimitHit): Promise<LoopResult> {
+  loop.record.state = "pending";
+  await loop.save();
+  return limit === undefined ? { kind: "paused" } : { kind: "paused", limit };
 }
 
 async function retryPrompt(base: string, failure: AttemptFailure): Promise<string> {

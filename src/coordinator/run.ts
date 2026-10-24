@@ -40,7 +40,7 @@ import {
 } from "./run-log.ts";
 import { applyTotals, emptyCost, emptyFriction } from "./run-totals.ts";
 import { countedTokens, type StopType } from "./stop-rules.ts";
-import { runSubtaskLoop, type LoopResult } from "./subtask-loop.ts";
+import { runSubtaskLoop, type LoopResult, type PlanLimitHit } from "./subtask-loop.ts";
 import { judgeTests, NO_JUDGMENT } from "./verifier-run.ts";
 
 export const CREDENTIAL_VARIABLES: Record<AgentKind, string> = {
@@ -200,6 +200,12 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     return { checks, ...evidence };
   };
 
+  const pauseRun = (limit: PlanLimitHit) => {
+    if (log.pauseReason !== undefined) return;
+    log.pauseReason = `the plan limit of ${limit.agent} was reached: ${limit.message}`;
+    if (limit.resetsAt !== undefined) log.resetsAt = limit.resetsAt.toISOString();
+  };
+
   let conflicted = false;
   const stateOf = (subtaskId: string) => (records.get(subtaskId) as SubtaskRecord).state;
 
@@ -225,7 +231,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     const startSha = await revParse(request.repoDir, branch);
     const existingTestPaths = await testFilesAt(request.repoDir, startSha);
     const requestChecks = spec.base ? requestCheckPaths(spec) : [];
-    const gate = async (attempt: number): Promise<GateDecision | null> => {
+    const gate = async (attempt: number): Promise<GateDecision | PlanLimitHit | null> => {
       const sha = await revParse(request.repoDir, record.branch);
       const gated = await checksOn(
         `${subtask.id}-gate-${attempt}`,
@@ -258,6 +264,9 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
             label: `${subtask.id}-attempt-${attempt}`,
           })
         : NO_JUDGMENT;
+      if (judgment.planLimit !== undefined) {
+        return { kind: "plan-limit", agent: config.roles.verifier.agent, ...judgment.planLimit };
+      }
       const decision = verifiedDecision(checked, judgment);
       const reasons = decision.rejections.filter((rejection) => rejection.kind !== "verifier").map((rejection) => rejection.message);
       record.gate = { sha, accepted: decision.accepted, reasons, checks, criteria, verifier: judgment.records };
@@ -268,7 +277,14 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
     record.state = "working";
     await save();
-    const worked = await runWorker(request, ports, prepared, subtask, runDir, slot, gitLock, { record, startedAt, gate, runTokens, save });
+    const worked = await runWorker(request, ports, prepared, subtask, runDir, slot, gitLock, {
+      record,
+      startedAt,
+      gate,
+      runTokens,
+      save,
+      paused: () => log.pauseReason !== undefined,
+    });
     const unclassified = worked.failures.find((failure) => !(failure instanceof WorkerLayerError));
     if (unclassified !== undefined) throw unclassified;
     for (const failure of worked.failures) await noteFailure(failure, record.id);
@@ -295,7 +311,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
         record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
       }
     } else if (loop.kind === "paused") {
-      log.pauseReason = `the plan limit of ${workers.agent} was reached: ${loop.message}`;
+      if (loop.limit !== undefined) pauseRun(loop.limit);
     } else {
       record.state = "blocked";
       record.blockType = blockTypeOf(loop.stop.type);
@@ -341,7 +357,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   await ports.notifier.notify({
     title: `factory run #${request.issue}`,
-    message: `${log.result === "ready" ? "Ready for review" : log.result === "paused" ? "Paused" : "Draft"}: ${issue.title}`,
+    message: notificationMessage(log, issue.title),
     url: pullRequest.url,
   });
   return { result: log.result, pullRequest, runLogPath, log };
@@ -390,9 +406,10 @@ interface Worked {
 interface LoopWiring {
   record: SubtaskRecord;
   startedAt: Date;
-  gate: (attempt: number) => Promise<GateDecision | null>;
+  gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | null>;
   runTokens: () => number;
   save: () => Promise<void>;
+  paused: () => boolean;
 }
 
 async function runWorker(
@@ -451,6 +468,7 @@ async function runWorker(
         inStage("attempt", () => worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits)),
       gate: wiring.gate,
       save: wiring.save,
+      paused: wiring.paused,
     });
   } catch (error) {
     failures.push(error);
@@ -492,6 +510,12 @@ export function subtaskBranch(integration: string, subtaskId: string): string {
 
 export function mergeMessage(issue: number, subtaskId: string): string {
   return `Merge subtask ${subtaskId} of #${issue}\n\nFactory-Subtask: ${subtaskId}`;
+}
+
+function notificationMessage(log: RunLog, title: string): string {
+  if (log.result === "ready") return `Ready for review: ${title}`;
+  if (log.result !== "paused") return `Draft: ${title}`;
+  return log.resetsAt === undefined ? `Paused: ${title}` : `Paused until the plan limit resets at ${log.resetsAt}: ${title}`;
 }
 
 function blockTypeOf(stop: StopType): BlockType {

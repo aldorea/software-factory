@@ -156,6 +156,7 @@ export interface RunLog {
   endedAt?: string;
   result: RunResult;
   pauseReason?: string;
+  resetsAt?: string;
   agents: AgentsRecord;
   criteria: CriteriaRecord;
   cost: CostRecord;
