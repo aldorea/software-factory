@@ -1,6 +1,8 @@
+import { basename } from "node:path";
 import type { Issue } from "../github/github.ts";
 import { criteriaText } from "../spec/issue.ts";
 import type { RoleChoice } from "../config/config.ts";
+import { evidencePath } from "./evidence-branch.ts";
 import type { AgentChangeRecord, CheckRecord, CriterionRecord, HumanCriterionRecord, RunLog, SubtaskRecord } from "./run-log.ts";
 
 export interface PullRequestText {
@@ -64,6 +66,7 @@ function resultLine(log: RunLog): string {
       `the integrated verification failed${failing.length > 0 ? ` (criteria not passing: ${failing.join(", ")})` : ""}`,
     );
   }
+  if (log.evidence?.failure !== undefined) failed.push(`the attachments of the human criteria were not published: ${log.evidence.failure}`);
   const layer = log.workerLayerFailures.length;
   if (layer > 0) failed.push(`${layer} failure${layer === 1 ? "" : "s"} of the worker layer, not of the design`);
   return `Draft: ${failed.join("; ")}.`;
@@ -114,8 +117,8 @@ function criteriaSections(issue: Issue, log: RunLog): string[] {
     `## Criteria on \`${log.verification.sha.slice(0, 12)}\`\n\n${log.verification.criteria.map((criterion) => criterionLine(criterion, label)).join("\n")}`,
   ];
   if (log.verification.humanCriteria.length > 0) {
-    const lines = log.verification.humanCriteria.map((criterion) => humanLine(criterion, label, log.runId));
-    sections.push(`## Human criteria for your review\n\n${lines.join("\n")}`);
+    const lines = log.verification.humanCriteria.map((criterion) => humanLine(criterion, label, log));
+    sections.push(`## Human criteria for your review\n\n${[...evidenceNotes(log), ...lines].join("\n")}`);
   }
   return sections;
 }
@@ -125,10 +128,35 @@ function criterionLine(criterion: CriterionRecord, label: (id: string) => string
   return criterion.passed ? `- [x] ${evidence}` : `- [ ] ${evidence} failed with exit code ${criterion.exitCode}`;
 }
 
-function humanLine(criterion: HumanCriterionRecord, label: (id: string) => string, runId: string): string {
-  const attachments =
-    criterion.attachments.length > 0
-      ? criterion.attachments.map((path) => `\`.factory/logs/${runId}/${path}\``).join(", ")
-      : "none";
-  return `- [ ] ${label(criterion.id)}. Reason: ${criterion.reason.replace(/[.\s]*$/, "")}. Attachments: ${attachments}`;
+function humanLine(criterion: HumanCriterionRecord, label: (id: string) => string, log: RunLog): string {
+  const head = `- [ ] ${label(criterion.id)}. Reason: ${criterion.reason.replace(/[.\s]*$/, "")}. Attachments:`;
+  if (criterion.attachments.length === 0) return `${head} none`;
+  const evidence = log.evidence;
+  if (evidence?.failure === undefined && evidence?.commit !== undefined && evidence.repositoryUrl !== undefined) {
+    const links = criterion.attachments.map((attachment) => {
+      const name = basename(attachment);
+      const url = evidenceUrl(evidence.repositoryUrl ?? "", evidence.commit ?? "", evidencePath(log.runId, criterion.id, attachment));
+      return { name, url, image: IMAGE_EXTENSIONS.test(name) };
+    });
+    const images = links.filter((link) => link.image).map((link) => `\n  ![${link.name}](${link.url}?raw=true)`);
+    return `${head} ${links.map((link) => `[${link.name}](${link.url})`).join(", ")}${images.join("")}`;
+  }
+  return `${head} ${criterion.attachments.map((path) => `\`.factory/logs/${log.runId}/${path}\``).join(", ")}`;
+}
+
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg)$/i;
+
+function evidenceUrl(repositoryUrl: string, commit: string, path: string): string {
+  return `${repositoryUrl}/blob/${commit}/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function evidenceNotes(log: RunLog): string[] {
+  const evidence = log.evidence;
+  if (evidence === undefined) return [];
+  if (evidence.failure !== undefined) {
+    return [
+      `The attachments could not be published to \`${evidence.branch}\`: ${evidence.failure}. They stay on the host under \`.factory/logs/${log.runId}/attachments/\`.\n`,
+    ];
+  }
+  return [`The attachments are on branch \`${evidence.branch}\` at \`${(evidence.commit ?? "").slice(0, 12)}\`. That branch is never merged.\n`];
 }

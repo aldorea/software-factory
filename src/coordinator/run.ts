@@ -15,7 +15,7 @@ import { renderPullRequest } from "./pull-request.ts";
 import { resumedLog } from "./resume.ts";
 import { paused, type RunContext, type RunRequest } from "./run-context.ts";
 import { latestRunLog, mergedSubtasks, readRunLogs, runBaseSha } from "./run-history.ts";
-import { RUN_LOG_VERSION, writeRunLog, type RunLog, type SubtaskRecord } from "./run-log.ts";
+import { RUN_LOG_VERSION, writeRunLog, type EvidenceBranchRecord, type RunLog, type SubtaskRecord } from "./run-log.ts";
 import { applyTotals, emptyCost, emptyFriction } from "./run-totals.ts";
 import { inWaves, Lock } from "./slots.ts";
 import { startSubtask } from "./subtask-work.ts";
@@ -143,14 +143,15 @@ async function publishHumanEvidence(context: RunContext): Promise<void> {
   delete log.evidence;
   const files = evidenceFiles(log.runId, context.runDir, log.verification?.humanCriteria ?? []);
   if (files.length === 0) return;
-  const branch = evidenceBranchName(request.issue);
+  const record: EvidenceBranchRecord = { branch: evidenceBranchName(request.issue) };
+  log.evidence = record;
   try {
-    const commit = await context.gitLock.exclusive(() =>
+    record.commit = await context.gitLock.exclusive(() =>
       publishEvidence({ repoDir: request.repoDir, remote: REMOTE, issue: request.issue, runId: log.runId, files }),
     );
-    log.evidence = { branch, commit };
+    record.repositoryUrl = await context.ports.github.repositoryUrl();
   } catch (error) {
-    log.evidence = { branch, failure: (error as Error).message };
+    record.failure = (error as Error).message;
   }
   await context.save();
 }

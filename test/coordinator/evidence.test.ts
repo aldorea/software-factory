@@ -308,7 +308,7 @@ describe("criterion evidence in the pull request", () => {
     const body = target.github.pullRequests[0]?.body ?? "";
     expect(body).toContain("## Human criteria for your review");
     expect(body).toContain(
-      `- [ ] A3 The greeting looks friendly. Reason: Friendliness is subjective. Attachments: \`.factory/logs/${report.log.runId}/attachments/A3/A3.png\``,
+      `- [ ] A3 The greeting looks friendly. Reason: Friendliness is subjective. Attachments: [A3.png](https://github.test/aldorea/greeting/blob/${report.log.evidence?.commit}/${report.log.runId}/A3/A3.png)`,
     );
     expect(body).not.toContain("- [x] A3");
     expect(report.log.verification?.humanCriteria).toEqual([

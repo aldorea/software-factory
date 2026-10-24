@@ -115,6 +115,7 @@ export interface VerificationRecord {
 export interface EvidenceBranchRecord {
   branch: string;
   commit?: string;
+  repositoryUrl?: string;
   failure?: string;
 }
 

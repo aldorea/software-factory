@@ -6,6 +6,7 @@ import { BRANCH, CONFIG, git, harness, targetRepo, temp, WITH_HUMAN_CRITERION, t
 afterEach(() => temp.removeAll());
 
 const EVIDENCE_BRANCH = "factory-evidence/42";
+const REPOSITORY = "https://github.test/aldorea/greeting";
 
 const WITH_ATTACHMENTS = CONFIG.replace(
   'evidence: { request: "grep -q hello src/greeting.txt # {{id}}" },',
@@ -43,11 +44,31 @@ describe("the evidence branch", () => {
     const report = await run();
 
     const commit = await git(target.remoteDir, "rev-parse", EVIDENCE_BRANCH);
-    expect(report.log.evidence).toEqual({ branch: EVIDENCE_BRANCH, commit });
+    expect(report.log.evidence).toEqual({ branch: EVIDENCE_BRANCH, commit, repositoryUrl: REPOSITORY });
     expect(await git(target.remoteDir, "rev-list", "--max-parents=0", EVIDENCE_BRANCH)).toBe(commit);
     expect((await exec("git", ["-C", target.remoteDir, "merge-base", "main", EVIDENCE_BRANCH])).exitCode).toBe(1);
     expect((await exec("git", ["-C", target.remoteDir, "merge-base", BRANCH, EVIDENCE_BRANCH])).exitCode).toBe(1);
     const commands = runner.workers.flatMap((worker) => worker.execs.map((call) => call.command));
     expect(commands.filter((command) => /\bgit\b/.test(command))).toEqual([]);
+  });
+
+  it("should link each human criterion to its files at the pushed commit, render images inline and leave the criterion unchecked", async () => {
+    const target = await withAttachments();
+    const { run } = harness(target, writes("png-of-the-greeting\n"));
+
+    const report = await run();
+
+    const commit = await git(target.remoteDir, "rev-parse", EVIDENCE_BRANCH);
+    const url = `${REPOSITORY}/blob/${commit}/${report.log.runId}/A2/A2.png`;
+    const body = target.github.pullRequests[0]?.body ?? "";
+    expect(body).toContain(
+      [
+        `- [ ] A2 The greeting looks friendly. Reason: Looks are subjective. Attachments: [A2.png](${url})`,
+        `  ![A2.png](${url}?raw=true)`,
+      ].join("\n"),
+    );
+    expect(body).toContain(`on branch \`${EVIDENCE_BRANCH}\` at \`${commit.slice(0, 12)}\``);
+    expect(body).not.toContain("- [x] A2");
+    expect(body).not.toContain("/attachments/");
   });
 });
