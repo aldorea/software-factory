@@ -22,6 +22,7 @@ const issueBody = "## Acceptance criteria\n\n- [ ] A1 one\n- [ ] A2 two\n- [ ] A
 const CONFIG = `export default {
   image: "worker:dev",
   checks: [{ name: "spec", command: "test -f specs/42.md" }],
+  evidence: { request: "test -f specs/42.md # {{id}}" },
   environment: () => ({}),
   protectedPaths: ["package.json"],
   roles: {

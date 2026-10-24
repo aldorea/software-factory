@@ -92,6 +92,34 @@ describe("loadConfig", () => {
     );
   });
 
+  it("should load the e2e and request commands with the placeholder of the criterion ID and default to no commands", async () => {
+    const withEvidence = VALID.replace(
+      "  app:",
+      '  evidence: { playwright: "pnpm e2e -g {{id}}", request: "pnpm request {{id}}", attachments: "test-results" },\n  app:',
+    );
+
+    expect((await loadConfig(await repoWithConfig(withEvidence))).evidence).toEqual({
+      playwright: "pnpm e2e -g {{id}}",
+      request: "pnpm request {{id}}",
+      attachments: "test-results",
+    });
+    expect((await loadConfig(await repoWithConfig(VALID))).evidence).toEqual({});
+  });
+
+  it("should refuse an evidence command with no placeholder and an attachments folder outside the repo", async () => {
+    const dir = await repoWithConfig(
+      VALID.replace("  app:", '  evidence: { request: "pnpm request", attachments: "../outside" },\n  app:'),
+    );
+
+    const error = await loadConfig(dir).then(
+      () => "",
+      (caught: Error) => caught.message,
+    );
+
+    expect(error).toContain("- evidence.request must be a command with the {{id}} placeholder for the criterion ID");
+    expect(error).toContain("- evidence.attachments must be a folder inside the repo, as a relative path");
+  });
+
   it("should load the config again after it changes in the same process", async () => {
     const dir = await repoWithConfig(VALID);
     await loadConfig(dir);

@@ -73,6 +73,8 @@ Each criterion has one type of evidence:
 
 A "human" criterion with no reason in the spec means that the refinement is not finished.
 
+`.factory/config.ts` gives the Playwright and request commands with the placeholder `{{id}}` for the criterion ID (the test or request carries the ID in its title) and the folder where Playwright leaves its screenshots and videos. A criterion whose type has no command in the config stops the run before any worker starts.
+
 ### Who writes the tests
 
 - **Request checks:** the base subtask writes them, because it fixes the contracts. The workers cannot change them.

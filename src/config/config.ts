@@ -13,6 +13,14 @@ export interface AppStart {
   start: string;
 }
 
+export interface EvidenceCommands {
+  playwright?: string;
+  request?: string;
+  attachments?: string;
+}
+
+export const ID_PLACEHOLDER = "{{id}}";
+
 export type EnvironmentPurpose = "worker" | "gate" | "verification";
 
 export interface WorkerEnvironmentContext {
@@ -44,6 +52,7 @@ export interface FactoryConfig {
   image: string;
   checks: Check[];
   app?: AppStart;
+  evidence?: EvidenceCommands;
   environment: (worker: WorkerEnvironmentContext) => Record<string, string>;
   protectedPaths: string[];
   roles: Record<Role, RoleChoice>;
@@ -55,6 +64,7 @@ export interface ResolvedConfig {
   image: string;
   checks: Check[];
   app?: AppStart;
+  evidence: EvidenceCommands;
   environment: (worker: WorkerEnvironmentContext) => Record<string, string>;
   protectedPaths: string[];
   roles: Record<Role, RoleChoice>;
@@ -98,6 +108,8 @@ export function resolveConfig(value: unknown): ConfigResult {
     else problems.push("app.start must be a non-empty string");
   }
 
+  const evidence = readEvidence(value.evidence, problems);
+
   if (typeof value.environment !== "function") {
     problems.push("environment must be a function from the worker to its environment");
   }
@@ -118,6 +130,7 @@ export function resolveConfig(value: unknown): ConfigResult {
       image: value.image as string,
       checks,
       ...(app ? { app } : {}),
+      evidence,
       environment: value.environment as ResolvedConfig["environment"],
       protectedPaths: protectedPaths as string[],
       roles: roles as Record<Role, RoleChoice>,
@@ -139,6 +152,32 @@ function readChecks(value: unknown, problems: string[]): Check[] {
     problems.push(`checks[${index}] must have a non-empty name and command`);
     return [];
   });
+}
+
+function readEvidence(value: unknown, problems: string[]): EvidenceCommands {
+  if (value === undefined) return {};
+  if (!isRecord(value)) {
+    problems.push("evidence must be an object with the e2e and request commands");
+    return {};
+  }
+  const evidence: EvidenceCommands = {};
+  for (const key of Object.keys(value)) {
+    if (!["playwright", "request", "attachments"].includes(key)) problems.push(`evidence.${key} is not a known setting`);
+  }
+  for (const kind of ["playwright", "request"] as const) {
+    const command = value[kind];
+    if (command === undefined) continue;
+    if (!isNonEmptyString(command) || !command.includes(ID_PLACEHOLDER)) {
+      problems.push(`evidence.${kind} must be a command with the ${ID_PLACEHOLDER} placeholder for the criterion ID`);
+    } else evidence[kind] = command;
+  }
+  if (value.attachments !== undefined) {
+    const attachments = value.attachments;
+    if (!isNonEmptyString(attachments) || attachments.startsWith("/") || attachments.split("/").includes("..")) {
+      problems.push("evidence.attachments must be a folder inside the repo, as a relative path");
+    } else evidence.attachments = attachments;
+  }
+  return evidence;
 }
 
 function readRoles(value: unknown, problems: string[]): Partial<Record<Role, RoleChoice>> {

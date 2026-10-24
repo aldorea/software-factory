@@ -26,11 +26,26 @@ export interface CheckRecord {
   passed: boolean;
 }
 
+export interface CriterionRecord {
+  id: string;
+  evidence: "playwright" | "request";
+  command: string;
+  exitCode: number;
+  passed: boolean;
+}
+
+export interface HumanCriterionRecord {
+  id: string;
+  reason: string;
+  attachments: string[];
+}
+
 export interface GateRecord {
   sha: string;
   accepted: boolean;
   reasons: string[];
   checks: CheckRecord[];
+  criteria: CriterionRecord[];
 }
 
 export interface SubtaskRecord {
@@ -47,6 +62,8 @@ export interface VerificationRecord {
   sha: string;
   passed: boolean;
   checks: CheckRecord[];
+  criteria: CriterionRecord[];
+  humanCriteria: HumanCriterionRecord[];
 }
 
 export interface PullRequestRecord {
