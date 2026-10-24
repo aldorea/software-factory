@@ -57,7 +57,7 @@ export interface FakeWorkerRecord {
   closed: boolean;
 }
 
-export type AttemptScript = (call: AttemptCall) => ScriptedAttempt;
+export type AttemptScript = (call: AttemptCall) => ScriptedAttempt | Promise<ScriptedAttempt>;
 
 export interface WorkerFaults {
   start?: (spec: WorkerSpec) => Error | undefined;
@@ -105,7 +105,7 @@ class FakeWorker implements Worker {
     const attemptFault = this.faults.attempt?.(call);
     if (attemptFault) throw attemptFault;
     const startedAt = new Date();
-    const scripted = this.script(call);
+    const scripted = await this.script(call);
     for (const [path, content] of Object.entries(scripted.files ?? {})) {
       await mkdir(dirname(join(this.worktreePath, path)), { recursive: true });
       await writeFile(join(this.worktreePath, path), content);

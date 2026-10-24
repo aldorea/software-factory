@@ -125,7 +125,7 @@ async function targetRepo(options: TargetOptions = {}): Promise<Target> {
   return { repoDir, remoteDir, github };
 }
 
-function harness(target: Target, script: (call: AttemptCall, clock: FakeClock) => ScriptedAttempt) {
+function harness(target: Target, script: (call: AttemptCall, clock: FakeClock) => ScriptedAttempt | Promise<ScriptedAttempt>) {
   const notifier = new FakeNotifier();
   const clock = new FakeClock("2026-10-24T08:00:00.000Z");
   const runner = new FakeWorkerRunner((call) => script(call, clock));

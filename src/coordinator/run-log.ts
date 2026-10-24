@@ -9,7 +9,7 @@ export const RUN_LOG_VERSION = 1;
 
 export type RunResult = "running" | "ready" | "draft" | "paused";
 
-export type SubtaskState = "pending" | "working" | "gating" | "merged" | "blocked" | "interrupted";
+export type SubtaskState = "pending" | "working" | "gating" | "merged" | "blocked" | "interrupted" | "not-started";
 
 export const BLOCK_TYPES = ["scope", "design-question", "patience", "limit", "environment"] as const;
 
@@ -79,6 +79,7 @@ export interface SubtaskRecord {
   blockType?: BlockType;
   reason?: string;
   block?: BlockRecord;
+  conflictFiles?: string[];
   attempts: AttemptRecord[];
   usage: TokenUsage;
   gate?: GateRecord;
