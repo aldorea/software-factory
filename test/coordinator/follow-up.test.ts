@@ -234,6 +234,20 @@ describe("factory run: follow-up tasks", () => {
     expect(repo.github.pullRequests[0]?.draft).toBe(true);
   });
 
+  it("should start no follow-up once the run is past its wall clock, and block the owner by that limit", async () => {
+    const repo = await target("limits: { runWallClockMs: 60 * 60 * 1000 }");
+    const { run, runner, clock } = harness(repo, (call) => {
+      if (subtaskOf(call) === "S2") clock.advance(2 * 60 * 60 * 1000);
+      return fixesSecondCriterion(call);
+    });
+
+    const report = await run();
+
+    expect(followUps(runner)).toHaveLength(0);
+    expect(subtask(report.log, "S2")).toMatchObject({ state: "blocked", blockType: "limit", block: { type: "run-wall-clock" } });
+    expect(report.result).toBe("draft");
+  });
+
   it("should give the follow-up the same gate as any attempt and reject a change outside the scope of its subtask", async () => {
     const repo = await target();
     const { run } = harness(repo, (call) =>

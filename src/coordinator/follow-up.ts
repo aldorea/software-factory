@@ -32,11 +32,14 @@ export function verificationSignature(criteria: CriterionRecord[]): string {
     .join(" | ");
 }
 
-export function followUpStop(signatures: string[], limits: StopLimits): StopReason | null {
-  return stopReason(
-    { signatures, subtaskElapsedMs: 0, subtaskTokens: 0, runElapsedMs: 0, runTokens: 0 },
-    limits,
-  );
+export interface FollowUpProgress {
+  signatures: string[];
+  runElapsedMs: number;
+  runTokens: number;
+}
+
+export function followUpStop(progress: FollowUpProgress, limits: StopLimits): StopReason | null {
+  return stopReason({ ...progress, subtaskElapsedMs: 0, subtaskTokens: 0 }, limits);
 }
 
 export function followUpFailure(

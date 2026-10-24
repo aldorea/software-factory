@@ -6,6 +6,7 @@ import { verificationPassed } from "./decisions.ts";
 import { integrationPlan } from "./evidence.ts";
 import { followUpFailure, followUpStop, followUpTasks, verificationSignature } from "./follow-up.ts";
 import { paused, stopLimits, type RunContext } from "./run-context.ts";
+import { agentTokens } from "./stop-rules.ts";
 import { blockSubtask, entryOf } from "./subtask-settlement.ts";
 import { workOn } from "./subtask-work.ts";
 
@@ -39,7 +40,14 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
     const tasks = followUpTasks(subtasks, criteria, stateOf);
     if (tasks.length === 0) break;
     signatures.push(verificationSignature(criteria));
-    const stop = followUpStop(signatures, stopLimits(config, workers));
+    const stop = followUpStop(
+      {
+        signatures,
+        runElapsedMs: context.ports.clock.now().getTime() - context.startedAt.getTime(),
+        runTokens: agentTokens(log.subtasks.flatMap((entry) => entry.attempts), workers.agent),
+      },
+      stopLimits(config, workers),
+    );
     if (stop) {
       for (const task of tasks) blockSubtask(entryOf(context.records, task.subtask.id, "record"), { type: stop.type, reason: stop.reason });
       await context.save();
