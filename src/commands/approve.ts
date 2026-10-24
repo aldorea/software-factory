@@ -7,6 +7,7 @@ import { issueCriteria } from "../spec/issue.ts";
 import { parseSpec, validateSpec } from "../spec/spec.ts";
 import { addWorktreeForBranch, listWorktrees, removeWorktree, revParse } from "../workers/git.ts";
 import { exec, execOk } from "../workers/sh.ts";
+import { findIntegrationBranch } from "./integration-branch.ts";
 
 export interface SpecCommandInput {
   repoDir: string;
@@ -67,21 +68,11 @@ async function loadSpec(input: SpecCommandInput): Promise<LoadedSpec> {
 }
 
 async function integrationBranch(repoDir: string, issue: number): Promise<string> {
-  const out = await execOk("git", [
-    "-C",
-    repoDir,
-    "for-each-ref",
-    "--format=%(refname:short)",
-    `refs/heads/factory/${issue}-*`,
-  ]);
-  const branches = out.split("\n").filter((line) => line !== "");
-  if (branches.length === 0) {
+  const branch = await findIntegrationBranch(repoDir, issue);
+  if (branch === null) {
     throw new Error(`no integration branch factory/${issue}-<slug> in ${repoDir}; run factory refine ${issue} first`);
   }
-  if (branches.length > 1) {
-    throw new Error(`more than one integration branch for issue #${issue}: ${branches.join(", ")}`);
-  }
-  return branches[0] as string;
+  return branch;
 }
 
 async function commitOnBranch(
