@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adjustMaxParallel, type ParallelismBounds } from "../../src/coordinator/parallelism.ts";
+import { adjustMaxParallel, MAX_PARALLEL_CEILING, type ParallelismBounds } from "../../src/coordinator/parallelism.ts";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
 import { cleanRun, failedRun, pausedRun } from "./run-log-fixtures.ts";
 
@@ -27,6 +27,11 @@ describe("the maxParallel adjustment", () => {
     expect(adjustMaxParallel(clean(12), "claude-code", BOUNDS)).toBe(2);
   });
 
+  it("should clamp a configured ceiling or start above 2 to 2, because more than 2 workers needs a decision the design leaves open", () => {
+    expect(adjustMaxParallel(clean(12), "claude-code", { start: 1, ceiling: 5 })).toBe(MAX_PARALLEL_CEILING);
+    expect(adjustMaxParallel([], "claude-code", { start: 4, ceiling: 4 })).toBe(2);
+  });
+
   it("should respect a lower ceiling set in the config", () => {
     expect(adjustMaxParallel(clean(6), "claude-code", { start: 1, ceiling: 1 })).toBe(1);
   });
@@ -37,9 +42,10 @@ describe("the maxParallel adjustment", () => {
     expect(adjustMaxParallel([...history, cleanRun(5)], "claude-code", BOUNDS)).toBe(2);
   });
 
-  it("should need 3 more clean runs after going up before it goes up again", () => {
-    expect(adjustMaxParallel(clean(5), "claude-code", { start: 1, ceiling: 3 })).toBe(2);
-    expect(adjustMaxParallel(clean(6), "claude-code", { start: 1, ceiling: 3 })).toBe(3);
+  it("should need 3 more clean runs to go back up after a pause took it down", () => {
+    const history = [...clean(3), pausedRun(3), cleanRun(4), cleanRun(5)];
+    expect(adjustMaxParallel(history, "claude-code", BOUNDS)).toBe(1);
+    expect(adjustMaxParallel([...history, cleanRun(6)], "claude-code", BOUNDS)).toBe(2);
   });
 
   it("should go down by one on a pause", () => {
