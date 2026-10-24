@@ -33,6 +33,9 @@ One execution of the factory for one issue, from the approved spec to the pull r
 The deterministic program that drives a run: it schedules subtasks, applies the gates and the stop rules, and opens the pull request.
 _Avoid_: orchestrator
 
+**Agent**:
+The CLI that runs inside a worker or the independent verifier: Claude Code or OpenCode.
+
 **Worker**:
 An agent that implements one subtask in its own container, on its own branch.
 _Avoid_: agent (too broad), runner
@@ -68,6 +71,9 @@ The branch of a run, `factory/<n>-<slug>`, where each accepted subtask merges an
 **Follow-up task**:
 Work sent back to the subtask that owns a criterion that failed the integrated verification.
 
+**Run log**:
+The record of a run in `.factory/logs/<run-id>/`, outside git: `run.json` and the raw log of each attempt.
+
 ### Verification
 
 **Checks**:
@@ -75,6 +81,9 @@ The target repo's own commands (type checking, linting, tests) that every change
 
 **Evidence**:
 The proof that a criterion passes: a Playwright test, a request with its expected response, or a human review.
+
+**Request check**:
+The request and its expected response that prove a criterion. The base subtask writes it, because it fixes the contracts, and workers cannot change it. It is evidence, not one of the checks.
 
 **Human criterion**:
 A criterion whose evidence is the developer's review, allowed only for a visual or subjective criterion, with the reason in the spec.
@@ -90,6 +99,9 @@ _Avoid_: reviewer, judge
 The checks and all the criteria run on the integration branch. It is the only source of the evidence in the pull request.
 _Avoid_: final check
 
+**Fail closed**:
+To stop when a safeguard cannot be confirmed, instead of going on without it: a run stops when a hash of the approved spec no longer matches, and fails when the independent verifier's config does not load.
+
 ### Stop
 
 **Patience**:
@@ -104,6 +116,9 @@ A cap on wall clock or tokens, per subtask or per run, that stops a loop that pr
 **Blocked**:
 The state of a subtask that stopped, with its reason and its last failure. The subtasks that do not depend on it go on.
 _Avoid_: failed
+
+**Plan limit**:
+The usage cap of the Claude subscription, per window (`five_hour`, `seven_day`), that Claude Code reports in each attempt. Reaching it pauses the run.
 
 **Paused**:
 The state of a run that reached the Claude plan limit. It is not a failure: no worker starts and no patience or wall clock is spent until the developer resumes it.
