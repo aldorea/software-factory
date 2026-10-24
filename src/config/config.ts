@@ -1,6 +1,7 @@
 import type { Role } from "../workers/agent-adapter.ts";
-import { AGENT_KINDS, missingRequirements } from "../workers/agents.ts";
+import { AGENT_KINDS } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
+import { choiceProblems, isAgentKind, ROLES } from "./roles.ts";
 
 export type { AgentKind, Role };
 
@@ -55,7 +56,7 @@ export interface FactoryConfig {
   evidence?: EvidenceCommands;
   environment: (worker: WorkerEnvironmentContext) => Record<string, string>;
   protectedPaths: string[];
-  roles: Record<Role, RoleChoice>;
+  roles?: Partial<Record<Role, RoleChoice>>;
   agents?: Partial<Record<AgentKind, Partial<AgentLimits>>>;
   limits?: Partial<RunLimits>;
 }
@@ -67,7 +68,7 @@ export interface ResolvedConfig {
   evidence: EvidenceCommands;
   environment: (worker: WorkerEnvironmentContext) => Record<string, string>;
   protectedPaths: string[];
-  roles: Record<Role, RoleChoice>;
+  roles: Partial<Record<Role, RoleChoice>>;
   agents: Record<AgentKind, AgentLimits>;
   limits: RunLimits;
 }
@@ -83,8 +84,6 @@ export const DEFAULT_LIMITS: { agents: Record<AgentKind, AgentLimits>; run: RunL
 };
 
 export type ConfigResult = { ok: true; config: ResolvedConfig } | { ok: false; problems: string[] };
-
-const ROLES: Role[] = ["workers", "verifier"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -133,7 +132,7 @@ export function resolveConfig(value: unknown): ConfigResult {
       evidence,
       environment: value.environment as ResolvedConfig["environment"],
       protectedPaths: protectedPaths as string[],
-      roles: roles as Record<Role, RoleChoice>,
+      roles,
       agents,
       limits,
     },
@@ -181,19 +180,24 @@ function readEvidence(value: unknown, problems: string[]): EvidenceCommands {
 }
 
 function readRoles(value: unknown, problems: string[]): Partial<Record<Role, RoleChoice>> {
+  if (value === undefined) return {};
   if (!isRecord(value)) {
     problems.push("roles must give the default agent and model of the workers and the verifier");
     return {};
   }
   const roles: Partial<Record<Role, RoleChoice>> = {};
+  for (const key of Object.keys(value)) {
+    if (!(ROLES as string[]).includes(key)) problems.push(`roles.${key} is not a role`);
+  }
   for (const role of ROLES) {
     const choice = value[role];
+    if (choice === undefined) continue;
     if (!isRecord(choice)) {
       problems.push(`roles.${role} must be an object with agent and model`);
       continue;
     }
     const { agent, model } = choice;
-    if (typeof agent !== "string" || !(AGENT_KINDS as string[]).includes(agent)) {
+    if (typeof agent !== "string" || !isAgentKind(agent)) {
       problems.push(`roles.${role}.agent must be one of ${AGENT_KINDS.join(", ")}`);
       continue;
     }
@@ -201,16 +205,12 @@ function readRoles(value: unknown, problems: string[]): Partial<Record<Role, Rol
       problems.push(`roles.${role}.model must be a non-empty string`);
       continue;
     }
-    const missing = missingRequirements(agent as AgentKind, role);
-    if (missing.length > 0) {
-      problems.push(`roles.${role}.agent ${agent} cannot serve the ${role}: it misses ${missing.join(", ")}`);
+    const invalid = choiceProblems(role, { agent, model });
+    if (invalid.length > 0) {
+      problems.push(...invalid.map((problem) => `roles.${role}: ${problem}`));
       continue;
     }
-    if (agent === "opencode" && !model.startsWith("opencode-go/")) {
-      problems.push(`roles.${role}.model must be an opencode-go/ model: other OpenCode providers are pay per use`);
-      continue;
-    }
-    roles[role] = { agent: agent as AgentKind, model };
+    roles[role] = { agent, model };
   }
   return roles;
 }

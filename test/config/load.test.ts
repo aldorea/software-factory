@@ -79,7 +79,7 @@ describe("loadConfig", () => {
     expect(error).toContain("- environment must be a function from the worker to its environment");
     expect(error).toContain("- protectedPaths must be a list of strings");
     expect(error).toContain("- roles.workers.agent must be one of claude-code, opencode");
-    expect(error).toContain("- roles.verifier must be an object with agent and model");
+    expect(error).not.toContain("roles.verifier");
   });
 
   it("should refuse a default agent that cannot serve its role, because the hard limits and the pause would not apply to it", async () => {
@@ -88,8 +88,14 @@ describe("loadConfig", () => {
     );
 
     await expect(loadConfig(dir)).rejects.toThrow(
-      "roles.workers.agent opencode cannot serve the workers: it misses readsTokenUsage, detectsPlanLimit",
+      "roles.workers: opencode cannot serve the workers: it misses readsTokenUsage, detectsPlanLimit",
     );
+  });
+
+  it("should load a config with no default agents, because the flags or the prompt of factory run can give them", async () => {
+    const dir = await repoWithConfig(VALID.replace(/  roles: \{[\s\S]*?\n  \},\n/, ""));
+
+    expect((await loadConfig(dir)).roles).toEqual({});
   });
 
   it("should load the e2e and request commands with the placeholder of the criterion ID and default to no commands", async () => {
