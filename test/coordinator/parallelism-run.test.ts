@@ -43,13 +43,16 @@ async function withHistory(target: Target, history: RunLog[]): Promise<void> {
   for (const log of history) await writeRunLog(join(target.repoDir, ".factory", "logs", log.runId, "run.json"), log);
 }
 
-function observedRun(target: Target) {
+function observedRun(target: Target, rendezvous = 1) {
   let active = 0;
+  let arrivals = 0;
   const observer = { peak: 0 };
   const script: AttemptScript = async (call) => {
     active += 1;
+    arrivals += 1;
     observer.peak = Math.max(observer.peak, active);
-    await sleep(120);
+    for (let waited = 0; arrivals < rendezvous && waited < 10_000; waited += 10) await sleep(10);
+    await sleep(60);
     active -= 1;
     return call.spec.branch.endsWith("/S1")
       ? { files: { "src/greeting.txt": "hello\n" } }
@@ -82,7 +85,7 @@ describe("factory run with the maxParallel derived from the run history", () => 
   it("should run 2 subtasks at once after 3 runs in a row with no worker-layer failure, and record it in run.json", async () => {
     const target = await targetRepo(TWO_INDEPENDENT);
     await withHistory(target, threeClean());
-    const { observer, run } = observedRun(target);
+    const { observer, run } = observedRun(target, 2);
 
     const report = await run();
 
@@ -94,7 +97,7 @@ describe("factory run with the maxParallel derived from the run history", () => 
   it("should write the derived maxParallel to the run.json on disk", async () => {
     const target = await targetRepo(TWO_INDEPENDENT);
     await withHistory(target, threeClean());
-    const { run } = observedRun(target);
+    const { run } = observedRun(target, 2);
 
     const report = await run();
 
