@@ -214,4 +214,23 @@ describe("factory run on a paused or partially done run", () => {
     expect(working(second.runner)).toHaveLength(0);
     expect(resumed.log.subtasks[0]?.block?.type).toBe("subtask-wall-clock");
   });
+
+  it("should keep the scope extended before the pause, in the gate and in the prompt", async () => {
+    const target = await targetRepo();
+    const first = factory(target, (call) =>
+      call.number === 1
+        ? { outcome: { kind: "completed", summary: "FACTORY-SCOPE-REQUEST: docs/greeting.md" } }
+        : { outcome: { kind: "plan-limit", message: "limit" } },
+    );
+    await first.run();
+
+    const second = factory(target, () => ({ files: { "src/greeting.txt": "hello\n", "docs/greeting.md": "# Hello\n" } }), {
+      at: "2026-10-24T14:00:00.000Z",
+    });
+    const resumed = await second.run();
+
+    expect(resumed.result).toBe("ready");
+    expect(resumed.log.subtasks[0]?.scopeExtensions).toEqual(["docs/greeting.md"]);
+    expect(working(second.runner)[0]?.attempts[0]?.prompt).toContain("docs/greeting.md");
+  });
 });

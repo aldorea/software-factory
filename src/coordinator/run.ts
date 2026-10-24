@@ -24,12 +24,13 @@ import { changedPaths, testFilesAt } from "./diff.ts";
 import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
 import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
 import { firstErrorLine } from "./failures.ts";
-import { gateDecision, requestCheckPaths, type GateDecision } from "./gate.ts";
+import { gateDecision, protectedFor, requestCheckPaths, type GateDecision } from "./gate.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
 import { resumedLog } from "./resume.ts";
 import { latestRunLog, mergedSubtasks, SUBTASK_TRAILER } from "./run-history.ts";
 import { dependencyProblem, schedule, type Schedule } from "./schedule.ts";
+import { decideScopeExtension, type ScopeExtensionDecision } from "./scope-extension.ts";
 import { Lock, runSchedule } from "./slots.ts";
 import {
   RUN_LOG_VERSION,
@@ -130,6 +131,26 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   await save();
 
   const gitLock = new Lock();
+  const scopes = new Map<string, string[]>(
+    subtasks.map((subtask) => [subtask.id, [...subtask.scope, ...(records.get(subtask.id)?.scopeExtensions ?? [])]]),
+  );
+  const extendScope = (subtask: Subtask, requested: string[]): ScopeExtensionDecision => {
+    const scope = scopes.get(subtask.id) as string[];
+    const wave = plan.waves.find((members) => members.some((member) => member.id === subtask.id)) ?? [];
+    const decision = decideScopeExtension({
+      requested,
+      scope,
+      waveScopes: wave
+        .filter((member) => member.id !== subtask.id)
+        .map((member) => ({ subtask: member.id, scope: scopes.get(member.id) as string[] })),
+      protectedPaths: protectedFor(subtask.id === plan.base?.id, config.protectedPaths),
+    });
+    if (decision.kind === "extend") {
+      scope.push(...decision.paths);
+      (records.get(subtask.id) as SubtaskRecord).scopeExtensions.push(...decision.paths);
+    }
+    return decision;
+  };
 
   const noteFailure = async (error: unknown, subtaskId: string | null) => {
     if (!(error instanceof WorkerLayerError)) throw error;
@@ -249,7 +270,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       const { checks, criteria } = gated;
       const checked = gateDecision({
         changes: await changedPaths(request.repoDir, branch, sha),
-        scope: subtask.scope,
+        scope: scopes.get(subtask.id) as string[],
         protectedPaths: config.protectedPaths,
         isBase: subtask.id === plan.base?.id,
         existingTestPaths,
@@ -287,6 +308,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       startedAt,
       gate,
       runTokens,
+      extendScope: (requested) => extendScope(subtask, requested),
       save,
       paused: () => log.pauseReason !== undefined,
     });
@@ -315,6 +337,11 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
         record.state = "blocked";
         record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
       }
+    } else if (loop.kind === "reported") {
+      record.state = "blocked";
+      record.blockType = loop.type;
+      record.reason = loop.reason;
+      record.block = { type: loop.type, reason: loop.reason };
     } else if (loop.kind === "paused") {
       if (loop.limit !== undefined) pauseRun(loop.limit);
     } else {
@@ -413,6 +440,7 @@ interface LoopWiring {
   startedAt: Date;
   gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | null>;
   runTokens: () => number;
+  extendScope: (requested: string[]) => ScopeExtensionDecision;
   save: () => Promise<void>;
   paused: () => boolean;
 }
@@ -472,6 +500,7 @@ async function runWorker(
       attempt: (prompt, attemptLimits) =>
         inStage("attempt", () => worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits)),
       gate: wiring.gate,
+      extendScope: wiring.extendScope,
       save: wiring.save,
       paused: wiring.paused,
     });
