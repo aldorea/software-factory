@@ -1,14 +1,17 @@
-import { mkdtemp, readFile, realpath } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { supervise } from "../../src/workers/supervise.ts";
+import { tempDirs } from "../temp-dirs.ts";
+
+const temp = tempDirs();
+afterEach(() => temp.removeAll());
 
 async function superviseNode(
   script: string,
   options: { deadlineMs?: number; idleMs?: number; finalLine?: string; stdin?: string } = {},
 ) {
-  const dir = await mkdtemp(join(tmpdir(), "supervise-"));
+  const dir = await temp.make("supervise-");
   const logPath = join(dir, "attempt.jsonl");
   const lines: string[] = [];
   const result = await supervise({
@@ -83,7 +86,7 @@ describe("supervise", () => {
   });
 
   it("should run the process in the given directory, with PWD set to it", async () => {
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "supervise-cwd-")));
+    const dir = await temp.make("supervise-cwd-");
     const lines: string[] = [];
     await supervise({
       command: process.execPath,

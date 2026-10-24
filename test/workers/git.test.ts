@@ -1,7 +1,6 @@
-import { mkdtemp, realpath, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   addWorktree,
   addWorktreeForBranch,
@@ -12,9 +11,13 @@ import {
   revParse,
 } from "../../src/workers/git.ts";
 import { exec, execOk } from "../../src/workers/sh.ts";
+import { tempDirs } from "../temp-dirs.ts";
+
+const temp = tempDirs();
+afterEach(() => temp.removeAll());
 
 async function repo(): Promise<string> {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "git-test-")));
+  const dir = await temp.make("git-test-");
   await execOk("git", ["init", "-q", "-b", "main", dir]);
   await writeFile(join(dir, "README.md"), "# repo\n");
   await execOk("git", ["-C", dir, "add", "."]);
