@@ -3,9 +3,15 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toEnvFile } from "./docker-runner.ts";
-import { applyOpenCodeLine, initialOpenCodeState, openCodeArgs, openCodeOutcome } from "./opencode.ts";
+import {
+  applyOpenCodeLine,
+  initialOpenCodeState,
+  openCodeArgs,
+  openCodeOutcome,
+  type OpenCodeStreamState,
+} from "./opencode.ts";
 import { exec, execOk } from "./sh.ts";
-import { supervise } from "./supervise.ts";
+import { supervise, type SupervisedProcess } from "./supervise.ts";
 import type { AttemptLimits, AttemptOutcome, AttemptResult } from "./types.ts";
 
 const WORKDIR = "/home/agent/verifier";
@@ -79,21 +85,9 @@ export async function askVerifier(request: VerifierRequest): Promise<AttemptResu
     });
 
     const listing = await execOk("docker", ["exec", container, "ls", "-A", WORKDIR]);
-    const leftovers = listing.split("\n").filter((name) => name !== "" && name !== CONFIG_FILE);
-    const answered = openCodeOutcome(state, supervised);
-    const outcome: AttemptOutcome =
-      leftovers.length > 0
-        ? {
-            kind: "agent-error",
-            message: `The verifier changed its directory despite the deny-all config: ${leftovers.join(", ")}`,
-            exitCode: supervised.exitCode,
-          }
-        : answered.kind === "completed" && answered.summary.trim() === ""
-          ? { kind: "agent-error", message: "The verifier gave no answer", exitCode: supervised.exitCode }
-          : answered;
 
     return {
-      outcome,
+      outcome: verifierOutcome(state, supervised, listing),
       usage: { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0 },
       logPath: request.logPath,
       startedAt,
@@ -103,4 +97,24 @@ export async function askVerifier(request: VerifierRequest): Promise<AttemptResu
     await exec("docker", ["rm", "-f", container]);
     await rm(secretsDir, { recursive: true, force: true });
   }
+}
+
+export function verifierOutcome(
+  state: OpenCodeStreamState,
+  supervised: SupervisedProcess,
+  directoryListing: string,
+): AttemptOutcome {
+  const leftovers = directoryListing.split("\n").filter((name) => name !== "" && name !== CONFIG_FILE);
+  if (leftovers.length > 0) {
+    return {
+      kind: "agent-error",
+      message: `The verifier changed its directory despite the deny-all config: ${leftovers.join(", ")}`,
+      exitCode: supervised.exitCode,
+    };
+  }
+  const answered = openCodeOutcome(state, supervised);
+  if (answered.kind === "completed" && answered.summary.trim() === "") {
+    return { kind: "agent-error", message: "The verifier gave no answer", exitCode: supervised.exitCode };
+  }
+  return answered;
 }
