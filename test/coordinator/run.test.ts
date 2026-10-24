@@ -61,6 +61,7 @@ const CONFIG = `
 export default {
   image: "greeting-worker:dev",
   checks: [{ name: "greeting", command: "grep -q hello src/greeting.txt" }],
+  evidence: { request: "grep -q hello src/greeting.txt # {{id}}" },
   environment: ({ purpose, subtask, slot }) => ({
     DATABASE_URL: "postgres://neon/" + (subtask ?? purpose),
     E2E_PORT: String(4000 + slot),
@@ -258,9 +259,15 @@ describe("factory run for a one-subtask spec", () => {
     expect(runner.workers).toHaveLength(3);
     expect(worker?.execs).toEqual([]);
     expect(gate?.attempts).toEqual([]);
-    expect(gate?.execs).toEqual([{ command: "grep -q hello src/greeting.txt", exitCode: 0 }]);
+    expect(gate?.execs).toEqual([
+      { command: "grep -q hello src/greeting.txt", exitCode: 0 },
+      { command: "grep -q hello src/greeting.txt # A1", exitCode: 0 },
+    ]);
     expect(verification?.attempts).toEqual([]);
-    expect(verification?.execs).toEqual([{ command: "grep -q hello src/greeting.txt", exitCode: 0 }]);
+    expect(verification?.execs).toEqual([
+      { command: "grep -q hello src/greeting.txt", exitCode: 0 },
+      { command: "grep -q hello src/greeting.txt # A1", exitCode: 0 },
+    ]);
     expect(runner.workers.every((record) => record.closed)).toBe(true);
     expect(await listWorktrees(target.repoDir)).toEqual([{ path: target.repoDir, branch: "main" }]);
   });
@@ -277,7 +284,9 @@ describe("factory run for a one-subtask spec", () => {
     const pullRequest = target.github.pullRequests[0];
     expect(pullRequest?.draft).toBe(true);
     expect(pullRequest?.body).toContain("**S1** (A1): blocked.");
-    expect(pullRequest?.body).toContain("Last failure: The gate rejected the work: check greeting failed with exit code 1");
+    expect(pullRequest?.body).toContain(
+      "Last failure: The gate rejected the work: check greeting failed with exit code 1; criterion A1 (request) failed with exit code 1",
+    );
     expect(pullRequest?.body).toContain("- [ ] greeting: `grep -q hello src/greeting.txt` failed with exit code 2");
     expect(notifier.sent[0]?.url).toBe(pullRequest?.url);
   });
@@ -457,7 +466,7 @@ describe("factory run: gate rejections", () => {
     expect(second?.prompt).toContain("Last failure");
     expect(second?.prompt).toContain("check greeting failed with exit code 1");
     expect(report.result).toBe("ready");
-    expect(report.log.subtasks[0]?.attempts.map((attempt) => attempt.failure?.signature)).toEqual(["check:greeting", undefined]);
+    expect(report.log.subtasks[0]?.attempts.map((attempt) => attempt.failure?.signature)).toEqual(["check:greeting | criterion:A1", undefined]);
     expect(report.log.subtasks[0]?.state).toBe("merged");
   });
 

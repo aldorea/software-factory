@@ -1,5 +1,5 @@
 import { criteriaHash, readApproval, technicalHash } from "../spec/approval.ts";
-import type { RunLog, RunResult } from "./run-log.ts";
+import type { CheckRecord, CriterionRecord, RunLog, RunResult } from "./run-log.ts";
 
 export function approvalProblem(issue: number, specText: string, issueBody: string): string | null {
   const state = readApproval(specText);
@@ -12,6 +12,10 @@ export function approvalProblem(issue: number, specText: string, issueBody: stri
   if (technicalHash(specText) !== state.approval.technicalHash) changed.push(`specs/${issue}.md changed`);
   if (changed.length === 0) return null;
   return `${changed.join(" and ")} since the approval; review the spec and run factory approve ${issue} again`;
+}
+
+export function verificationPassed(checks: CheckRecord[], criteria: CriterionRecord[]): boolean {
+  return checks.every((check) => check.passed) && criteria.every((criterion) => criterion.passed);
 }
 
 export function runResult(log: Pick<RunLog, "subtasks" | "verification" | "pauseReason">): Exclude<RunResult, "running"> {

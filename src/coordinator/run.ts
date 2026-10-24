@@ -17,8 +17,10 @@ import { parseSpec, validateSpec, type Spec, type Subtask } from "../spec/spec.t
 import { missingRequirements } from "../workers/agents.ts";
 import { revParse } from "../workers/git.ts";
 import type { AgentKind } from "../workers/types.ts";
-import { approvalProblem, runId as makeRunId, runResult } from "./decisions.ts";
+import { approvalProblem, runId as makeRunId, runResult, verificationPassed } from "./decisions.ts";
 import { changedPaths, testFilesAt } from "./diff.ts";
+import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
+import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
 import { firstErrorLine } from "./failures.ts";
 import { gateDecision, requestCheckPaths, type GateDecision } from "./gate.ts";
 import type { RunPorts } from "./ports.ts";
@@ -61,7 +63,7 @@ interface Prepared {
 
 export async function runIssue(request: RunRequest, ports: RunPorts): Promise<RunReport> {
   const prepared = await prepare(request, ports);
-  const { config, issue, branch, subtask, workers } = prepared;
+  const { config, issue, branch, spec, subtask, workers } = prepared;
   const startedAt = ports.clock.now();
   const id = makeRunId(request.issue, startedAt);
   const runDir = join(request.repoDir, ".factory", "logs", id);
@@ -86,7 +88,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   const save = () => writeRunLog(runLogPath, log);
   await save();
 
-  const checksOn = async (label: string, sha: string, context: WorkerEnvironmentContext) => {
+  const checksOn = async (label: string, sha: string, context: WorkerEnvironmentContext, plan: EvidencePlan) => {
     const checkBranch = `factory-check/${id}/${label}`;
     const env = environment(config, context);
     await createBranchAt(request.repoDir, checkBranch, sha);
@@ -97,6 +99,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
         throw error;
       });
     const checks: CheckRecord[] = [];
+    let evidence: EvidenceResult = { criteria: [], human: [] };
     let preserved = false;
     try {
       for (const check of config.checks) {
@@ -111,18 +114,28 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
           ...(firstError !== undefined ? { firstError } : {}),
         });
       }
+      evidence = await runEvidence(worker, plan, {
+        app: config.app,
+        commands: config.evidence,
+        attachmentsDir: join(runDir, "attachments"),
+      });
     } finally {
       preserved = (await worker.close()).preservedWorktreePath !== undefined;
     }
     if (!preserved) await deleteBranch(request.repoDir, checkBranch);
-    return checks;
+    return { checks, ...evidence };
   };
 
   const startSha = await revParse(request.repoDir, branch);
   const existingTestPaths = await testFilesAt(request.repoDir, startSha);
-  const requestChecks = prepared.spec.base ? requestCheckPaths(prepared.spec) : [];
+  const requestChecks = spec.base ? requestCheckPaths(spec) : [];
   const gate = async (sha: string, attempt: number): Promise<GateDecision> => {
-    const checks = await checksOn(`${subtask.id}-gate-${attempt}`, sha, { purpose: "gate", subtask: subtask.id, slot: 0 });
+    const { checks, criteria } = await checksOn(
+      `${subtask.id}-gate-${attempt}`,
+      sha,
+      { purpose: "gate", subtask: subtask.id, slot: 0 },
+      gatePlan(spec, subtask.criteria, config.evidence),
+    );
     const decision = gateDecision({
       changes: await changedPaths(request.repoDir, branch, sha),
       scope: subtask.scope,
@@ -132,8 +145,9 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       authorizedTestChanges: subtask.testChanges,
       requestCheckPaths: requestChecks,
       checks,
+      criteria,
     });
-    record.gate = { sha, accepted: decision.accepted, reasons: decision.reasons, checks };
+    record.gate = { sha, accepted: decision.accepted, reasons: decision.reasons, checks, criteria };
     return decision;
   };
   const runTokens = () =>
@@ -165,8 +179,13 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   if (log.pauseReason === undefined) {
     const sha = await revParse(request.repoDir, branch);
-    const checks = await checksOn("verification", sha, { purpose: "verification", subtask: null, slot: 0 });
-    log.verification = { sha, passed: checks.every((check) => check.passed), checks };
+    const { checks, criteria, human } = await checksOn(
+      "verification",
+      sha,
+      { purpose: "verification", subtask: null, slot: 0 },
+      integrationPlan(spec, config.evidence),
+    );
+    log.verification = { sha, passed: verificationPassed(checks, criteria), checks, criteria, humanCriteria: human };
   }
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();
@@ -207,6 +226,8 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
     protectedPaths: config.protectedPaths,
   });
   if (problems.length > 0) throw new Error(`${specPath} is invalid: ${problems.join("; ")}`);
+  const missingEvidence = evidenceProblems(parsed.spec, config.evidence);
+  if (missingEvidence.length > 0) throw new Error(`${specPath} cannot be verified: ${missingEvidence.join("; ")}`);
   const [subtask, ...others] = parsed.spec.subtasks;
   if (parsed.spec.base !== null || subtask === undefined || others.length > 0) {
     throw new Error(`factory run supports only a spec with one subtask and no base subtask for now`);

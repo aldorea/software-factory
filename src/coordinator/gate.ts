@@ -1,5 +1,5 @@
 import type { Spec } from "../spec/spec.ts";
-import type { CheckRecord } from "./run-log.ts";
+import type { CheckRecord, CriterionRecord } from "./run-log.ts";
 
 export const ALWAYS_PROTECTED = [".factory"];
 
@@ -10,7 +10,9 @@ export interface DiffChange {
   status: ChangeStatus;
 }
 
-export type RejectionKind = "protected" | "request-check" | "existing-test" | "scope" | "check";
+export type RejectionKind = "protected" | "request-check" | "existing-test" | "scope" | "check" | "criterion";
+
+type DiffRejectionKind = Exclude<RejectionKind, "check" | "criterion">;
 
 export interface GateRejection {
   kind: RejectionKind;
@@ -27,6 +29,7 @@ export interface GateInput {
   authorizedTestChanges: string[];
   requestCheckPaths: string[];
   checks: CheckRecord[];
+  criteria?: CriterionRecord[];
 }
 
 export interface GateDecision {
@@ -37,7 +40,11 @@ export interface GateDecision {
 }
 
 export function gateDecision(input: GateInput): GateDecision {
-  const rejections = [...diffRejections(input), ...input.checks.filter((check) => !check.passed).map(checkRejection)];
+  const rejections = [
+    ...diffRejections(input),
+    ...input.checks.filter((check) => !check.passed).map(checkRejection),
+    ...(input.criteria ?? []).filter((criterion) => !criterion.passed).map(criterionRejection),
+  ];
   return {
     accepted: rejections.length === 0,
     reasons: rejections.map((rejection) => rejection.message),
@@ -49,7 +56,7 @@ export function gateDecision(input: GateInput): GateDecision {
 function diffRejections(input: GateInput): GateRejection[] {
   const protectedPaths = input.isBase ? [] : [...input.protectedPaths, ...ALWAYS_PROTECTED];
   const requestChecks = input.isBase ? [] : input.requestCheckPaths;
-  const found: Record<Exclude<RejectionKind, "check">, string[]> = {
+  const found: Record<DiffRejectionKind, string[]> = {
     protected: [],
     "request-check": [],
     "existing-test": [],
@@ -63,7 +70,7 @@ function diffRejections(input: GateInput): GateRejection[] {
     else if (!authorized && !input.scope.some((entry) => covers(entry, path))) found.scope.push(path);
   }
   const rejections: GateRejection[] = [];
-  const add = (kind: Exclude<RejectionKind, "check">, paths: string[], message: string) => {
+  const add = (kind: DiffRejectionKind, paths: string[], message: string) => {
     if (paths.length === 0) return;
     const sorted = [...paths].sort();
     rejections.push({ kind, message: `${message}: ${sorted.join(", ")}`, signature: `${kind}:${sorted.join(",")}` });
@@ -81,6 +88,14 @@ function checkRejection(check: CheckRecord): GateRejection {
     kind: "check",
     message: `check ${check.name} failed with exit code ${check.exitCode}${detail}`,
     signature: `check:${check.name}${detail}`,
+  };
+}
+
+function criterionRejection(criterion: CriterionRecord): GateRejection {
+  return {
+    kind: "criterion",
+    message: `criterion ${criterion.id} (${criterion.evidence}) failed with exit code ${criterion.exitCode}`,
+    signature: `criterion:${criterion.id}`,
   };
 }
 

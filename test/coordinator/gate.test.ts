@@ -147,6 +147,15 @@ describe("gateDecision", () => {
     ]);
   });
 
+  it("should reject a failed criterion with its ID in the reason and in the signature", () => {
+    const decision = gateDecision(
+      input({ criteria: [{ id: "A2", evidence: "request", command: "curl", exitCode: 22, passed: false }] }),
+    );
+
+    expect(decision.reasons).toEqual(["criterion A2 (request) failed with exit code 22"]);
+    expect(decision.signature).toBe("criterion:A2");
+  });
+
   it("should give the same signature to the same rejection and a different one to another", () => {
     const first = gateDecision(input({ changes: [{ path: "docs/a.md", status: "added" }] }));
     const again = gateDecision(input({ changes: [{ path: "docs/a.md", status: "modified" }] }));
