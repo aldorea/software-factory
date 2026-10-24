@@ -14,7 +14,7 @@ import { gatePlan } from "./evidence.ts";
 import { gateDecision, protectedFor, type GateDecision } from "./gate.ts";
 import { environment, paused, stopLimits, type RunContext } from "./run-context.ts";
 import { SUBTASK_TRAILER } from "./run-history.ts";
-import type { SubtaskRecord } from "./run-log.ts";
+import type { CarriedLoopRecord, SubtaskRecord } from "./run-log.ts";
 import { decideScopeExtension, type ScopeExtensionDecision } from "./scope-extension.ts";
 import { agentTokens } from "./stop-rules.ts";
 import { attemptSubtask, type EnvironmentHit, type LoopResult, type PlanLimitHit } from "./subtask-loop.ts";
@@ -73,6 +73,7 @@ export async function workOn(
     record,
     slot,
     workerId: workerId(issue, label, record),
+    carried: followUp ? context.budgets.get(subtask.id) : undefined,
     gate: (attempt) => gate(context, { subtask, record, slot, label, attempt, followUp: followUp !== null }),
     ...(followUp ? { followUp: followUp.text } : {}),
   });
@@ -80,6 +81,7 @@ export async function workOn(
   if (unclassified !== undefined) throw unclassified;
   for (const failure of worked.failures) await context.noteFailure(failure, record.id);
 
+  if (worked.result?.kind === "accepted") context.budgets.set(subtask.id, worked.result.budget);
   const settlement = settleLoop(worked.result);
   let outcome: FollowUpOutcome;
   if (settlement.kind === "merge") {
@@ -198,6 +200,7 @@ interface WorkerRequest {
   record: SubtaskRecord;
   slot: number;
   workerId: string;
+  carried: CarriedLoopRecord | undefined;
   followUp?: string;
   gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | EnvironmentHit | null>;
 }
@@ -236,6 +239,7 @@ async function workInWorker(context: RunContext, request: WorkerRequest): Promis
       agent: workers,
       prompt: await workerPrompt(issue, subtask, config, request.followUp),
       record,
+      ...(request.carried !== undefined ? { carried: request.carried } : {}),
       limits: { ...stopLimits(config, workers), attemptIdleTimeoutMs: config.limits.attemptIdleTimeoutMs },
       runStartedAt: context.startedAt,
       runTokens: () => agentTokens(context.log.subtasks.flatMap((entry) => entry.attempts), workers.agent),

@@ -254,7 +254,7 @@ describe("factory run: follow-up tasks", () => {
     expect(report.result).toBe("ready");
   });
 
-  it("should count the tokens of a follow-up against the limit of its subtask from zero, because the follow-up is a task of its own", async () => {
+  it("should keep counting the tokens of the subtask across its follow-ups, because a follow-up is more work on the same subtask", async () => {
     const repo = await target('agents: { "claude-code": { tokensPerSubtask: 1000 } }');
     const usage = { outputTokens: 800 };
     const { run, runner } = harness(repo, (call) => {
@@ -268,8 +268,39 @@ describe("factory run: follow-up tasks", () => {
 
     const report = await run();
 
-    expect(followUps(runner)[0]?.attempts).toHaveLength(2);
-    expect(subtask(report.log, "S2")?.state).toBe("merged");
+    expect(followUps(runner)[0]?.attempts).toHaveLength(1);
+    expect(subtask(report.log, "S2")).toMatchObject({ state: "blocked", blockType: "limit", block: { type: "subtask-tokens" } });
+    expect(report.result).toBe("draft");
+  });
+
+  it("should keep counting the wall clock of the subtask across its follow-ups", async () => {
+    const repo = await target("limits: { subtaskWallClockMs: 60 * 60 * 1000 }");
+    const { run, runner, clock } = harness(repo, (call) => {
+      clock.advance(40 * 60 * 1000);
+      if (call.spec.id.includes("followup")) {
+        return call.number === 1 ? { files: { "a/a.txt": "changed\n" } } : { files: { "a/a.txt": "a\n", "ok-A2": "ok\n" } };
+      }
+      return firstPass(call);
+    });
+
+    const report = await run();
+
+    expect(followUps(runner)[0]?.attempts).toHaveLength(1);
+    expect(subtask(report.log, "S2")?.block?.type).toBe("subtask-wall-clock");
+  });
+
+  it("should keep counting patience across follow-ups, so a follow-up that repeats the failure of the first pass stops sooner", async () => {
+    const repo = await target("", [{ name: "no-bad", command: "! grep -qs BAD b/b.txt" }]);
+    const { run, runner } = harness(repo, (call) => {
+      if (call.spec.id.includes("followup")) return { files: { "b/b.txt": "BAD again\n" } };
+      if (subtaskOf(call) === "S2") return { files: { "b/b.txt": call.number <= 2 ? `BAD ${call.number}\n` : "b\n" } };
+      return firstPass(call);
+    });
+
+    const report = await run();
+
+    expect(subtask(report.log, "S2")).toMatchObject({ state: "blocked", blockType: "patience" });
+    expect(followUps(runner)[0]?.attempts).toHaveLength(1);
   });
 });
 

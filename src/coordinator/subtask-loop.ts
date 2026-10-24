@@ -4,7 +4,7 @@ import type { AgentKind, AttemptLimits, AttemptResult } from "../workers/types.t
 import { outcomeFailure, gateFailure, type AttemptFailure } from "./failures.ts";
 import type { GateDecision } from "./gate.ts";
 import type { Clock } from "./ports.ts";
-import type { AttemptRecord, SubtaskRecord } from "./run-log.ts";
+import type { AttemptRecord, CarriedLoopRecord, SubtaskRecord } from "./run-log.ts";
 import type { ScopeExtensionDecision } from "./scope-extension.ts";
 import { agentTokens, stopReason, type StopLimits, type StopReason } from "./stop-rules.ts";
 import { parseWorkerReport } from "./worker-report.ts";
@@ -18,6 +18,7 @@ export interface SubtaskLoop {
   agent: RoleChoice;
   prompt: string;
   record: SubtaskRecord;
+  carried?: CarriedLoopRecord;
   limits: LoopLimits;
   runStartedAt: Date;
   runTokens: () => number;
@@ -41,7 +42,7 @@ export interface EnvironmentHit {
 }
 
 export type LoopResult =
-  | { kind: "accepted" }
+  | { kind: "accepted"; budget: CarriedLoopRecord }
   | { kind: "blocked"; stop: StopReason; lastFailure?: string }
   | { kind: "reported"; type: "scope" | "design-question"; reason: string }
   | { kind: "paused"; limit?: PlanLimitHit }
@@ -50,16 +51,18 @@ export type LoopResult =
 
 export async function attemptSubtask(loop: SubtaskLoop): Promise<LoopResult> {
   const { clock, record } = loop;
-  const carried = record.carriedLoop;
+  const carried = loop.carried ?? record.carriedLoop;
   delete record.carriedLoop;
   const first = carried?.firstAttempt ?? record.attempts.length;
   const startedAt = new Date(clock.now().getTime() - (carried?.elapsedMs ?? 0));
   const result = await attemptsUntilDone(loop, startedAt, first);
-  if (result.kind !== "accepted") record.carriedLoop = { firstAttempt: first, elapsedMs: clock.now().getTime() - startedAt.getTime() };
+  const budget = { firstAttempt: first, elapsedMs: clock.now().getTime() - startedAt.getTime() };
+  if (result.kind === "accepted") return { kind: "accepted", budget };
+  record.carriedLoop = budget;
   return result;
 }
 
-async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: number): Promise<LoopResult> {
+async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: number): Promise<LoopResult | { kind: "accepted" }> {
   const { clock, record, limits } = loop;
   const earlier = record.attempts.slice(first).flatMap((attempt) => (attempt.failure ? [attempt.failure] : []));
   const signatures = earlier.map((failure) => failure.signature);
@@ -140,7 +143,7 @@ async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: numb
   }
 }
 
-async function pause(loop: SubtaskLoop, limit?: PlanLimitHit): Promise<LoopResult> {
+async function pause(loop: SubtaskLoop, limit?: PlanLimitHit): Promise<Exclude<LoopResult, { kind: "accepted" }>> {
   loop.record.state = "pending";
   await loop.save();
   return limit === undefined ? { kind: "paused" } : { kind: "paused", limit };

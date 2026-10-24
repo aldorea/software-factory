@@ -400,6 +400,7 @@ describe("factory run with several subtasks", () => {
     const target = await targetRepo({ subtasks, maxParallel: 2 });
     const commitOutsideTheRun = async () => {
       while (!(await git(target.repoDir, "log", BRANCH, "--format=%B")).includes("Factory-Subtask: S1")) await pause(20);
+      while ((await git(target.repoDir, "worktree", "list", "--porcelain")).includes(`refs/heads/${BRANCH}`)) await pause(20);
       await withBranchWorktree(target.repoDir, BRANCH, async (worktree) => {
         await mkdir(join(worktree, "b"), { recursive: true });
         await writeFile(join(worktree, "b", "shared.txt"), "outside\n");

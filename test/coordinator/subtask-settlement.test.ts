@@ -24,7 +24,7 @@ const subtask = (id: string, dependsOn: string[] = [], scope: string[] = [`${id}
 
 describe("settleLoop", () => {
   it("should merge an accepted loop", () => {
-    expect(settleLoop({ kind: "accepted" })).toEqual({ kind: "merge" });
+    expect(settleLoop({ kind: "accepted", budget: { firstAttempt: 0, elapsedMs: 0 } })).toEqual({ kind: "merge" });
   });
 
   it("should interrupt a loop the worker layer stopped, saying whether it stopped the attempt or the gate", () => {

@@ -94,6 +94,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     scopes: new Map(
       subtasks.map((subtask) => [subtask.id, [...subtask.scope, ...(records.get(subtask.id)?.scopeExtensions ?? [])]]),
     ),
+    budgets: new Map(),
     gitLock: new Lock(),
     conflicted: log.subtasks.some((record) => record.state === "blocked" && record.conflictFiles !== undefined),
     save,

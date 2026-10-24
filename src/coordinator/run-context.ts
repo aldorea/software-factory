@@ -4,7 +4,7 @@ import type { Spec } from "../spec/spec.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { ParallelismBounds } from "./parallelism.ts";
 import type { RunPorts } from "./ports.ts";
-import type { RunLog, SubtaskRecord } from "./run-log.ts";
+import type { CarriedLoopRecord, RunLog, SubtaskRecord } from "./run-log.ts";
 import type { Schedule } from "./schedule.ts";
 import type { Lock } from "./slots.ts";
 import type { StopLimits } from "./stop-rules.ts";
@@ -41,6 +41,7 @@ export interface RunContext {
   requestChecks: string[];
   records: ReadonlyMap<string, SubtaskRecord>;
   scopes: ReadonlyMap<string, string[]>;
+  budgets: Map<string, CarriedLoopRecord>;
   gitLock: Lock;
   conflicted: boolean;
   save(): Promise<void>;
