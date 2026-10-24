@@ -70,7 +70,7 @@ function formatCount(value: number): string {
   return value.toLocaleString("en-US");
 }
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
   const minutes = Math.round(ms / 60_000);
   if (minutes < 1) return `${Math.round(ms / 1000)} s`;
   const hours = Math.floor(minutes / 60);
