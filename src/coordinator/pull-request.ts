@@ -32,6 +32,8 @@ function resultLine(log: RunLog): string {
       `the integrated verification failed${failing.length > 0 ? ` (criteria not passing: ${failing.join(", ")})` : ""}`,
     );
   }
+  const layer = log.workerLayerFailures.length;
+  if (layer > 0) failed.push(`${layer} failure${layer === 1 ? "" : "s"} of the worker layer, not of the design`);
   return `Draft: ${failed.join("; ")}.`;
 }
 

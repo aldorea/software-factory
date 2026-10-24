@@ -1,6 +1,6 @@
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
-import { revParse } from "../workers/git.ts";
-import type { AgentSpec, AttemptResult, Worker } from "../workers/types.ts";
+import type { RoleChoice } from "../config/config.ts";
+import type { AttemptLimits, AttemptResult } from "../workers/types.ts";
 import { outcomeFailure, gateFailure, type AttemptFailure } from "./failures.ts";
 import type { GateDecision } from "./gate.ts";
 import type { Clock } from "./ports.ts";
@@ -13,24 +13,25 @@ export interface LoopLimits extends StopLimits {
 
 export interface SubtaskLoop {
   clock: Clock;
-  worker: Worker;
-  agent: AgentSpec;
+  agent: RoleChoice;
   prompt: string;
   record: SubtaskRecord;
   limits: LoopLimits;
   runStartedAt: Date;
   runTokens: () => number;
-  gate: (sha: string, attempt: number) => Promise<GateDecision>;
+  attempt: (prompt: string, limits: AttemptLimits) => Promise<AttemptResult>;
+  gate: (attempt: number) => Promise<GateDecision | null>;
   save: () => Promise<void>;
 }
 
 export type LoopResult =
   | { kind: "accepted" }
   | { kind: "blocked"; stop: StopReason; lastFailure?: string }
-  | { kind: "paused"; message: string };
+  | { kind: "paused"; message: string }
+  | { kind: "interrupted" };
 
 export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
-  const { clock, worker, record, limits } = loop;
+  const { clock, record, limits } = loop;
   const startedAt = clock.now();
   const signatures: string[] = [];
   let last: AttemptFailure | undefined;
@@ -52,23 +53,25 @@ export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
       Math.min(startedAt.getTime() + limits.subtaskWallClockMs, loop.runStartedAt.getTime() + limits.runWallClockMs),
     );
     const prompt = last ? await retryPrompt(loop.prompt, last) : loop.prompt;
-    const result = await worker.attempt(loop.agent, prompt, { deadline, idleTimeoutMs: limits.attemptIdleTimeoutMs });
-    const attempt = attemptRecord(number, result);
+    const result = await loop.attempt(prompt, { deadline, idleTimeoutMs: limits.attemptIdleTimeoutMs });
+    const attempt = attemptRecord(number, result, loop.agent);
     record.attempts.push(attempt);
 
     if (result.outcome.kind === "plan-limit") {
+      record.state = "pending";
       await loop.save();
       return { kind: "paused", message: result.outcome.message };
     }
 
     let failure = outcomeFailure(result.outcome);
     if (result.outcome.kind === "completed") {
-      const sha = await revParse(worker.spec.repoDir, record.branch);
-      const decision = await loop.gate(sha, number);
-      if (decision.accepted) {
-        await loop.save();
-        return { kind: "accepted" };
-      }
+      record.state = "gating";
+      await loop.save();
+      const decision = await loop.gate(number);
+      if (decision === null) return { kind: "interrupted" };
+      if (decision.accepted) return { kind: "accepted" };
+      record.gateRejections += 1;
+      record.state = "working";
       failure = gateFailure(decision);
     }
     if (failure) {
@@ -89,10 +92,11 @@ function subtaskTokens(record: SubtaskRecord): number {
   return record.attempts.reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
 }
 
-export function attemptRecord(number: number, result: AttemptResult): AttemptRecord {
+function attemptRecord(number: number, result: AttemptResult, agent: RoleChoice): AttemptRecord {
   const detail = outcomeDetail(result);
   return {
     number,
+    agent,
     outcome: result.outcome.kind,
     ...(detail !== undefined ? { detail } : {}),
     usage: result.usage,
