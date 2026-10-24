@@ -1,10 +1,22 @@
 import type { ExecResult } from "../workers/types.ts";
 import { exec } from "../workers/sh.ts";
-import type { GitHub, Issue } from "./github.ts";
+import type { GitHub, Issue, NewPullRequest, PullRequest, PullRequestUpdate } from "./github.ts";
 
 export interface GhOptions {
   repoDir: string;
   command?: string;
+}
+
+interface GhPullRequest {
+  number: number;
+  url: string;
+  isDraft: boolean;
+}
+
+const PR_FIELDS = "number,url,isDraft";
+
+function toPullRequest(data: GhPullRequest): PullRequest {
+  return { number: data.number, url: data.url, draft: data.isDraft };
 }
 
 export function ghGitHub(options: GhOptions): GitHub {
@@ -20,14 +32,47 @@ export function ghGitHub(options: GhOptions): GitHub {
       throw error;
     }
     if (result.exitCode !== 0) {
-      throw new Error(`gh ${args.join(" ")} failed (${result.exitCode}): ${result.stderr.trim()}`);
+      throw new Error(`gh ${args[0]} ${args[1] ?? ""} failed (${result.exitCode}): ${result.stderr.trim()}`);
     }
     return result.stdout;
+  }
+  async function view(ref: string): Promise<PullRequest> {
+    return toPullRequest(JSON.parse(await gh(["pr", "view", ref, "--json", PR_FIELDS])) as GhPullRequest);
+  }
+  async function setDraft(number: number, draft: boolean): Promise<void> {
+    await gh(["pr", "ready", String(number), ...(draft ? ["--undo"] : [])]);
   }
   return {
     async readIssue(issue: number): Promise<Issue> {
       const data = JSON.parse(await gh(["issue", "view", String(issue), "--json", "number,title,body"])) as Issue;
       return { number: data.number, title: data.title, body: data.body };
+    },
+    async findPullRequest(head: string, base: string): Promise<PullRequest | null> {
+      const found = JSON.parse(
+        await gh(["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", PR_FIELDS, "--limit", "1"]),
+      ) as GhPullRequest[];
+      return found[0] ? toPullRequest(found[0]) : null;
+    },
+    async createPullRequest(pullRequest: NewPullRequest): Promise<PullRequest> {
+      const url = await gh([
+        "pr",
+        "create",
+        "--head",
+        pullRequest.head,
+        "--base",
+        pullRequest.base,
+        "--title",
+        pullRequest.title,
+        "--body",
+        pullRequest.body,
+        ...(pullRequest.draft ? ["--draft"] : []),
+      ]);
+      return view(url.trim());
+    },
+    async updatePullRequest(number: number, update: PullRequestUpdate): Promise<PullRequest> {
+      await gh(["pr", "edit", String(number), "--title", update.title, "--body", update.body]);
+      if ((await view(String(number))).draft !== update.draft) await setDraft(number, update.draft);
+      return view(String(number));
     },
   };
 }

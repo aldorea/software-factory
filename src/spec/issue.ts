@@ -12,6 +12,16 @@ export function criteriaSection(body: string): string | null {
   return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join("\n");
 }
 
+export function criteriaText(body: string): Record<string, string> {
+  const section = criteriaSection(body) ?? "";
+  const texts: Record<string, string> = {};
+  for (const line of section.split("\n")) {
+    const id = CRITERION_ITEM.exec(line)?.[1];
+    if (id) texts[id] = line.replace(/^\s*[-*]\s+(?:\[[ xX]\]\s+)?/, "").trim();
+  }
+  return texts;
+}
+
 export function issueCriteria(body: string): string[] | null {
   const section = criteriaSection(body);
   if (section === null) return null;
