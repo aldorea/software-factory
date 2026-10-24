@@ -57,7 +57,7 @@ export interface FakeWorkerRecord {
   closed: boolean;
 }
 
-export type AttemptScript = (call: AttemptCall) => ScriptedAttempt;
+export type AttemptScript = (call: AttemptCall) => ScriptedAttempt | Promise<ScriptedAttempt>;
 
 export class FakeWorkerRunner implements WorkerRunner {
   readonly workers: FakeWorkerRecord[] = [];
@@ -91,7 +91,7 @@ class FakeWorker implements Worker {
     const call: AttemptCall = { spec: this.spec, agent, prompt, limits, number: this.record.attempts.length + 1 };
     this.record.attempts.push(call);
     const startedAt = new Date();
-    const scripted = this.script(call);
+    const scripted = await this.script(call);
     for (const [path, content] of Object.entries(scripted.files ?? {})) {
       await mkdir(dirname(join(this.worktreePath, path)), { recursive: true });
       await writeFile(join(this.worktreePath, path), content);

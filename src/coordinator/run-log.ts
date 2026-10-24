@@ -39,6 +39,7 @@ export interface SubtaskRecord {
   branch: string;
   state: SubtaskState;
   reason?: string;
+  conflictFiles?: string[];
   attempts: AttemptRecord[];
   gate?: GateRecord;
 }
