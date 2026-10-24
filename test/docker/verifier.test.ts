@@ -1,16 +1,21 @@
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { execOk } from "../../src/workers/sh.ts";
 import { askVerifier } from "../../src/workers/verifier.ts";
+import { tempDirs } from "../temp-dirs.ts";
+
+const temp = tempDirs();
+afterEach(async ({ task }) => {
+  if (task.result?.state === "fail") temp.keepAll();
+  else await temp.removeAll();
+});
 
 const IMAGE = "software-factory/worker:dev";
 const OPENCODE_KEY = process.env.OPENCODE_API_KEY;
 const FREE_GO_MODEL = "opencode-go/beam-free";
 
 async function ask(prompt: string) {
-  const logDir = await mkdtemp(join(tmpdir(), "verifier-log-"));
+  const logDir = await temp.make("verifier-log-");
   return askVerifier({
     image: IMAGE,
     env: { OPENCODE_API_KEY: OPENCODE_KEY ?? "" },

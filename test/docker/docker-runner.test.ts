@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DockerWorkerRunner } from "../../src/workers/docker-runner.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import type { Worker, WorkerSpec } from "../../src/workers/types.ts";
+import { tempDirs } from "../temp-dirs.ts";
 
 const IMAGE = "software-factory/worker:dev";
 const CLAUDE_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -18,7 +18,7 @@ const identity = {
 };
 
 async function toyRepo(): Promise<string> {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "toy-repo-")));
+  const dir = await temp.make("toy-repo-");
   await execOk("git", ["init", "-q", "-b", "main", dir]);
   await writeFile(join(dir, "README.md"), "# toy\n");
   await writeFile(join(dir, ".gitignore"), ".factory/\n");
@@ -42,8 +42,11 @@ async function spec(id: string, overrides: Partial<WorkerSpec> = {}): Promise<Wo
 }
 
 const open: Worker[] = [];
-afterEach(async () => {
+const temp = tempDirs();
+afterEach(async ({ task }) => {
   while (open.length > 0) await open.pop()?.close();
+  if (task.result?.state === "fail") temp.keepAll();
+  else await temp.removeAll();
 });
 
 describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeout: 360_000 }, () => {
