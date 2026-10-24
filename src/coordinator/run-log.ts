@@ -7,7 +7,7 @@ export const RUN_LOG_VERSION = 1;
 
 export type RunResult = "running" | "ready" | "draft" | "paused";
 
-export type SubtaskState = "pending" | "merged" | "blocked";
+export type SubtaskState = "pending" | "working" | "gating" | "merged" | "blocked";
 
 export interface AttemptRecord {
   number: number;

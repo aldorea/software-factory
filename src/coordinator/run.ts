@@ -111,8 +111,11 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     return checks;
   };
 
+  record.state = "working";
+  await save();
   const attempt = await runWorker(request, ports, prepared, record, runDir, startedAt);
   record.attempts.push(attemptRecord(1, attempt));
+  record.state = attempt.outcome.kind === "completed" ? "gating" : "pending";
   await save();
 
   if (attempt.outcome.kind === "completed") {
