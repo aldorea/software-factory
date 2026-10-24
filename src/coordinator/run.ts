@@ -13,21 +13,19 @@ import {
 import type { Issue, PullRequest } from "../github/github.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { criteriaText, issueCriteria } from "../spec/issue.ts";
-import { parseSpec, validateSpec, type Subtask } from "../spec/spec.ts";
+import { parseSpec, validateSpec, type Spec, type Subtask } from "../spec/spec.ts";
 import { missingRequirements } from "../workers/agents.ts";
 import { revParse } from "../workers/git.ts";
-import type { AgentKind, AttemptResult } from "../workers/types.ts";
-import { approvalProblem, gateDecision, runId as makeRunId, runResult } from "./decisions.ts";
+import type { AgentKind } from "../workers/types.ts";
+import { approvalProblem, runId as makeRunId, runResult } from "./decisions.ts";
+import { changedPaths, testFilesAt } from "./diff.ts";
+import { firstErrorLine } from "./failures.ts";
+import { gateDecision, requestCheckPaths, type GateDecision } from "./gate.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
-import {
-  RUN_LOG_VERSION,
-  writeRunLog,
-  type AttemptRecord,
-  type CheckRecord,
-  type RunLog,
-  type SubtaskRecord,
-} from "./run-log.ts";
+import { RUN_LOG_VERSION, writeRunLog, type CheckRecord, type RunLog, type SubtaskRecord } from "./run-log.ts";
+import { countedTokens } from "./stop-rules.ts";
+import { runSubtaskLoop, type LoopResult } from "./subtask-loop.ts";
 
 export const CREDENTIAL_VARIABLES: Record<AgentKind, string> = {
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN",
@@ -55,6 +53,7 @@ interface Prepared {
   config: ResolvedConfig;
   issue: Issue;
   branch: string;
+  spec: Spec;
   subtask: Subtask;
   workers: RoleChoice;
   credential: string;
@@ -102,7 +101,15 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     try {
       for (const check of config.checks) {
         const result = await worker.exec(check.command);
-        checks.push({ name: check.name, command: check.command, exitCode: result.exitCode, passed: result.exitCode === 0 });
+        const passed = result.exitCode === 0;
+        const firstError = passed ? undefined : firstErrorLine(`${result.stderr}\n${result.stdout}`);
+        checks.push({
+          name: check.name,
+          command: check.command,
+          exitCode: result.exitCode,
+          passed,
+          ...(firstError !== undefined ? { firstError } : {}),
+        });
       }
     } finally {
       preserved = (await worker.close()).preservedWorktreePath !== undefined;
@@ -111,33 +118,48 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     return checks;
   };
 
-  const attempt = await runWorker(request, ports, prepared, record, runDir, startedAt);
-  record.attempts.push(attemptRecord(1, attempt));
-  await save();
+  const startSha = await revParse(request.repoDir, branch);
+  const existingTestPaths = await testFilesAt(request.repoDir, startSha);
+  const requestChecks = prepared.spec.base ? requestCheckPaths(prepared.spec) : [];
+  const gate = async (sha: string, attempt: number): Promise<GateDecision> => {
+    const checks = await checksOn(`${subtask.id}-gate-${attempt}`, sha, { purpose: "gate", subtask: subtask.id, slot: 0 });
+    const decision = gateDecision({
+      changes: await changedPaths(request.repoDir, branch, sha),
+      scope: subtask.scope,
+      protectedPaths: config.protectedPaths,
+      isBase: false,
+      existingTestPaths,
+      authorizedTestChanges: subtask.testChanges,
+      requestCheckPaths: requestChecks,
+      checks,
+    });
+    record.gate = { sha, accepted: decision.accepted, reasons: decision.reasons, checks };
+    return decision;
+  };
+  const runTokens = () =>
+    log.subtasks.flatMap((entry) => entry.attempts).reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
 
-  if (attempt.outcome.kind === "completed") {
-    const sha = await revParse(request.repoDir, record.branch);
-    const checks = await checksOn(`${subtask.id}-gate`, sha, { purpose: "gate", subtask: subtask.id, slot: 0 });
-    const decision = gateDecision(checks);
-    record.gate = { sha, ...decision, checks };
-    if (!decision.accepted) {
+  const loop = await runWorker(request, ports, prepared, runDir, { record, startedAt, gate, runTokens, save });
+
+  if (loop.kind === "accepted") {
+    const merged = await withBranchWorktree(request.repoDir, branch, (worktree) =>
+      mergeBranch(worktree, record.branch, mergeMessage(request.issue, subtask.id)),
+    );
+    if (merged.kind === "merged") record.state = "merged";
+    else {
       record.state = "blocked";
-      record.reason = `The gate rejected it: ${decision.reasons.join("; ")}.`;
-    } else {
-      const merged = await withBranchWorktree(request.repoDir, branch, (worktree) =>
-        mergeBranch(worktree, record.branch, mergeMessage(request.issue, subtask.id)),
-      );
-      if (merged.kind === "merged") record.state = "merged";
-      else {
-        record.state = "blocked";
-        record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
-      }
+      record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
     }
-  } else if (attempt.outcome.kind === "plan-limit") {
-    log.pauseReason = `the plan limit of ${workers.agent} was reached: ${attempt.outcome.message}`;
+  } else if (loop.kind === "paused") {
+    log.pauseReason = `the plan limit of ${workers.agent} was reached: ${loop.message}`;
   } else {
     record.state = "blocked";
-    record.reason = `Its attempt ended with ${attempt.outcome.kind}${outcomeDetail(attempt) ? `: ${outcomeDetail(attempt)}` : ""}.`;
+    record.reason = loop.stop.reason;
+    record.block = {
+      type: loop.stop.type,
+      reason: loop.stop.reason,
+      ...(loop.lastFailure !== undefined ? { lastFailure: loop.lastFailure } : {}),
+    };
   }
   await save();
 
@@ -197,23 +219,30 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
   if (!credential) {
     throw new Error(`${CREDENTIAL_VARIABLES[workers.agent]} is not set; the ${workers.agent} workers need it`);
   }
-  return { config, issue, branch, subtask, workers, credential };
+  return { config, issue, branch, spec: parsed.spec, subtask, workers, credential };
+}
+
+interface LoopWiring {
+  record: SubtaskRecord;
+  startedAt: Date;
+  gate: (sha: string, attempt: number) => Promise<GateDecision>;
+  runTokens: () => number;
+  save: () => Promise<void>;
 }
 
 async function runWorker(
   request: RunRequest,
   ports: RunPorts,
   prepared: Prepared,
-  record: SubtaskRecord,
   runDir: string,
-  startedAt: Date,
-): Promise<AttemptResult> {
+  wiring: LoopWiring,
+): Promise<LoopResult> {
   const { config, issue, branch, subtask, workers, credential } = prepared;
   const worker = await ports.runner.start({
     id: `${request.issue}-${subtask.id}`,
     repoDir: request.repoDir,
     baseRef: branch,
-    branch: record.branch,
+    branch: wiring.record.branch,
     image: config.image,
     env: {
       ...environment(config, { purpose: "worker", subtask: subtask.id, slot: 0 }),
@@ -222,10 +251,25 @@ async function runWorker(
     logDir: runDir,
   });
   try {
-    const prompt = await workerPrompt(issue, subtask, config);
-    return await worker.attempt({ kind: workers.agent, model: workers.model }, prompt, {
-      deadline: new Date(startedAt.getTime() + config.limits.subtaskWallClockMs),
-      idleTimeoutMs: config.limits.attemptIdleTimeoutMs,
+    const { agents, limits } = config;
+    return await runSubtaskLoop({
+      clock: ports.clock,
+      worker,
+      agent: { kind: workers.agent, model: workers.model },
+      prompt: await workerPrompt(issue, subtask, config),
+      record: wiring.record,
+      limits: {
+        patience: limits.patience,
+        subtaskWallClockMs: limits.subtaskWallClockMs,
+        runWallClockMs: limits.runWallClockMs,
+        attemptIdleTimeoutMs: limits.attemptIdleTimeoutMs,
+        subtaskTokens: agents[workers.agent].tokensPerSubtask,
+        runTokens: agents[workers.agent].tokensPerRun,
+      },
+      runStartedAt: wiring.startedAt,
+      runTokens: wiring.runTokens,
+      gate: wiring.gate,
+      save: wiring.save,
     });
   } finally {
     await worker.close();
@@ -263,24 +307,4 @@ export function subtaskBranch(integration: string, subtaskId: string): string {
 
 export function mergeMessage(issue: number, subtaskId: string): string {
   return `Merge subtask ${subtaskId} of #${issue}\n\nFactory-Subtask: ${subtaskId}`;
-}
-
-function outcomeDetail(result: AttemptResult): string | undefined {
-  const outcome = result.outcome;
-  if (outcome.kind === "agent-error" || outcome.kind === "plan-limit") return outcome.message;
-  if (outcome.kind === "completed") return outcome.summary;
-  return undefined;
-}
-
-function attemptRecord(number: number, result: AttemptResult): AttemptRecord {
-  const detail = outcomeDetail(result);
-  return {
-    number,
-    outcome: result.outcome.kind,
-    ...(detail !== undefined ? { detail } : {}),
-    usage: result.usage,
-    logPath: result.logPath,
-    startedAt: result.startedAt.toISOString(),
-    endedAt: result.endedAt.toISOString(),
-  };
 }

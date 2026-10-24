@@ -1,5 +1,5 @@
 import { criteriaHash, readApproval, technicalHash } from "../spec/approval.ts";
-import type { CheckRecord, RunLog, RunResult } from "./run-log.ts";
+import type { RunLog, RunResult } from "./run-log.ts";
 
 export function approvalProblem(issue: number, specText: string, issueBody: string): string | null {
   const state = readApproval(specText);
@@ -12,18 +12,6 @@ export function approvalProblem(issue: number, specText: string, issueBody: stri
   if (technicalHash(specText) !== state.approval.technicalHash) changed.push(`specs/${issue}.md changed`);
   if (changed.length === 0) return null;
   return `${changed.join(" and ")} since the approval; review the spec and run factory approve ${issue} again`;
-}
-
-export interface GateDecision {
-  accepted: boolean;
-  reasons: string[];
-}
-
-export function gateDecision(checks: CheckRecord[]): GateDecision {
-  const reasons = checks
-    .filter((check) => !check.passed)
-    .map((check) => `check ${check.name} failed with exit code ${check.exitCode}`);
-  return { accepted: reasons.length === 0, reasons };
 }
 
 export function runResult(log: Pick<RunLog, "subtasks" | "verification" | "pauseReason">): Exclude<RunResult, "running"> {
