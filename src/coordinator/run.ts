@@ -24,10 +24,11 @@ import { changedPaths, testFilesAt } from "./diff.ts";
 import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
 import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
 import { firstErrorLine } from "./failures.ts";
-import { gateDecision, requestCheckPaths, type GateDecision } from "./gate.ts";
+import { gateDecision, protectedFor, requestCheckPaths, type GateDecision } from "./gate.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
 import { dependencyProblem, schedule, type Schedule } from "./schedule.ts";
+import { decideScopeExtension, type ScopeExtensionDecision } from "./scope-extension.ts";
 import { Lock, runSchedule } from "./slots.ts";
 import {
   RUN_LOG_VERSION,
@@ -125,6 +126,24 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   await save();
 
   const gitLock = new Lock();
+  const scopes = new Map<string, string[]>(subtasks.map((subtask) => [subtask.id, [...subtask.scope]]));
+  const extendScope = (subtask: Subtask, requested: string[]): ScopeExtensionDecision => {
+    const scope = scopes.get(subtask.id) as string[];
+    const wave = plan.waves.find((members) => members.some((member) => member.id === subtask.id)) ?? [];
+    const decision = decideScopeExtension({
+      requested,
+      scope,
+      waveScopes: wave
+        .filter((member) => member.id !== subtask.id)
+        .map((member) => ({ subtask: member.id, scope: scopes.get(member.id) as string[] })),
+      protectedPaths: protectedFor(subtask.id === plan.base?.id, config.protectedPaths),
+    });
+    if (decision.kind === "extend") {
+      scope.push(...decision.paths);
+      (records.get(subtask.id) as SubtaskRecord).scopeExtensions.push(...decision.paths);
+    }
+    return decision;
+  };
 
   const noteFailure = async (error: unknown, subtaskId: string | null) => {
     if (!(error instanceof WorkerLayerError)) throw error;
@@ -238,7 +257,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       const { checks, criteria } = gated;
       const checked = gateDecision({
         changes: await changedPaths(request.repoDir, branch, sha),
-        scope: subtask.scope,
+        scope: scopes.get(subtask.id) as string[],
         protectedPaths: config.protectedPaths,
         isBase: subtask.id === plan.base?.id,
         existingTestPaths,
@@ -268,7 +287,14 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
     record.state = "working";
     await save();
-    const worked = await runWorker(request, ports, prepared, subtask, runDir, slot, gitLock, { record, startedAt, gate, runTokens, save });
+    const worked = await runWorker(request, ports, prepared, subtask, runDir, slot, gitLock, {
+      record,
+      startedAt,
+      gate,
+      runTokens,
+      extendScope: (requested) => extendScope(subtask, requested),
+      save,
+    });
     const unclassified = worked.failures.find((failure) => !(failure instanceof WorkerLayerError));
     if (unclassified !== undefined) throw unclassified;
     for (const failure of worked.failures) await noteFailure(failure, record.id);
@@ -294,6 +320,11 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
         record.state = "blocked";
         record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
       }
+    } else if (loop.kind === "reported") {
+      record.state = "blocked";
+      record.blockType = loop.type;
+      record.reason = loop.reason;
+      record.block = { type: loop.type, reason: loop.reason };
     } else if (loop.kind === "paused") {
       log.pauseReason = `the plan limit of ${workers.agent} was reached: ${loop.message}`;
     } else {
@@ -392,6 +423,7 @@ interface LoopWiring {
   startedAt: Date;
   gate: (attempt: number) => Promise<GateDecision | null>;
   runTokens: () => number;
+  extendScope: (requested: string[]) => ScopeExtensionDecision;
   save: () => Promise<void>;
 }
 
@@ -450,6 +482,7 @@ async function runWorker(
       attempt: (prompt, attemptLimits) =>
         inStage("attempt", () => worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits)),
       gate: wiring.gate,
+      extendScope: wiring.extendScope,
       save: wiring.save,
     });
   } catch (error) {

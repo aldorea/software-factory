@@ -53,8 +53,12 @@ export function gateDecision(input: GateInput): GateDecision {
   };
 }
 
+export function protectedFor(isBase: boolean, protectedPaths: string[]): string[] {
+  return isBase ? [] : [...protectedPaths, ...ALWAYS_PROTECTED];
+}
+
 function diffRejections(input: GateInput): GateRejection[] {
-  const protectedPaths = input.isBase ? [] : [...input.protectedPaths, ...ALWAYS_PROTECTED];
+  const protectedPaths = protectedFor(input.isBase, input.protectedPaths);
   const requestChecks = input.isBase ? [] : input.requestCheckPaths;
   const found: Record<DiffRejectionKind, string[]> = {
     protected: [],
