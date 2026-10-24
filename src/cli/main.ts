@@ -1,9 +1,11 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../commands/approve.ts";
 import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
 import { loadConfig } from "../config/load.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
 import { runIssue } from "../coordinator/run.ts";
+import { readRunLogs } from "../coordinator/run-history.ts";
+import { formatStats, summarizeRuns } from "../coordinator/stats.ts";
 import type { Verifier } from "../coordinator/verifier.ts";
 import type { GitHub } from "../github/github.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
@@ -24,9 +26,10 @@ export interface CliEnv {
 }
 
 const COMMANDS = ["refine", "approve", "validate", "run"];
-const USAGE = `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`;
+const USAGE = `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]\n       factory stats [target-repo]`;
 
 export async function main(args: string[], env: CliEnv): Promise<number> {
+  if (args[0] === "stats") return stats(args.slice(1), env);
   const [command, issueArg, repoArg] = args;
   const issue = Number(issueArg);
   if (!COMMANDS.includes(command ?? "") || !Number.isInteger(issue) || issue <= 0 || args.length > 3) {
@@ -73,6 +76,21 @@ async function refine(repoDir: string, issue: number, env: CliEnv): Promise<numb
     const workspace = await prepareRefinement({ repoDir, issue, github: env.github(repoDir) });
     env.out(`${workspace.created ? "Created" : "Reusing"} ${workspace.branch} in ${workspace.worktree}`);
     return await env.launch(refineLaunch({ worktree: workspace.worktree, issue, factoryRoot: env.factoryRoot }));
+  } catch (error) {
+    env.err(`factory: ${(error as Error).message}`);
+    return 1;
+  }
+}
+
+async function stats(args: string[], env: CliEnv): Promise<number> {
+  if (args.length > 1) {
+    env.err(USAGE);
+    return 2;
+  }
+  try {
+    const { logs, unreadable } = await readRunLogs(join(resolve(env.cwd, args[0] ?? "."), ".factory", "logs"));
+    env.out(formatStats(summarizeRuns(logs), unreadable));
+    return 0;
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);
     return 1;
