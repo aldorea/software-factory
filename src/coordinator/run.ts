@@ -6,6 +6,7 @@ import {
   deleteBranch,
   integrationBranch,
   mergeBranch,
+  moveBranch,
   pushBranch,
   showFile,
   withBranchWorktree,
@@ -24,6 +25,7 @@ import { changedPaths, testFilesAt } from "./diff.ts";
 import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
 import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
 import { firstErrorLine } from "./failures.ts";
+import { followUpFailure, followUpStop, followUpTasks, verificationSignature } from "./follow-up.ts";
 import { gateDecision, protectedFor, requestCheckPaths, type GateDecision } from "./gate.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
@@ -35,12 +37,13 @@ import {
   writeRunLog,
   type BlockType,
   type CheckRecord,
+  type FollowUpRecord,
   type RunLog,
   type SubtaskRecord,
   type SubtaskState,
 } from "./run-log.ts";
 import { applyTotals, emptyCost, emptyFriction } from "./run-totals.ts";
-import { countedTokens, type StopType } from "./stop-rules.ts";
+import { countedTokens, type StopLimits, type StopType } from "./stop-rules.ts";
 import { runSubtaskLoop, type LoopResult } from "./subtask-loop.ts";
 import { judgeTests, NO_JUDGMENT } from "./verifier-run.ts";
 
@@ -83,6 +86,9 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   const { config, issue, branch, spec, plan, maxParallel, workers, humanCriteria } = prepared;
   const subtasks = plan.base ? [plan.base, ...spec.subtasks] : spec.subtasks;
   const startedAt = ports.clock.now();
+  const runStartSha = await revParse(request.repoDir, branch);
+  const existingTestPaths = await testFilesAt(request.repoDir, runStartSha);
+  const requestChecks = spec.base ? requestCheckPaths(spec) : [];
   const id = makeRunId(request.issue, startedAt);
   const runDir = join(request.repoDir, ".factory", "logs", id);
   const runLogPath = join(runDir, "run.json");
@@ -241,13 +247,19 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       await save();
       return;
     }
-    const startSha = await revParse(request.repoDir, branch);
-    const existingTestPaths = await testFilesAt(request.repoDir, startSha);
-    const requestChecks = spec.base ? requestCheckPaths(spec) : [];
+    await work(subtask, slot, null);
+  };
+
+  const work = async (subtask: Subtask, slot: number, followUp: FollowUpRun | null): Promise<void> => {
+    const record = records.get(subtask.id) as SubtaskRecord;
+    const label = followUp ? `${subtask.id}-followup-${followUp.round}` : subtask.id;
+    if (followUp) {
+      await gitLock.exclusive(async () => moveBranch(request.repoDir, record.branch, await revParse(request.repoDir, branch)));
+    }
     const gate = async (attempt: number): Promise<GateDecision | null> => {
       const sha = await revParse(request.repoDir, record.branch);
       const gated = await checksOn(
-        `${subtask.id}-gate-${attempt}`,
+        `${label}-gate-${attempt}`,
         sha,
         { purpose: "gate", subtask: subtask.id, slot },
         gatePlan(spec, subtask.criteria, config.evidence),
@@ -269,12 +281,12 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       const judgment = checked.accepted
         ? await judgeTests(ports.verifier, {
             repoDir: request.repoDir,
-            integrationBranch: branch,
+            integrationBranch: followUp ? runStartSha : branch,
             sha,
             criteria,
             texts: criteriaText(issue.body),
             logDir: runDir,
-            label: `${subtask.id}-attempt-${attempt}`,
+            label: `${label}-attempt-${attempt}`,
           })
         : NO_JUDGMENT;
       const decision = verifiedDecision(checked, judgment);
@@ -287,20 +299,24 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
     record.state = "working";
     await save();
-    const worked = await runWorker(request, ports, prepared, subtask, runDir, slot, gitLock, {
+    const worked = await runWorker(request, ports, prepared, { ...subtask, scope: [...(scopes.get(subtask.id) as string[])] }, runDir, slot, gitLock, {
       record,
       startedAt,
       gate,
       runTokens,
       extendScope: (requested) => extendScope(subtask, requested),
       save,
+      workerId: `${request.issue}-${label}`,
+      ...(followUp ? { followUp: followUp.text } : {}),
     });
     const unclassified = worked.failures.find((failure) => !(failure instanceof WorkerLayerError));
     if (unclassified !== undefined) throw unclassified;
     for (const failure of worked.failures) await noteFailure(failure, record.id);
     const loop = worked.result;
 
+    let outcome: FollowUpRecord["outcome"] = "merged";
     if (loop === null || loop.kind === "interrupted") {
+      outcome = "interrupted";
       record.state = "interrupted";
       record.reason =
         loop === null
@@ -314,6 +330,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       );
       if (merged.kind === "merged") record.state = "merged";
       else {
+        outcome = "blocked";
         conflicted = true;
         record.conflicts += 1;
         record.conflictFiles = merged.files;
@@ -321,13 +338,17 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
         record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
       }
     } else if (loop.kind === "reported") {
+      outcome = "blocked";
       record.state = "blocked";
       record.blockType = loop.type;
       record.reason = loop.reason;
       record.block = { type: loop.type, reason: loop.reason };
     } else if (loop.kind === "paused") {
+      outcome = "paused";
       log.pauseReason = `the plan limit of ${workers.agent} was reached: ${loop.message}`;
+      if (followUp) record.state = "merged";
     } else {
+      outcome = "blocked";
       record.state = "blocked";
       record.blockType = blockTypeOf(loop.stop.type);
       record.reason = loop.stop.reason;
@@ -337,24 +358,67 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
         ...(loop.lastFailure !== undefined ? { lastFailure: loop.lastFailure } : {}),
       };
     }
+    if (followUp) {
+      record.followUps = [
+        ...(record.followUps ?? []),
+        { round: followUp.round, criteria: followUp.criteria, failure: followUp.text, outcome },
+      ];
+    }
     await save();
   };
 
   await runSchedule(plan, maxParallel, runSubtask);
 
   if (log.pauseReason === undefined) {
-    const sha = await revParse(request.repoDir, branch);
-    const verified = await checksOn(
-      "verification",
-      sha,
-      { purpose: "verification", subtask: null, slot: 0 },
-      integrationPlan(spec, config.evidence),
-      null,
-    );
-    if (verified !== null) {
+    const signatures: string[] = [];
+    for (let round = 1; ; round += 1) {
+      const sha = await revParse(request.repoDir, branch);
+      const verified = await checksOn(
+        round === 1 ? "verification" : `verification-${round}`,
+        sha,
+        { purpose: "verification", subtask: null, slot: 0 },
+        integrationPlan(spec, config.evidence),
+        null,
+      );
+      if (verified === null) {
+        delete log.verification;
+        break;
+      }
       const { checks, criteria, human } = verified;
-      log.verification = { sha, passed: verificationPassed(checks, criteria), checks, criteria, humanCriteria: human };
+      const passed = verificationPassed(checks, criteria);
+      log.verification = { sha, passed, checks, criteria, humanCriteria: human };
+      if (passed || conflicted) break;
+      const tasks = followUpTasks(subtasks, criteria, stateOf);
+      if (tasks.length === 0) break;
+      signatures.push(verificationSignature(criteria));
+      const stop = followUpStop(signatures, stopLimits(config, workers));
+      if (stop) {
+        for (const task of tasks) {
+          const record = records.get(task.subtask.id) as SubtaskRecord;
+          record.state = "blocked";
+          record.blockType = blockTypeOf(stop.type);
+          record.reason = stop.reason;
+          record.block = { type: stop.type, reason: stop.reason };
+        }
+        await save();
+        break;
+      }
+      const texts = criteriaText(issue.body);
+      let merged = false;
+      for (const task of tasks) {
+        const followUp: FollowUpRun = {
+          round,
+          criteria: task.criteria,
+          text: followUpFailure(sha, task, { checks, criteria }, texts),
+        };
+        await work(task.subtask, 0, followUp);
+        const outcome = (records.get(task.subtask.id) as SubtaskRecord).followUps?.at(-1)?.outcome;
+        if (outcome === "merged") merged = true;
+        if (log.pauseReason !== undefined || conflicted) break;
+      }
+      if (!merged || log.pauseReason !== undefined || conflicted) break;
     }
+    if (log.verification && log.verification.sha !== (await revParse(request.repoDir, branch))) delete log.verification;
   }
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();
@@ -418,8 +482,16 @@ interface Worked {
   failures: unknown[];
 }
 
+interface FollowUpRun {
+  round: number;
+  criteria: string[];
+  text: string;
+}
+
 interface LoopWiring {
   record: SubtaskRecord;
+  workerId: string;
+  followUp?: string;
   startedAt: Date;
   gate: (attempt: number) => Promise<GateDecision | null>;
   runTokens: () => number;
@@ -443,7 +515,7 @@ async function runWorker(
     .exclusive(() =>
       inStage("start", () =>
         ports.runner.start({
-          id: `${request.issue}-${subtask.id}`,
+          id: wiring.workerId,
           repoDir: request.repoDir,
           baseRef: branch,
           branch: wiring.record.branch,
@@ -463,20 +535,13 @@ async function runWorker(
   if (worker === null) return { result: null, failures };
   let result: LoopResult | null = null;
   try {
-    const { agents, limits } = config;
+    const { limits } = config;
     result = await runSubtaskLoop({
       clock: ports.clock,
       agent: workers,
-      prompt: await workerPrompt(issue, subtask, config),
+      prompt: await workerPrompt(issue, subtask, config, wiring.followUp),
       record: wiring.record,
-      limits: {
-        patience: limits.patience,
-        subtaskWallClockMs: limits.subtaskWallClockMs,
-        runWallClockMs: limits.runWallClockMs,
-        attemptIdleTimeoutMs: limits.attemptIdleTimeoutMs,
-        subtaskTokens: agents[workers.agent].tokensPerSubtask,
-        runTokens: agents[workers.agent].tokensPerRun,
-      },
+      limits: { ...stopLimits(config, workers), attemptIdleTimeoutMs: limits.attemptIdleTimeoutMs },
       runStartedAt: wiring.startedAt,
       runTokens: wiring.runTokens,
       attempt: (prompt, attemptLimits) =>
@@ -505,10 +570,21 @@ function environment(config: ResolvedConfig, context: WorkerEnvironmentContext):
   return env as Record<string, string>;
 }
 
-async function workerPrompt(issue: Issue, subtask: Subtask, config: ResolvedConfig): Promise<string> {
+function stopLimits(config: ResolvedConfig, workers: RoleChoice): StopLimits {
+  const { agents, limits } = config;
+  return {
+    patience: limits.patience,
+    subtaskWallClockMs: limits.subtaskWallClockMs,
+    runWallClockMs: limits.runWallClockMs,
+    subtaskTokens: agents[workers.agent].tokensPerSubtask,
+    runTokens: agents[workers.agent].tokensPerRun,
+  };
+}
+
+async function workerPrompt(issue: Issue, subtask: Subtask, config: ResolvedConfig, followUp?: string): Promise<string> {
   const texts = criteriaText(issue.body);
   const list = (items: string[]) => (items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- (none)");
-  return renderTemplate(await readPromptTemplate("worker"), {
+  const base = renderTemplate(await readPromptTemplate("worker"), {
     subtask: subtask.id,
     issue: String(issue.number),
     title: issue.title,
@@ -517,6 +593,9 @@ async function workerPrompt(issue: Issue, subtask: Subtask, config: ResolvedConf
     protectedPaths: list(config.protectedPaths),
     checks: list(config.checks.map((check) => `${check.name}: \`${check.command}\``)),
   });
+  if (followUp === undefined) return base;
+  const section = renderTemplate(await readPromptTemplate("follow-up"), { subtask: subtask.id, failure: followUp });
+  return `${base}\n\n${section}`;
 }
 
 export function subtaskBranch(integration: string, subtaskId: string): string {
