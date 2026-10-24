@@ -13,13 +13,15 @@ import {
 import type { Issue, PullRequest } from "../github/github.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { criteriaText, issueCriteria } from "../spec/issue.ts";
-import { parseSpec, validateSpec, type Subtask } from "../spec/spec.ts";
+import { parseSpec, validateSpec, type Spec, type Subtask } from "../spec/spec.ts";
 import { emptyUsage } from "../workers/agent-adapter.ts";
 import { missingRequirements } from "../workers/agents.ts";
 import { inStage, WorkerLayerError } from "../workers/failures.ts";
 import { revParse } from "../workers/git.ts";
 import type { AgentKind, AttemptResult } from "../workers/types.ts";
-import { approvalProblem, gateDecision, runId as makeRunId, runResult } from "./decisions.ts";
+import { approvalProblem, gateDecision, runId as makeRunId, runResult, verificationPassed } from "./decisions.ts";
+import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
+import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
 import {
@@ -59,6 +61,7 @@ interface Prepared {
   config: ResolvedConfig;
   issue: Issue;
   branch: string;
+  spec: Spec;
   subtask: Subtask;
   humanCriteria: string[];
   workers: RoleChoice;
@@ -67,7 +70,7 @@ interface Prepared {
 
 export async function runIssue(request: RunRequest, ports: RunPorts): Promise<RunReport> {
   const prepared = await prepare(request, ports);
-  const { config, issue, branch, subtask, workers, humanCriteria } = prepared;
+  const { config, issue, branch, spec, subtask, workers, humanCriteria } = prepared;
   const startedAt = ports.clock.now();
   const id = makeRunId(request.issue, startedAt);
   const runDir = join(request.repoDir, ".factory", "logs", id);
@@ -116,7 +119,13 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     await save();
   };
 
-  const checksOn = async (label: string, sha: string, context: WorkerEnvironmentContext, subtaskId: string | null) => {
+  const checksOn = async (
+    label: string,
+    sha: string,
+    context: WorkerEnvironmentContext,
+    plan: EvidencePlan,
+    subtaskId: string | null,
+  ) => {
     const checkBranch = `factory-check/${id}/${label}`;
     const env = environment(config, context);
     await createBranchAt(request.repoDir, checkBranch, sha);
@@ -133,12 +142,18 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     if (started.worker === null) return null;
     const { worker } = started;
     let checks: CheckRecord[] | null = [];
+    let evidence: EvidenceResult = { criteria: [], human: [] };
     let preserved = false;
     try {
       for (const check of config.checks) {
         const result = await inStage("exec", () => worker.exec(check.command));
         checks.push({ name: check.name, command: check.command, exitCode: result.exitCode, passed: result.exitCode === 0 });
       }
+      evidence = await runEvidence(worker, plan, {
+        app: config.app,
+        commands: config.evidence,
+        attachmentsDir: join(runDir, "attachments"),
+      });
     } catch (error) {
       checks = null;
       await noteFailure(error, subtaskId);
@@ -150,7 +165,8 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       }
     }
     if (!preserved) await deleteBranch(request.repoDir, checkBranch);
-    return checks;
+    if (checks === null) return null;
+    return { checks, ...evidence };
   };
 
   record.state = "working";
@@ -169,13 +185,20 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   if (attempt?.outcome.kind === "completed") {
     const sha = await revParse(request.repoDir, record.branch);
-    const checks = await checksOn(`${subtask.id}-gate`, sha, { purpose: "gate", subtask: subtask.id, slot: 0 }, record.id);
-    if (checks === null) {
+    const gated = await checksOn(
+      `${subtask.id}-gate`,
+      sha,
+      { purpose: "gate", subtask: subtask.id, slot: 0 },
+      gatePlan(spec, subtask.criteria, config.evidence),
+      record.id,
+    );
+    if (gated === null) {
       record.state = "interrupted";
       record.reason = "A failure of the worker layer stopped its gate.";
     } else {
-      const decision = gateDecision(checks);
-      record.gate = { sha, ...decision, checks };
+      const { checks, criteria } = gated;
+      const decision = gateDecision(checks, criteria);
+      record.gate = { sha, ...decision, checks, criteria };
       if (!decision.accepted) {
         record.gateRejections += 1;
         record.state = "blocked";
@@ -204,8 +227,17 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   if (log.pauseReason === undefined) {
     const sha = await revParse(request.repoDir, branch);
-    const checks = await checksOn("verification", sha, { purpose: "verification", subtask: null, slot: 0 }, null);
-    if (checks !== null) log.verification = { sha, passed: checks.every((check) => check.passed), checks };
+    const verified = await checksOn(
+      "verification",
+      sha,
+      { purpose: "verification", subtask: null, slot: 0 },
+      integrationPlan(spec, config.evidence),
+      null,
+    );
+    if (verified !== null) {
+      const { checks, criteria, human } = verified;
+      log.verification = { sha, passed: verificationPassed(checks, criteria), checks, criteria, humanCriteria: human };
+    }
   }
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();
@@ -246,6 +278,8 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
     protectedPaths: config.protectedPaths,
   });
   if (problems.length > 0) throw new Error(`${specPath} is invalid: ${problems.join("; ")}`);
+  const missingEvidence = evidenceProblems(parsed.spec, config.evidence);
+  if (missingEvidence.length > 0) throw new Error(`${specPath} cannot be verified: ${missingEvidence.join("; ")}`);
   const [subtask, ...others] = parsed.spec.subtasks;
   const humanCriteria = Object.entries(parsed.spec.criteria)
     .filter(([, evidence]) => evidence.evidence === "human")
@@ -261,7 +295,7 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
   if (!credential) {
     throw new Error(`${CREDENTIAL_VARIABLES[workers.agent]} is not set; the ${workers.agent} workers need it`);
   }
-  return { config, issue, branch, subtask, humanCriteria, workers, credential };
+  return { config, issue, branch, spec: parsed.spec, subtask, humanCriteria, workers, credential };
 }
 
 interface Worked {

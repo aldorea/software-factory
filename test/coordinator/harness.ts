@@ -54,6 +54,7 @@ export const CONFIG = `
 export default {
   image: "greeting-worker:dev",
   checks: [{ name: "greeting", command: "grep -q hello src/greeting.txt" }],
+  evidence: { request: "grep -q hello src/greeting.txt # {{id}}" },
   environment: ({ purpose, subtask, slot }) => ({
     DATABASE_URL: "postgres://neon/" + (subtask ?? purpose),
     E2E_PORT: String(4000 + slot),
