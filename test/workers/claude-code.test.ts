@@ -47,7 +47,7 @@ function feed(lines: string[]): ClaudeStreamState {
 }
 
 describe("Claude Code command", () => {
-  it("takes the prompt from stdin, not from the arguments", () => {
+  it("should take the prompt from stdin, not from the arguments", () => {
     const args = claudeCodeArgs("claude-haiku-5-5");
     expect(args.slice(-2)).toEqual(["-p", "-"]);
     expect(args).toContain("--print");
@@ -56,7 +56,7 @@ describe("Claude Code command", () => {
 });
 
 describe("Claude Code stream", () => {
-  it("reads usage and a successful result", () => {
+  it("should read usage and a successful result", () => {
     const state = feed([
       "Warning: claude.ai MCP servers blocked by enterprise policy",
       JSON.stringify({ type: "system", subtype: "init" }),
@@ -75,18 +75,18 @@ describe("Claude Code stream", () => {
     expect(claudeOutcome(state, exited)).toEqual({ kind: "completed", summary: "OK" });
   });
 
-  it("adds the usage of each result", () => {
+  it("should add the usage of each result", () => {
     const state = feed([result(), result()]);
     expect(state.usage.outputTokens).toBe(8);
   });
 
-  it("detects the final line", () => {
+  it("should detect the final line", () => {
     expect(isClaudeFinalLine(result())).toBe(true);
     expect(isClaudeFinalLine(rateLimit("allowed", 0, 0))).toBe(false);
     expect(isClaudeFinalLine("not json")).toBe(false);
   });
 
-  it("reports a plan limit when the plan is rejected and waits for the last exhausted window", () => {
+  it("should report a plan limit when the plan is rejected and wait for the last exhausted window", () => {
     const state = feed([
       JSON.stringify({
         type: "rate_limit_event",
@@ -108,23 +108,23 @@ describe("Claude Code stream", () => {
     expect(outcome.kind === "plan-limit" && outcome.resetsAt).toEqual(new Date(1792800000 * 1000));
   });
 
-  it("reports a plan limit from a 429 result", () => {
+  it("should report a plan limit from a 429 result", () => {
     const state = feed([result({ is_error: true, api_error_status: 429, result: "Request rejected" })]);
     expect(claudeOutcome(state, exited).kind).toBe("plan-limit");
   });
 
-  it("reports an agent error when there is no result", () => {
+  it("should report an agent error when there is no result", () => {
     const outcome = claudeOutcome(initialClaudeState(), { stopReason: "exited", exitCode: 1, stderrTail: "boom" });
     expect(outcome).toEqual({ kind: "agent-error", message: "boom", exitCode: 1 });
   });
 
-  it("puts deadline and idle timeout before anything else", () => {
+  it("should put deadline and idle timeout before anything else", () => {
     const state = feed([result()]);
     expect(claudeOutcome(state, { ...exited, stopReason: "deadline" }).kind).toBe("deadline");
     expect(claudeOutcome(state, { ...exited, stopReason: "idle-timeout" }).kind).toBe("idle-timeout");
   });
 
-  it("treats a hung process after the result as completed", () => {
+  it("should treat a hung process after the result as completed", () => {
     const state = feed([result()]);
     expect(claudeOutcome(state, { ...exited, stopReason: "completion-grace", exitCode: null }).kind).toBe(
       "completed",
