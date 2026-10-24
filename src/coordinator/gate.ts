@@ -54,7 +54,7 @@ export function gateDecision(input: GateInput): GateDecision {
 }
 
 export function protectedFor(isBase: boolean, protectedPaths: string[]): string[] {
-  return isBase ? [] : [...protectedPaths, ...ALWAYS_PROTECTED];
+  return isBase ? [...ALWAYS_PROTECTED] : [...protectedPaths, ...ALWAYS_PROTECTED];
 }
 
 function diffRejections(input: GateInput): GateRejection[] {
@@ -71,7 +71,7 @@ function diffRejections(input: GateInput): GateRejection[] {
     if (protectedPaths.some((entry) => covers(entry, path))) found.protected.push(path);
     else if (requestChecks.some((entry) => covers(entry, path))) found["request-check"].push(path);
     else if (input.existingTestPaths.has(path) && !authorized) found["existing-test"].push(path);
-    else if (!authorized && !input.scope.some((entry) => covers(entry, path))) found.scope.push(path);
+    else if (!input.scope.some((entry) => covers(entry, path))) found.scope.push(path);
   }
   const rejections: GateRejection[] = [];
   const add = (kind: DiffRejectionKind, paths: string[], message: string) => {

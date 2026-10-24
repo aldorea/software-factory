@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { covers, gateDecision, isTestFile, requestCheckPaths, type GateInput } from "../../src/coordinator/gate.ts";
+import { covers, gateDecision, isTestFile, protectedFor, requestCheckPaths, type GateInput } from "../../src/coordinator/gate.ts";
 import type { Spec } from "../../src/spec/spec.ts";
 import type { CheckRecord } from "../../src/coordinator/run-log.ts";
 
@@ -69,6 +69,13 @@ describe("gateDecision", () => {
     expect(reasons).toEqual(["it touches protected paths: .factory/config.ts"]);
   });
 
+  it("should protect the .factory folder from the base subtask too, because its exemption covers only the configured protected paths", () => {
+    const reasons = reasonsOf({ isBase: true, scope: ["."], changes: [{ path: ".factory/config.ts", status: "modified" }] });
+
+    expect(reasons).toEqual(["it touches protected paths: .factory/config.ts"]);
+    expect(protectedFor(true, ["package.json"])).toEqual([".factory"]);
+  });
+
   it("should reject a change to a test file that existed before the run and name it", () => {
     const reasons = reasonsOf({
       existingTestPaths: new Set(["src/greeting/hello.test.ts"]),
@@ -97,6 +104,16 @@ describe("gateDecision", () => {
     );
 
     expect(decision.accepted).toBe(true);
+  });
+
+  it("should still reject an authorized change to an existing test outside the scope of the subtask, because the authorization does not widen the scope", () => {
+    const reasons = reasonsOf({
+      existingTestPaths: new Set(["src/other/other.test.ts"]),
+      authorizedTestChanges: ["src/other/other.test.ts"],
+      changes: [{ path: "src/other/other.test.ts", status: "modified" }],
+    });
+
+    expect(reasons).toEqual(["it touches paths outside its scope (src/greeting/): src/other/other.test.ts"]);
   });
 
   it("should accept a new test file, because only the tests that existed before the run are fixed", () => {
