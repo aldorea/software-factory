@@ -7,8 +7,9 @@ import { loadConfig } from "../config/load.ts";
 import { chooseRole, parseRoleFlag, ROLES, type ChosenRole } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
 import { resumeDefaults } from "../coordinator/resume.ts";
-import { latestRunLog } from "../coordinator/run-history.ts";
+import { latestRunLog, readRunLogs } from "../coordinator/run-history.ts";
 import { runIssue } from "../coordinator/run.ts";
+import { formatStats, summarizeRuns } from "../coordinator/stats.ts";
 import type { Verifier } from "../coordinator/verifier.ts";
 import type { GitHub } from "../github/github.ts";
 import { agentsForRole } from "../workers/agents.ts";
@@ -40,6 +41,7 @@ const COMMANDS = ["refine", "approve", "validate", "run"];
 const USAGE = [
   `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`,
   "       factory run <issue> [target-repo] [--worker-agent <agent>:<model>] [--verifier-agent <agent>:<model>]",
+  "       factory stats [target-repo]",
 ].join("\n");
 
 type RoleFlags = Partial<Record<Role, string>>;
@@ -52,6 +54,7 @@ interface Command {
 }
 
 export async function main(args: string[], env: CliEnv): Promise<number> {
+  if (args[0] === "stats") return stats(args.slice(1), env);
   const parsed = parseCommand(args);
   if (parsed === null) {
     env.err(USAGE);
@@ -151,6 +154,21 @@ async function refine(repoDir: string, issue: number, env: CliEnv): Promise<numb
     const workspace = await prepareRefinement({ repoDir, issue, github: env.github(repoDir) });
     env.out(`${workspace.created ? "Created" : "Reusing"} ${workspace.branch} in ${workspace.worktree}`);
     return await env.launch(refineLaunch({ worktree: workspace.worktree, issue, factoryRoot: env.factoryRoot }));
+  } catch (error) {
+    env.err(`factory: ${(error as Error).message}`);
+    return 1;
+  }
+}
+
+async function stats(args: string[], env: CliEnv): Promise<number> {
+  if (args.length > 1) {
+    env.err(USAGE);
+    return 2;
+  }
+  try {
+    const { logs, unreadable } = await readRunLogs(join(resolve(env.cwd, args[0] ?? "."), ".factory", "logs"));
+    env.out(formatStats(summarizeRuns(logs), unreadable));
+    return 0;
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);
     return 1;
