@@ -7,7 +7,10 @@ import type { GitHub } from "../../src/github/github.ts";
 import { ghGitHub } from "../../src/github/gh.ts";
 import { readApproval } from "../../src/spec/approval.ts";
 import { execOk } from "../../src/workers/sh.ts";
+import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
+import { FakeNotifier } from "../fakes/notifier.ts";
+import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
@@ -16,15 +19,50 @@ afterEach(() => temp.removeAll());
 const BRANCH = "factory/42-saved-searches";
 const issueBody = "## Acceptance criteria\n\n- [ ] A1 one\n- [ ] A2 two\n- [ ] A3 three\n";
 
+const CONFIG = `export default {
+  image: "worker:dev",
+  checks: [{ name: "spec", command: "test -f specs/42.md" }],
+  environment: () => ({}),
+  protectedPaths: ["package.json"],
+  roles: {
+    workers: { agent: "claude-code", model: "sonnet" },
+    verifier: { agent: "opencode", model: "opencode-go/kimi-k2" },
+  },
+};
+`;
+
+const ONE_SUBTASK_SPEC = [
+  "# Spec #42",
+  "",
+  "```json factory-spec",
+  JSON.stringify({
+    files: { A1: ["src/a.txt"], A2: ["src/a.txt"], A3: ["src/a.txt"] },
+    base: null,
+    subtasks: [{ id: "S1", criteria: ["A1", "A2", "A3"], scope: ["src/"], dependsOn: [], testChanges: [] }],
+    criteria: {
+      A1: { evidence: "request", level: "subtask" },
+      A2: { evidence: "request", level: "subtask" },
+      A3: { evidence: "request", level: "subtask" },
+    },
+  }),
+  "```",
+  "",
+].join("\n");
+
 async function git(dir: string, ...args: string[]): Promise<string> {
   return (await execOk("git", ["-C", dir, ...args])).trim();
 }
 
-async function targetRepo(spec: string): Promise<string> {
+async function targetRepo(spec: string, config: string | null = CONFIG): Promise<string> {
   const dir = await temp.make("cli-test-");
   await execOk("git", ["init", "-q", "-b", BRANCH, dir]);
   await git(dir, "config", "user.name", "t");
   await git(dir, "config", "user.email", "t@t");
+  await writeFile(join(dir, ".gitignore"), ".factory/logs/\n.factory/worktrees/\n");
+  if (config !== null) {
+    await mkdir(join(dir, ".factory"));
+    await writeFile(join(dir, ".factory", "config.ts"), config);
+  }
   await mkdir(join(dir, "specs"));
   await writeFile(join(dir, "specs", "42.md"), spec);
   await git(dir, "add", ".");
@@ -46,13 +84,17 @@ async function mainRepo(): Promise<string> {
 function cli(cwd: string, github: GitHub = new FakeGitHub([{ number: 42, title: "x", body: issueBody }])) {
   const out: string[] = [];
   const err: string[] = [];
+  const runner = new FakeWorkerRunner();
+  const notifier = new FakeNotifier();
   const launches: InteractiveLaunch[] = [];
   const env: CliEnv = {
     cwd,
     factoryRoot: "/factory",
-    now: () => new Date("2026-10-24T08:00:00.000Z"),
+    clock: new FakeClock("2026-10-24T08:00:00.000Z"),
     github: () => github,
-    protectedPaths: async () => ["package.json"],
+    runner: () => runner,
+    notifier,
+    credentials: { "claude-code": "token" },
     launch: async (launch) => {
       launches.push(launch);
       return 0;
@@ -60,7 +102,7 @@ function cli(cwd: string, github: GitHub = new FakeGitHub([{ number: 42, title: 
     out: (text) => out.push(text),
     err: (text) => err.push(text),
   };
-  return { env, out, err, launches };
+  return { env, out, err, runner, notifier, launches };
 }
 
 const valid = () => readFile(join(import.meta.dirname, "..", "spec", "fixtures", "valid.md"), "utf8");
@@ -82,6 +124,22 @@ describe("factory CLI", () => {
     expect(err.join("\n")).toContain("the spec must hold exactly one ```json factory-spec block, found 0");
   });
 
+  it("should validate against the protected paths of the target repo's config", async () => {
+    const repoDir = await targetRepo(await valid(), CONFIG.replace('["package.json"]', '["src/search/"]'));
+    const { env, err } = cli(repoDir);
+
+    expect(await main(["validate", "42"], env)).toBe(1);
+    expect(err.join("\n")).toContain("subtask list has the protected path src/search/ in its scope");
+  });
+
+  it("should exit non-zero when the target repo has no config, because validation needs its protected paths", async () => {
+    const repoDir = await targetRepo(await valid(), null);
+    const { env, err } = cli(repoDir);
+
+    expect(await main(["validate", "42"], env)).toBe(1);
+    expect(err.join("\n")).toContain(`${join(repoDir, ".factory", "config.ts")} does not exist`);
+  });
+
   it("should approve a valid spec and say where it committed", async () => {
     const repoDir = await targetRepo(await valid());
     const { env, out } = cli(repoDir);
@@ -89,6 +147,30 @@ describe("factory CLI", () => {
     expect(await main(["approve", "42"], env)).toBe(0);
     expect(out.join("\n")).toContain(`Approved spec #42 on ${BRANCH}`);
     expect(readApproval(await readFile(join(repoDir, "specs", "42.md"), "utf8")).kind).toBe("approved");
+  });
+
+  it("should run an approved spec and print the link of the pull request", async () => {
+    const repoDir = await targetRepo(ONE_SUBTASK_SPEC);
+    const remoteDir = await temp.make("cli-remote-");
+    await execOk("git", ["init", "-q", "--bare", remoteDir]);
+    await git(repoDir, "remote", "add", "origin", remoteDir);
+    await git(repoDir, "branch", "main");
+    const { env, out, notifier } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    expect(out.join("\n")).toContain("Run 42-2026-10-24T08-00-00-000Z: ready, https://github.test/pull/100");
+    expect(notifier.sent).toHaveLength(1);
+  });
+
+  it("should exit non-zero and start no worker when the spec to run is not approved", async () => {
+    const repoDir = await targetRepo(ONE_SUBTASK_SPEC);
+    const { env, err, runner } = cli(repoDir);
+
+    expect(await main(["run", "42"], env)).toBe(1);
+    expect(err.join("\n")).toContain("specs/42.md is not approved; run factory approve 42 first");
+    expect(runner.workers).toEqual([]);
   });
 
   it("should exit non-zero with a clear message when the integration branch does not exist", async () => {
@@ -112,7 +194,7 @@ describe("factory CLI", () => {
 
     expect(await main(["deploy", "42"], env)).toBe(2);
     expect(await main(["approve", "forty-two"], env)).toBe(2);
-    expect(err.join("\n")).toContain("usage: factory <refine|approve|validate> <issue> [target-repo]");
+    expect(err.join("\n")).toContain("usage: factory <refine|approve|validate|run> <issue> [target-repo]");
   });
 
   it("should prepare the worktree and launch the refinement in it, exiting with the code of the session", async () => {

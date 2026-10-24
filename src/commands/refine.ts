@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { InteractiveLaunch } from "../cli/launch.ts";
 import type { GitHub } from "../github/github.ts";
 import { addWorktree, addWorktreeForBranch, listWorktrees, revParse } from "../workers/git.ts";
-import { findIntegrationBranch } from "./integration-branch.ts";
+import { findIntegrationBranch } from "../git/repo.ts";
 
 const MAX_SLUG_LENGTH = 40;
 const BASE_BRANCH = "main";

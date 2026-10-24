@@ -1,13 +1,12 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { integrationBranch, showFile, withBranchWorktree } from "../git/repo.ts";
 import type { GitHub } from "../github/github.ts";
 import { criteriaHash, technicalHash, writeApproval, type Approval } from "../spec/approval.ts";
 import { issueCriteria } from "../spec/issue.ts";
 import { parseSpec, validateSpec } from "../spec/spec.ts";
-import { addWorktreeForBranch, listWorktrees, removeWorktree, revParse } from "../workers/git.ts";
-import { exec, execOk } from "../workers/sh.ts";
-import { findIntegrationBranch } from "./integration-branch.ts";
+import { revParse } from "../workers/git.ts";
+import { execOk } from "../workers/sh.ts";
 
 export interface SpecCommandInput {
   repoDir: string;
@@ -52,27 +51,19 @@ export async function approveSpec(input: SpecCommandInput & { now: Date }): Prom
 async function loadSpec(input: SpecCommandInput): Promise<LoadedSpec> {
   const branch = await integrationBranch(input.repoDir, input.issue);
   const specPath = `specs/${input.issue}.md`;
-  const shown = await exec("git", ["-C", input.repoDir, "show", `${branch}:${specPath}`]);
-  if (shown.exitCode !== 0) throw new Error(`${specPath} does not exist on ${branch}`);
+  const specText = await showFile(input.repoDir, branch, specPath);
+  if (specText === null) throw new Error(`${specPath} does not exist on ${branch}`);
   const issue = await input.github.readIssue(input.issue);
   const criteria = issueCriteria(issue.body);
   const hash = criteriaHash(issue.body);
   if (criteria === null || hash === null) {
     return { kind: "invalid", problems: [`issue #${input.issue} has no Acceptance criteria section`] };
   }
-  const parsed = parseSpec(shown.stdout);
+  const parsed = parseSpec(specText);
   if (!parsed.ok) return { kind: "invalid", problems: parsed.problems };
   const problems = validateSpec(parsed.spec, { issueCriteria: criteria, protectedPaths: input.protectedPaths });
   if (problems.length > 0) return { kind: "invalid", problems };
-  return { kind: "valid", branch, specPath, specText: shown.stdout, criteriaHash: hash };
-}
-
-async function integrationBranch(repoDir: string, issue: number): Promise<string> {
-  const branch = await findIntegrationBranch(repoDir, issue);
-  if (branch === null) {
-    throw new Error(`no integration branch factory/${issue}-<slug> in ${repoDir}; run factory refine ${issue} first`);
-  }
-  return branch;
+  return { kind: "valid", branch, specPath, specText, criteriaHash: hash };
 }
 
 async function commitOnBranch(
@@ -82,25 +73,10 @@ async function commitOnBranch(
   content: string,
   message: string,
 ): Promise<void> {
-  const checkedOut = (await listWorktrees(repoDir)).find((entry) => entry.branch === branch);
-  if (checkedOut) {
-    const status = await execOk("git", ["-C", checkedOut.path, "status", "--porcelain", "--", path]);
-    if (status.trim() !== "") throw new Error(`${path} has uncommitted changes in ${checkedOut.path}`);
-    await commitIn(checkedOut.path, path, content, message);
-    return;
-  }
-  const parent = await mkdtemp(join(tmpdir(), "factory-approve-"));
-  const worktree = join(parent, "wt");
-  try {
-    await addWorktreeForBranch(repoDir, worktree, branch);
-    await commitIn(worktree, path, content, message);
-  } finally {
-    await removeWorktree(repoDir, worktree).catch(() => undefined);
-    await rm(parent, { recursive: true, force: true });
-  }
-}
-
-async function commitIn(worktree: string, path: string, content: string, message: string): Promise<void> {
-  await writeFile(join(worktree, path), content);
-  await execOk("git", ["-C", worktree, "commit", "-q", "-m", message, "--", path]);
+  await withBranchWorktree(repoDir, branch, async (worktree) => {
+    const status = await execOk("git", ["-C", worktree, "status", "--porcelain", "--", path]);
+    if (status.trim() !== "") throw new Error(`${path} has uncommitted changes in ${worktree}`);
+    await writeFile(join(worktree, path), content);
+    await execOk("git", ["-C", worktree, "commit", "-q", "-m", message, "--", path]);
+  });
 }
