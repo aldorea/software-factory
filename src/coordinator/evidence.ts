@@ -17,14 +17,18 @@ export interface EvidencePlan {
   human: HumanPlan[];
 }
 
+const CRITERION_ID = /^A[0-9]+$/;
+
 export function evidenceCommand(template: string, id: string): string {
+  if (!CRITERION_ID.test(id)) throw new Error(`${JSON.stringify(id)} is not a criterion ID, so it cannot go into an evidence command`);
   return template.split(ID_PLACEHOLDER).join(id);
 }
 
 export function evidenceProblems(spec: Spec, commands: EvidenceCommands): string[] {
   const problems: string[] = [];
   for (const [id, criterion] of Object.entries(spec.criteria)) {
-    if (criterion.evidence !== "human" && commands[criterion.evidence] === undefined) {
+    if (criterion.evidence !== "human" && !CRITERION_ID.test(id)) problems.push(`${JSON.stringify(id)} is not a criterion ID`);
+    else if (criterion.evidence !== "human" && commands[criterion.evidence] === undefined) {
       problems.push(
         `criterion ${id} has ${criterion.evidence} evidence but .factory/config.ts gives no evidence.${criterion.evidence} command`,
       );
