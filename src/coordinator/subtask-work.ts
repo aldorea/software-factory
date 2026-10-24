@@ -37,7 +37,7 @@ export interface FollowUpRound {
 
 export async function startSubtask(context: RunContext, subtask: Subtask, slot: number): Promise<void> {
   const record = entryOf(context.records, subtask.id, "record");
-  if (paused(context) || record.state === "merged") return;
+  if (paused(context) || record.state === "merged" || record.state === "blocked") return;
   const reason = notStartedReason({
     subtask,
     baseId: context.prepared.plan.base?.id ?? null,

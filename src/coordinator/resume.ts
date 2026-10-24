@@ -52,6 +52,7 @@ export function resumedLog({ fresh, previous, merged, now }: ResumeInput): RunLo
 
 function continued(fresh: SubtaskRecord, earlier: SubtaskRecord | undefined, merged: boolean): SubtaskRecord {
   if (earlier === undefined) return merged ? { ...fresh, state: "merged", reason: MERGED_EARLIER } : fresh;
+  if (earlier.state === "blocked" && !merged) return { ...earlier, criteria: fresh.criteria, branch: fresh.branch };
   const {
     reason: _reason,
     block: _block,

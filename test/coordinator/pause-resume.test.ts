@@ -176,6 +176,58 @@ describe("factory run on a paused or partially done run", () => {
     ]);
   });
 
+  it("should keep a subtask blocked before the pause blocked on resume, and continue only the paused one", async () => {
+    const target = await targetRepo({
+      ...TWO_SUBTASKS,
+      config: TWO_SUBTASKS.config.replace('  agents: { "claude-code": { maxParallel: 2 } },\n', ""),
+    });
+    const first = factory(target, (call) =>
+      isS1(call)
+        ? { files: { "src/greeting.txt": `BAD ${call.number}\n` } }
+        : { outcome: { kind: "plan-limit", message: "5-hour limit reached", resetsAt: RESETS_AT } },
+    );
+    const paused = await first.run();
+    expect(paused.result).toBe("paused");
+    expect(paused.log.subtasks.map((subtask) => subtask.state)).toEqual(["blocked", "pending"]);
+
+    const second = factory(
+      target,
+      (call) => (isS1(call) ? { files: { "src/greeting.txt": "hello\n" } } : { files: { "lib/farewell.txt": "bye\n" } }),
+      { at: "2026-10-24T14:00:00.000Z" },
+    );
+    const resumed = await second.run();
+
+    expect(second.runner.workers.map((worker) => worker.spec.branch)).not.toContain(paused.log.subtasks[0]?.branch);
+    expect(working(second.runner).map((worker) => worker.spec.branch)).toEqual([paused.log.subtasks[1]?.branch]);
+    expect(resumed.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "patience", block: { type: "patience" } });
+    expect(resumed.log.subtasks[0]?.attempts).toHaveLength(3);
+    expect(resumed.log.subtasks[1]?.state).toBe("merged");
+    expect(resumed.result).toBe("draft");
+    expect(target.github.pullRequests[0]?.body).toContain("**S1** (A1): blocked.");
+  });
+
+  it("should keep a design question asked before the pause blocked on resume, because only the developer answers it", async () => {
+    const target = await targetRepo({
+      ...TWO_SUBTASKS,
+      config: TWO_SUBTASKS.config.replace('  agents: { "claude-code": { maxParallel: 2 } },\n', ""),
+    });
+    const first = factory(target, (call) =>
+      isS1(call)
+        ? { outcome: { kind: "completed", summary: "FACTORY-DESIGN-QUESTION: Which greeting?" } }
+        : { outcome: { kind: "plan-limit", message: "5-hour limit reached" } },
+    );
+    expect((await first.run()).result).toBe("paused");
+
+    const second = factory(target, (call) => (isS1(call) ? { files: { "src/greeting.txt": "hello\n" } } : { files: { "lib/farewell.txt": "bye\n" } }), {
+      at: "2026-10-24T14:00:00.000Z",
+    });
+    const resumed = await second.run();
+
+    expect(working(second.runner).map((worker) => worker.spec.branch)).toEqual([resumed.log.subtasks[1]?.branch]);
+    expect(resumed.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "design-question" });
+    expect(resumed.log.subtasks[0]?.reason).toContain("Which greeting?");
+  });
+
   it("should count neither the time in pause against the run wall clock nor the plan limit against patience", async () => {
     const target = await targetRepo();
     const first = factory(target, (call) => {

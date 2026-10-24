@@ -95,7 +95,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       subtasks.map((subtask) => [subtask.id, [...subtask.scope, ...(records.get(subtask.id)?.scopeExtensions ?? [])]]),
     ),
     gitLock: new Lock(),
-    conflicted: false,
+    conflicted: log.subtasks.some((record) => record.state === "blocked" && record.conflictFiles !== undefined),
     save,
     async noteFailure(error, subtaskId) {
       if (!(error instanceof WorkerLayerError)) throw error;
