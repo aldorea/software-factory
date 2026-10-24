@@ -34,14 +34,15 @@ export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
   const { clock, record, limits } = loop;
   const startedAt = clock.now();
   const signatures: string[] = [];
+  const first = record.attempts.length;
   let last: AttemptFailure | undefined;
-  for (let number = 1; ; number += 1) {
+  for (let number = first + 1; ; number += 1) {
     const now = clock.now();
     const stop = stopReason(
       {
         signatures,
         subtaskElapsedMs: now.getTime() - startedAt.getTime(),
-        subtaskTokens: subtaskTokens(record),
+        subtaskTokens: subtaskTokens(record.attempts.slice(first)),
         runElapsedMs: now.getTime() - loop.runStartedAt.getTime(),
         runTokens: loop.runTokens(),
       },
@@ -89,8 +90,8 @@ async function retryPrompt(base: string, failure: AttemptFailure): Promise<strin
   return `${base}\n\n${section}`;
 }
 
-function subtaskTokens(record: SubtaskRecord): number {
-  return record.attempts.reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
+function subtaskTokens(attempts: AttemptRecord[]): number {
+  return attempts.reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
 }
 
 function attemptRecord(number: number, result: AttemptResult, agent: RoleChoice): AttemptRecord {

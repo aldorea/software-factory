@@ -66,6 +66,10 @@ export async function createBranchAt(repoDir: string, branch: string, sha: strin
   await execOk("git", ["-C", repoDir, "branch", branch, sha]);
 }
 
+export async function moveBranch(repoDir: string, branch: string, sha: string): Promise<void> {
+  await execOk("git", ["-C", repoDir, "branch", "-f", branch, sha]);
+}
+
 export async function deleteBranch(repoDir: string, branch: string): Promise<void> {
   await execOk("git", ["-C", repoDir, "branch", "-D", branch]);
 }

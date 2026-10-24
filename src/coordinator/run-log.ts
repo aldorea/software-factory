@@ -71,6 +71,13 @@ export interface BlockRecord {
   lastFailure?: string;
 }
 
+export interface FollowUpRecord {
+  round: number;
+  criteria: string[];
+  failure: string;
+  outcome: "merged" | "blocked" | "interrupted" | "paused";
+}
+
 export interface SubtaskRecord {
   id: string;
   criteria: string[];
@@ -80,6 +87,7 @@ export interface SubtaskRecord {
   reason?: string;
   block?: BlockRecord;
   conflictFiles?: string[];
+  followUps?: FollowUpRecord[];
   attempts: AttemptRecord[];
   usage: TokenUsage;
   gate?: GateRecord;

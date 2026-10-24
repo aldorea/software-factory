@@ -41,7 +41,14 @@ function subtaskLine(subtask: SubtaskRecord): string {
   const head = `- **${subtask.id}** (${subtask.criteria.join(", ")}): ${subtask.state}`;
   const reason = subtask.reason ? `${head}. ${subtask.reason}` : head;
   const lastFailure = subtask.block?.lastFailure;
-  return lastFailure ? `${reason}\n  Last failure: ${lastFailure}` : reason;
+  const lines = [
+    reason,
+    ...(subtask.followUps ?? []).map(
+      (followUp) => `  Follow-up ${followUp.round} (${followUp.criteria.join(", ")}): ${followUp.outcome}`,
+    ),
+    ...(lastFailure ? [`  Last failure: ${lastFailure}`] : []),
+  ];
+  return lines.join("\n");
 }
 
 function verificationSection(log: RunLog): string {
