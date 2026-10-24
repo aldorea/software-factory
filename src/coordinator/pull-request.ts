@@ -23,7 +23,10 @@ export function renderPullRequest(issue: Issue, log: RunLog): PullRequestText {
 
 function resultLine(log: RunLog): string {
   if (log.result === "ready") return "Ready for review: every subtask merged and the integrated verification passed.";
-  if (log.result === "paused") return `Paused: ${log.pauseReason ?? "unknown reason"}. Run factory run ${log.issue} again to resume.`;
+  if (log.result === "paused") {
+    const reset = log.resetsAt === undefined ? "The reset time is unknown." : `It resets at ${log.resetsAt}.`;
+    return `Paused: ${log.pauseReason ?? "unknown reason"}. ${reset} Run factory run ${log.issue} again to resume.`;
+  }
   const failed: string[] = [];
   const blocked = log.subtasks.filter((subtask) => subtask.state !== "merged").map((subtask) => subtask.id);
   if (blocked.length > 0) failed.push(`subtasks not merged: ${blocked.join(", ")}`);

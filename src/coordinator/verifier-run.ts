@@ -6,6 +6,7 @@ import type { Verifier, VerifierAnswer } from "./verifier.ts";
 export interface TestJudgment {
   records: VerifierRecord[];
   missingTests: string[];
+  planLimit?: { message: string; resetsAt?: Date };
 }
 
 export interface JudgmentInput {
@@ -31,6 +32,10 @@ export async function judgeTests(verifier: Verifier, input: JudgmentInput): Prom
     }
     const logPath = join(input.logDir, `${input.label}-verifier-${criterion.id}.jsonl`);
     const answer = await ask(verifier, { id: criterion.id, criterion: input.texts[criterion.id] ?? criterion.id, test, logPath });
+    if (answer.kind === "plan-limit") {
+      const resetsAt = answer.resetsAt !== undefined ? { resetsAt: answer.resetsAt } : {};
+      return { ...judgment, planLimit: { message: answer.message, ...resetsAt } };
+    }
     judgment.records.push(recordOf(criterion.id, logPath, answer));
   }
   return judgment;
@@ -43,7 +48,7 @@ async function ask(verifier: Verifier, question: Parameters<Verifier["judge"]>[0
   }));
 }
 
-function recordOf(id: string, logPath: string, answer: VerifierAnswer): VerifierRecord {
+function recordOf(id: string, logPath: string, answer: Exclude<VerifierAnswer, { kind: "plan-limit" }>): VerifierRecord {
   if (answer.kind === "accept") return { id, verdict: "accept", logPath };
   if (answer.kind === "refute") return { id, verdict: "refute", reason: answer.reason, logPath };
   return { id, verdict: "error", reason: answer.message, logPath };

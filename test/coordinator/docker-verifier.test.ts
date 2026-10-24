@@ -36,10 +36,14 @@ describe("answerFrom the outcome of the verifier agent", () => {
     ).toEqual({ kind: "error", message: "The verifier changed its directory despite the deny-all config: probe.txt" });
   });
 
-  it("should error when the verifier hits a deadline, an idle timeout or a plan limit", () => {
+  it("should error when the verifier hits a deadline or an idle timeout", () => {
     expect(answerFrom({ kind: "deadline" })).toMatchObject({ kind: "error" });
     expect(answerFrom({ kind: "idle-timeout" })).toMatchObject({ kind: "error" });
-    expect(answerFrom({ kind: "plan-limit", message: "limit" })).toMatchObject({ kind: "error" });
+  });
+
+  it("should report a plan limit with its reset time, because a plan limit of any agent pauses the run", () => {
+    const resetsAt = new Date("2026-10-24T13:00:00.000Z");
+    expect(answerFrom({ kind: "plan-limit", message: "limit", resetsAt })).toEqual({ kind: "plan-limit", message: "limit", resetsAt });
   });
 });
 

@@ -78,6 +78,11 @@ export interface FollowUpRecord {
   outcome: "merged" | "blocked" | "interrupted" | "paused";
 }
 
+export interface PausedLoopRecord {
+  firstAttempt: number;
+  elapsedMs: number;
+}
+
 export interface SubtaskRecord {
   id: string;
   criteria: string[];
@@ -89,6 +94,7 @@ export interface SubtaskRecord {
   conflictFiles?: string[];
   followUps?: FollowUpRecord[];
   attempts: AttemptRecord[];
+  pausedLoop?: PausedLoopRecord;
   usage: TokenUsage;
   gate?: GateRecord;
   gateRejections: number;
@@ -164,6 +170,7 @@ export interface RunLog {
   endedAt?: string;
   result: RunResult;
   pauseReason?: string;
+  resetsAt?: string;
   agents: AgentsRecord;
   criteria: CriteriaRecord;
   cost: CostRecord;

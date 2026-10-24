@@ -29,6 +29,8 @@ import { followUpFailure, followUpStop, followUpTasks, verificationSignature } f
 import { gateDecision, protectedFor, requestCheckPaths, type GateDecision } from "./gate.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
+import { resumedLog } from "./resume.ts";
+import { latestRunLog, mergedSubtasks, runBaseSha, SUBTASK_TRAILER } from "./run-history.ts";
 import { dependencyProblem, schedule, type Schedule } from "./schedule.ts";
 import { decideScopeExtension, type ScopeExtensionDecision } from "./scope-extension.ts";
 import { Lock, runSchedule } from "./slots.ts";
@@ -44,7 +46,7 @@ import {
 } from "./run-log.ts";
 import { applyTotals, emptyCost, emptyFriction } from "./run-totals.ts";
 import { countedTokens, type StopLimits, type StopType } from "./stop-rules.ts";
-import { runSubtaskLoop, type LoopResult } from "./subtask-loop.ts";
+import { runSubtaskLoop, type LoopResult, type PlanLimitHit } from "./subtask-loop.ts";
 import { judgeTests, NO_JUDGMENT } from "./verifier-run.ts";
 
 export const CREDENTIAL_VARIABLES: Record<AgentKind, string> = {
@@ -85,44 +87,47 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   const prepared = await prepare(request, ports);
   const { config, issue, branch, spec, plan, maxParallel, workers, humanCriteria } = prepared;
   const subtasks = plan.base ? [plan.base, ...spec.subtasks] : spec.subtasks;
-  const startedAt = ports.clock.now();
-  const runStartSha = await revParse(request.repoDir, branch);
-  const existingTestPaths = await testFilesAt(request.repoDir, runStartSha);
-  const requestChecks = spec.base ? requestCheckPaths(spec) : [];
-  const id = makeRunId(request.issue, startedAt);
-  const runDir = join(request.repoDir, ".factory", "logs", id);
-  const runLogPath = join(runDir, "run.json");
-  const records = new Map<string, SubtaskRecord>(
-    subtasks.map((subtask) => [
-      subtask.id,
-      {
-        id: subtask.id,
-        criteria: subtask.criteria,
-        branch: subtaskBranch(branch, subtask.id),
-        state: "pending",
-        attempts: [],
-        usage: emptyUsage(),
-        gateRejections: 0,
-        verifierRejections: 0,
-        conflicts: 0,
-        scopeExtensions: [],
-      },
-    ]),
-  );
-  const log: RunLog = {
+  const now = ports.clock.now();
+  const logsDir = join(request.repoDir, ".factory", "logs");
+  const fresh: RunLog = {
     version: RUN_LOG_VERSION,
-    runId: id,
+    runId: makeRunId(request.issue, now),
     issue: request.issue,
     integrationBranch: branch,
-    startedAt: startedAt.toISOString(),
+    startedAt: now.toISOString(),
     result: "running",
     agents: { workers, verifier: config.roles.verifier, changes: [] },
     criteria: { passing: [], blocked: [], human: humanCriteria, pending: [] },
     cost: emptyCost(),
     friction: emptyFriction(),
     workerLayerFailures: [],
-    subtasks: subtasks.map((subtask) => records.get(subtask.id) as SubtaskRecord),
+    subtasks: subtasks.map((subtask) => ({
+      id: subtask.id,
+      criteria: subtask.criteria,
+      branch: subtaskBranch(branch, subtask.id),
+      state: "pending",
+      attempts: [],
+      usage: emptyUsage(),
+      gateRejections: 0,
+      verifierRejections: 0,
+      conflicts: 0,
+      scopeExtensions: [],
+    })),
   };
+  const log = resumedLog({
+    fresh,
+    previous: await latestRunLog(logsDir, request.issue),
+    merged: await mergedSubtasks(request.repoDir, branch),
+    now,
+  });
+  const id = log.runId;
+  const startedAt = new Date(Date.parse(log.startedAt) + log.cost.pausedMs);
+  const runDir = join(logsDir, id);
+  const runLogPath = join(runDir, "run.json");
+  const records = new Map<string, SubtaskRecord>(log.subtasks.map((record) => [record.id, record]));
+  const runStartSha = await runBaseSha(request.repoDir, branch);
+  const existingTestPaths = await testFilesAt(request.repoDir, runStartSha);
+  const requestChecks = spec.base ? requestCheckPaths(spec) : [];
   const saveLock = new Lock();
   const save = () =>
     saveLock.exclusive(async () => {
@@ -132,7 +137,9 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   await save();
 
   const gitLock = new Lock();
-  const scopes = new Map<string, string[]>(subtasks.map((subtask) => [subtask.id, [...subtask.scope]]));
+  const scopes = new Map<string, string[]>(
+    subtasks.map((subtask) => [subtask.id, [...subtask.scope, ...(records.get(subtask.id)?.scopeExtensions ?? [])]]),
+  );
   const extendScope = (subtask: Subtask, requested: string[]): ScopeExtensionDecision => {
     const scope = scopes.get(subtask.id) as string[];
     const wave = plan.waves.find((members) => members.some((member) => member.id === subtask.id)) ?? [];
@@ -225,6 +232,12 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     return { checks, ...evidence };
   };
 
+  const pauseRun = (limit: PlanLimitHit) => {
+    if (log.pauseReason !== undefined) return;
+    log.pauseReason = `the plan limit of ${limit.agent} was reached: ${limit.message}`;
+    if (limit.resetsAt !== undefined) log.resetsAt = limit.resetsAt.toISOString();
+  };
+
   let conflicted = false;
   const stateOf = (subtaskId: string) => (records.get(subtaskId) as SubtaskRecord).state;
 
@@ -239,7 +252,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   const runSubtask = async (subtask: Subtask, slot: number) => {
     const record = records.get(subtask.id) as SubtaskRecord;
-    if (log.pauseReason !== undefined) return;
+    if (log.pauseReason !== undefined || record.state === "merged") return;
     const reason = notStartedReason(subtask);
     if (reason !== null) {
       record.state = "not-started";
@@ -256,7 +269,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     if (followUp) {
       await gitLock.exclusive(async () => moveBranch(request.repoDir, record.branch, await revParse(request.repoDir, branch)));
     }
-    const gate = async (attempt: number): Promise<GateDecision | null> => {
+    const gate = async (attempt: number): Promise<GateDecision | PlanLimitHit | null> => {
       const sha = await revParse(request.repoDir, record.branch);
       const gated = await checksOn(
         `${label}-gate-${attempt}`,
@@ -289,6 +302,9 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
             label: `${label}-attempt-${attempt}`,
           })
         : NO_JUDGMENT;
+      if (judgment.planLimit !== undefined) {
+        return { kind: "plan-limit", agent: config.roles.verifier.agent, ...judgment.planLimit };
+      }
       const decision = verifiedDecision(checked, judgment);
       const reasons = decision.rejections.filter((rejection) => rejection.kind !== "verifier").map((rejection) => rejection.message);
       record.gate = { sha, accepted: decision.accepted, reasons, checks, criteria, verifier: judgment.records };
@@ -306,7 +322,8 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       runTokens,
       extendScope: (requested) => extendScope(subtask, requested),
       save,
-      workerId: `${request.issue}-${label}`,
+      paused: () => log.pauseReason !== undefined,
+      workerId: workerId(request.issue, label, record),
       ...(followUp ? { followUp: followUp.text } : {}),
     });
     const unclassified = worked.failures.find((failure) => !(failure instanceof WorkerLayerError));
@@ -345,7 +362,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       record.block = { type: loop.type, reason: loop.reason };
     } else if (loop.kind === "paused") {
       outcome = "paused";
-      log.pauseReason = `the plan limit of ${workers.agent} was reached: ${loop.message}`;
+      if (loop.limit !== undefined) pauseRun(loop.limit);
       if (followUp) record.state = "merged";
     } else {
       outcome = "blocked";
@@ -436,7 +453,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   await ports.notifier.notify({
     title: `factory run #${request.issue}`,
-    message: `${log.result === "ready" ? "Ready for review" : log.result === "paused" ? "Paused" : "Draft"}: ${issue.title}`,
+    message: notificationMessage(log, issue.title),
     url: pullRequest.url,
   });
   return { result: log.result, pullRequest, runLogPath, log };
@@ -493,10 +510,11 @@ interface LoopWiring {
   workerId: string;
   followUp?: string;
   startedAt: Date;
-  gate: (attempt: number) => Promise<GateDecision | null>;
+  gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | null>;
   runTokens: () => number;
   extendScope: (requested: string[]) => ScopeExtensionDecision;
   save: () => Promise<void>;
+  paused: () => boolean;
 }
 
 async function runWorker(
@@ -549,6 +567,7 @@ async function runWorker(
       gate: wiring.gate,
       extendScope: wiring.extendScope,
       save: wiring.save,
+      paused: wiring.paused,
     });
   } catch (error) {
     failures.push(error);
@@ -598,12 +617,22 @@ async function workerPrompt(issue: Issue, subtask: Subtask, config: ResolvedConf
   return `${base}\n\n${section}`;
 }
 
+function workerId(issue: number, label: string, record: SubtaskRecord): string {
+  return record.pausedLoop === undefined ? `${issue}-${label}` : `${issue}-${label}-from-${record.attempts.length + 1}`;
+}
+
 export function subtaskBranch(integration: string, subtaskId: string): string {
   return `factory-subtask/${integration.replace(/^factory\//, "")}/${subtaskId}`;
 }
 
 export function mergeMessage(issue: number, subtaskId: string): string {
-  return `Merge subtask ${subtaskId} of #${issue}\n\nFactory-Subtask: ${subtaskId}`;
+  return `Merge subtask ${subtaskId} of #${issue}\n\n${SUBTASK_TRAILER}: ${subtaskId}`;
+}
+
+function notificationMessage(log: RunLog, title: string): string {
+  if (log.result === "ready") return `Ready for review: ${title}`;
+  if (log.result !== "paused") return `Draft: ${title}`;
+  return log.resetsAt === undefined ? `Paused: ${title}` : `Paused until the plan limit resets at ${log.resetsAt}: ${title}`;
 }
 
 function blockTypeOf(stop: StopType): BlockType {
