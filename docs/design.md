@@ -243,7 +243,7 @@ Each agent has its own `maxParallel` and ceiling, because each runs on its own s
 |---|---|
 | `maxParallel` at the start | 1 |
 | Up by one | After 3 runs in a row of that agent with no failure of the worker layer |
-| Ceiling | Claude Code: 2 workers, 3 only after several runs with 2 and no pause for its plan limit. Other agents: an initial value, calibrated in the pilot |
+| Ceiling | Claude Code: 2 workers. Other agents: an initial value, calibrated in the pilot |
 | Down by one | On each pause for the plan limit of that agent |
 
 The independent verifier does not count for this ceiling.
