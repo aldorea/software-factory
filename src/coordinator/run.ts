@@ -27,6 +27,8 @@ import { firstErrorLine } from "./failures.ts";
 import { gateDecision, requestCheckPaths, type GateDecision } from "./gate.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
+import { resumedLog } from "./resume.ts";
+import { latestRunLog, mergedSubtasks, SUBTASK_TRAILER } from "./run-history.ts";
 import { dependencyProblem, schedule, type Schedule } from "./schedule.ts";
 import { Lock, runSchedule } from "./slots.ts";
 import {
@@ -81,41 +83,44 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   const prepared = await prepare(request, ports);
   const { config, issue, branch, spec, plan, maxParallel, workers, humanCriteria } = prepared;
   const subtasks = plan.base ? [plan.base, ...spec.subtasks] : spec.subtasks;
-  const startedAt = ports.clock.now();
-  const id = makeRunId(request.issue, startedAt);
-  const runDir = join(request.repoDir, ".factory", "logs", id);
-  const runLogPath = join(runDir, "run.json");
-  const records = new Map<string, SubtaskRecord>(
-    subtasks.map((subtask) => [
-      subtask.id,
-      {
-        id: subtask.id,
-        criteria: subtask.criteria,
-        branch: subtaskBranch(branch, subtask.id),
-        state: "pending",
-        attempts: [],
-        usage: emptyUsage(),
-        gateRejections: 0,
-        verifierRejections: 0,
-        conflicts: 0,
-        scopeExtensions: [],
-      },
-    ]),
-  );
-  const log: RunLog = {
+  const now = ports.clock.now();
+  const logsDir = join(request.repoDir, ".factory", "logs");
+  const fresh: RunLog = {
     version: RUN_LOG_VERSION,
-    runId: id,
+    runId: makeRunId(request.issue, now),
     issue: request.issue,
     integrationBranch: branch,
-    startedAt: startedAt.toISOString(),
+    startedAt: now.toISOString(),
     result: "running",
     agents: { workers, verifier: config.roles.verifier, changes: [] },
     criteria: { passing: [], blocked: [], human: humanCriteria, pending: [] },
     cost: emptyCost(),
     friction: emptyFriction(),
     workerLayerFailures: [],
-    subtasks: subtasks.map((subtask) => records.get(subtask.id) as SubtaskRecord),
+    subtasks: subtasks.map((subtask) => ({
+      id: subtask.id,
+      criteria: subtask.criteria,
+      branch: subtaskBranch(branch, subtask.id),
+      state: "pending",
+      attempts: [],
+      usage: emptyUsage(),
+      gateRejections: 0,
+      verifierRejections: 0,
+      conflicts: 0,
+      scopeExtensions: [],
+    })),
   };
+  const log = resumedLog({
+    fresh,
+    previous: await latestRunLog(logsDir, request.issue),
+    merged: await mergedSubtasks(request.repoDir, branch),
+    now,
+  });
+  const id = log.runId;
+  const startedAt = new Date(Date.parse(log.startedAt) + log.cost.pausedMs);
+  const runDir = join(logsDir, id);
+  const runLogPath = join(runDir, "run.json");
+  const records = new Map<string, SubtaskRecord>(log.subtasks.map((record) => [record.id, record]));
   const saveLock = new Lock();
   const save = () =>
     saveLock.exclusive(async () => {
@@ -220,7 +225,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   const runSubtask = async (subtask: Subtask, slot: number) => {
     const record = records.get(subtask.id) as SubtaskRecord;
-    if (log.pauseReason !== undefined) return;
+    if (log.pauseReason !== undefined || record.state === "merged") return;
     const reason = notStartedReason(subtask);
     if (reason !== null) {
       record.state = "not-started";
@@ -428,7 +433,7 @@ async function runWorker(
     .exclusive(() =>
       inStage("start", () =>
         ports.runner.start({
-          id: `${request.issue}-${subtask.id}`,
+          id: workerId(request.issue, subtask.id, wiring.record.attempts.length),
           repoDir: request.repoDir,
           baseRef: branch,
           branch: wiring.record.branch,
@@ -504,12 +509,16 @@ async function workerPrompt(issue: Issue, subtask: Subtask, config: ResolvedConf
   });
 }
 
+function workerId(issue: number, subtaskId: string, earlierAttempts: number): string {
+  return earlierAttempts === 0 ? `${issue}-${subtaskId}` : `${issue}-${subtaskId}-from-${earlierAttempts + 1}`;
+}
+
 export function subtaskBranch(integration: string, subtaskId: string): string {
   return `factory-subtask/${integration.replace(/^factory\//, "")}/${subtaskId}`;
 }
 
 export function mergeMessage(issue: number, subtaskId: string): string {
-  return `Merge subtask ${subtaskId} of #${issue}\n\nFactory-Subtask: ${subtaskId}`;
+  return `Merge subtask ${subtaskId} of #${issue}\n\n${SUBTASK_TRAILER}: ${subtaskId}`;
 }
 
 function notificationMessage(log: RunLog, title: string): string {

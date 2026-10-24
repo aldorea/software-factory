@@ -81,6 +81,7 @@ export interface SubtaskRecord {
   block?: BlockRecord;
   conflictFiles?: string[];
   attempts: AttemptRecord[];
+  elapsedMs?: number;
   usage: TokenUsage;
   gate?: GateRecord;
   gateRejections: number;

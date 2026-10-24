@@ -39,11 +39,19 @@ export type LoopResult =
   | { kind: "interrupted" };
 
 export async function runSubtaskLoop(loop: SubtaskLoop): Promise<LoopResult> {
+  const { clock, record } = loop;
+  const startedAt = new Date(clock.now().getTime() - (record.elapsedMs ?? 0));
+  const result = await attemptsUntilDone(loop, startedAt);
+  record.elapsedMs = clock.now().getTime() - startedAt.getTime();
+  return result;
+}
+
+async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date): Promise<LoopResult> {
   const { clock, record, limits } = loop;
-  const startedAt = clock.now();
-  const signatures: string[] = [];
-  let last: AttemptFailure | undefined;
-  for (let number = 1; ; number += 1) {
+  const earlier = record.attempts.flatMap((attempt) => (attempt.failure ? [attempt.failure] : []));
+  const signatures = earlier.map((failure) => failure.signature);
+  let last: AttemptFailure | undefined = earlier.at(-1);
+  for (let number = record.attempts.length + 1; ; number += 1) {
     if (loop.paused()) return pause(loop);
     const now = clock.now();
     const stop = stopReason(

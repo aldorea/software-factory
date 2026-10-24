@@ -3,12 +3,13 @@ import { runIssue } from "../../src/coordinator/run.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier, type VerifierScript } from "../fakes/verifier.ts";
-import { FakeWorkerRunner, type AttemptScript } from "../fakes/worker-runner.ts";
-import { CONFIG, harness, ISSUE, ISSUE_BODY, specText, targetRepo, temp, TOKEN, type Target } from "./harness.ts";
+import { FakeWorkerRunner, type AttemptCall, type AttemptScript } from "../fakes/worker-runner.ts";
+import { BRANCH, CONFIG, git, harness, ISSUE, ISSUE_BODY, specText, targetRepo, temp, TOKEN, type Target } from "./harness.ts";
 
 afterEach(() => temp.removeAll());
 
 const RESETS_AT = new Date("2026-10-24T13:00:00.000Z");
+const HOUR = 60 * 60 * 1000;
 
 const TWO_SUBTASKS = {
   issueBody: ISSUE_BODY.replace("A1 The greeting says hello.", "A1 The greeting says hello.\n- [ ] A2 The farewell says bye."),
@@ -107,5 +108,110 @@ describe("factory run at the plan limit", () => {
     expect(report.log.resetsAt).toBe(RESETS_AT.toISOString());
     expect(report.log.subtasks[0]).toMatchObject({ state: "pending", verifierRejections: 0, gateRejections: 0 });
     expect(runner.workers.filter((worker) => worker.attempts.length > 0).map((worker) => worker.attempts.length)).toEqual([1]);
+  });
+});
+
+describe("factory run on a paused or partially done run", () => {
+  const isS1 = (call: AttemptCall) => call.spec.branch.endsWith("/S1");
+  const working = (runner: FakeWorkerRunner) => runner.workers.filter((worker) => worker.attempts.length > 0);
+
+  it("should skip the merged subtasks, reuse the existing subtask branch and update the same pull request", async () => {
+    const target = await targetRepo(TWO_SUBTASKS);
+    const first = factory(target, (call) => {
+      if (isS1(call)) return { files: { "src/greeting.txt": "hello\n" } };
+      if (call.number === 1) return { files: { "lib/farewell.txt": "BAD\n" }, commit: "First farewell" };
+      return { outcome: { kind: "plan-limit", message: "5-hour limit reached", resetsAt: RESETS_AT } };
+    });
+    const paused = await first.run();
+    expect(paused.result).toBe("paused");
+    const s2Branch = paused.log.subtasks[1]?.branch ?? "";
+
+    let resumedFrom = "";
+    const second = factory(
+      target,
+      async (call) => {
+        resumedFrom = await git(target.repoDir, "log", "-1", "--format=%s", s2Branch);
+        return { files: { "lib/farewell.txt": "bye\n" } };
+      },
+      { at: "2026-10-24T13:30:00.000Z" },
+    );
+    const resumed = await second.run();
+
+    expect(resumed.result).toBe("ready");
+    expect(working(second.runner).map((worker) => worker.spec.branch)).toEqual([s2Branch]);
+    expect(resumedFrom).toBe("First farewell");
+    expect(resumed.log.runId).toBe(paused.log.runId);
+    expect(resumed.log.subtasks.map((subtask) => [subtask.id, subtask.state, subtask.attempts.length])).toEqual([
+      ["S1", "merged", 1],
+      ["S2", "merged", 3],
+    ]);
+    expect(new Set(resumed.log.subtasks[1]?.attempts.map((attempt) => attempt.logPath)).size).toBe(3);
+    expect(resumed.log).not.toHaveProperty("pauseReason");
+    expect(resumed.log).not.toHaveProperty("resetsAt");
+    expect(target.github.pullRequests).toHaveLength(1);
+    expect(target.github.pullRequests[0]).toMatchObject({ draft: false });
+    expect(await git(target.repoDir, "log", "--merges", "--format=%s", BRANCH)).toBe(
+      ["Merge subtask S2 of #42", "Merge subtask S1 of #42"].join("\n"),
+    );
+  });
+
+  it("should skip the subtasks merged by an earlier draft run and start the others with fresh patience", async () => {
+    const target = await targetRepo(TWO_SUBTASKS);
+    const first = factory(target, (call) =>
+      isS1(call) ? { files: { "src/greeting.txt": "hello\n" } } : { files: { "lib/farewell.txt": `BAD ${call.number}\n` } },
+    );
+    const draft = await first.run();
+    expect(draft.result).toBe("draft");
+    expect(draft.log.subtasks[1]?.block?.type).toBe("patience");
+
+    const second = factory(target, () => ({ files: { "lib/farewell.txt": "bye\n" } }), { at: "2026-10-24T09:00:00.000Z" });
+    const rerun = await second.run();
+
+    expect(rerun.result).toBe("ready");
+    expect(rerun.log.runId).not.toBe(draft.log.runId);
+    expect(working(second.runner).map((worker) => worker.spec.branch)).toEqual([draft.log.subtasks[1]?.branch]);
+    expect(rerun.log.subtasks.map((subtask) => [subtask.id, subtask.state, subtask.attempts.length])).toEqual([
+      ["S1", "merged", 0],
+      ["S2", "merged", 1],
+    ]);
+  });
+
+  it("should count neither the time in pause against the run wall clock nor the plan limit against patience", async () => {
+    const target = await targetRepo();
+    const first = factory(target, (call) => {
+      first.clock.advance(HOUR / 3);
+      return call.number < 3 ? { files: { "src/greeting.txt": `bye ${call.number}\n` } } : { outcome: { kind: "plan-limit", message: "limit" } };
+    });
+    await first.run();
+
+    const second = factory(
+      target,
+      () => {
+        second.clock.advance(HOUR / 3);
+        return { files: { "src/greeting.txt": "bye again\n" } };
+      },
+      { at: "2026-10-24T14:30:00.000Z" },
+    );
+    const resumed = await second.run();
+
+    expect(working(second.runner).map((worker) => worker.attempts.length)).toEqual([1]);
+    expect(resumed.log.subtasks[0]?.block?.type).toBe("patience");
+    expect(resumed.log.cost.pausedMs).toBe(5.5 * HOUR);
+    expect(resumed.log.cost.wallClockMs).toBe((4 / 3) * HOUR);
+  });
+
+  it("should count the work of a subtask before the pause against its own wall clock", async () => {
+    const target = await targetRepo();
+    const first = factory(target, (call) => {
+      first.clock.advance(HOUR);
+      return call.number < 2 ? { files: { "src/greeting.txt": "bye\n" } } : { outcome: { kind: "plan-limit", message: "limit" } };
+    });
+    await first.run();
+
+    const second = factory(target, () => ({ files: { "src/greeting.txt": "hello\n" } }), { at: "2026-10-24T15:00:00.000Z" });
+    const resumed = await second.run();
+
+    expect(working(second.runner)).toHaveLength(0);
+    expect(resumed.log.subtasks[0]?.block?.type).toBe("subtask-wall-clock");
   });
 });
