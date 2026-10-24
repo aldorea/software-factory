@@ -2,11 +2,15 @@
   "name": "software-factory",
   "private": true,
   "type": "module",
+  "bin": {
+    "factory": "./src/cli/factory.ts"
+  },
   "packageManager": "pnpm@10.19.0",
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
+    "factory": "node src/cli/factory.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:docker": "FACTORY_DOCKER_TESTS=1 vitest run test/docker",

@@ -20,7 +20,7 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 | `factory run <n>` | Implements, verifies and opens the PR |
 | `factory stats` | Summary of the `run.json` files of a repo |
 
-The developer starts each command. Nothing starts on its own.
+The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker or `gh` is not available.
 
 Before `factory run` starts, the developer chooses the agent and the model of each role: the workers and the independent verifier. The choice comes from the flags (`--worker-agent`, `--verifier-agent`); else, in a terminal, from a prompt with the default of `.factory/config.ts` already selected; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
 
@@ -73,6 +73,8 @@ Each criterion has one type of evidence:
 
 A "human" criterion with no reason in the spec means that the refinement is not finished.
 
+`.factory/config.ts` gives the Playwright and request commands with the placeholder `{{id}}` for the criterion ID (the test or request carries the ID in its title) and the folder where Playwright leaves its screenshots and videos. A criterion whose type has no command in the config stops the run before any worker starts.
+
 ### Who writes the tests
 
 - **Request checks:** the base subtask writes them, because it fixes the contracts. The workers cannot change them.
@@ -108,6 +110,8 @@ Its checks and criteria pass and the gate accepts it.
 - The token limits are set per agent in `.factory/config.ts`, because each provider counts tokens differently. The values above are the initial ones for Claude Code; each other agent gets its own initial values, calibrated in the pilot. A run that changes the agent of its workers on resume counts the tokens of each agent against that agent's limit. The wall clock and patience do not depend on the agent.
 - Patience and the hard limits are different rules. Patience stops a loop with no progress. A hard limit stops a loop that progresses too slowly or costs too much.
 - A worker cannot change its own limits.
+- A follow-up task is more work on the same subtask: it keeps counting the patience, the tokens and the wall clock of its subtask.
+- The limits per run also stop the follow-up tasks. The time in pause does not count.
 - A stopped subtask is `blocked`, with the reason and the last failure. The subtasks that do not depend on it go on.
 
 ### Plan limit
@@ -121,6 +125,11 @@ When the plan limit of any agent of the run is reached (the workers' or the inde
 
 When I resume a paused run, `factory run` asks again for the agent and the model of each role, with the previous choice selected. I may change them: patience keeps counting, because the error signature does not depend on the agent.
 
+The coordinator finds what to resume in two records, never in a conversation:
+
+- **Merged subtasks:** the `Factory-Subtask` trailers of the merge commits on the integration branch. A subtask merged by any earlier run does not run again.
+- **The paused run:** the latest `run.json` of the issue. When its result is `paused`, the run continues with the same run ID: the time in pause comes from it, and each paused subtask continues with the patience, tokens and wall clock it carried. A subtask blocked before the pause stays blocked. With no `run.json`, or a latest one that is not paused, a new run starts, and every subtask that has not merged starts again.
+
 Each agent's adapter reads its plan usage. Claude Code reports it in its `stream-json` output: a `rate_limit_event` gives the status and the utilization of each window (`five_hour`, `seven_day`) with its reset time. The worker layer records it in each attempt.
 
 ### Blocks during a run
@@ -131,7 +140,7 @@ The coordinator never asks me during a run. It records each block in the PR and 
 |---|---|
 | A worker needs a file outside its scope | The coordinator extends the scope only if no subtask of the same wave owns the file and the file is not protected. It records the extension in the run log and in the PR, not in `specs/<n>.md` (the hash stays valid). Otherwise, `blocked`. |
 | A question of design or product | `blocked`. The factory never decides a requirement. I change the spec, approve it again and start the run again. |
-| Patience, a limit or the environment | `blocked`, with the reason. |
+| Patience, a limit or the environment (for example, the app does not become ready) | `blocked`, with the reason. |
 
 A macOS notification links to the PR when a run ends, pauses or blocks.
 
@@ -150,7 +159,7 @@ The issue, `specs/<n>.md` and the PR are the records. A new session starts again
 
 - **`software-factory`** (this repo): the coordinator, the gates, the worker layer, the skills (refinement, independent verifier), the prompts and the `factory` CLI. It takes the target repo as an argument.
 - **Each target repo:** a `.factory/` folder:
-  - `config.ts`: checks, app start, e2e commands, environment, protected paths, the default agent and model of each role, and per agent its token limits and `maxParallel`. It uses the types that this repo exports.
+  - `config.ts`: checks, app start and the command that tells when the app is ready, e2e commands, environment, protected paths, the default agent and model of each role, and per agent its token limits and `maxParallel`. It uses the types that this repo exports.
   - `Dockerfile`: the image of the workers of that repo.
   - `.env.example`, and `.env` in `.gitignore`.
   - `logs/` and `worktrees/`, in `.gitignore`.

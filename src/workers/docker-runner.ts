@@ -2,13 +2,8 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  applyClaudeLine,
-  claudeCodeArgs,
-  claudeOutcome,
-  initialClaudeState,
-  isClaudeFinalLine,
-} from "./claude-code.ts";
+import { adapterFor } from "./agents.ts";
+import { performAttempt } from "./attempt.ts";
 import {
   addWorktree,
   addWorktreeForBranch,
@@ -21,9 +16,7 @@ import {
   removeWorktree,
   revParse,
 } from "./git.ts";
-import { applyOpenCodeLine, initialOpenCodeState, openCodeArgs, openCodeOutcome } from "./opencode.ts";
 import { exec, execOk } from "./sh.ts";
-import { supervise } from "./supervise.ts";
 import type {
   AgentSpec,
   AttemptLimits,
@@ -97,57 +90,17 @@ class DockerWorker implements Worker {
   async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
     this.attempts += 1;
     const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${this.attempts}.jsonl`);
-    const startedAt = new Date();
-    const dockerExec = (args: string[]) => ["exec", "-i", this.container, ...args];
-    const terminate = (pattern: string) => async () => {
-      await exec("docker", ["exec", this.container, "pkill", "-KILL", "-f", pattern]);
-    };
-
-    if (agent.kind === "claude-code") {
-      let state = initialClaudeState();
-      const supervised = await supervise({
-        command: "docker",
-        args: dockerExec(claudeCodeArgs(agent.model)),
-        stdin: prompt,
-        logPath,
-        deadline: limits.deadline,
-        idleTimeoutMs: limits.idleTimeoutMs,
-        onLine: (line) => {
-          state = applyClaudeLine(state, line);
-        },
-        isFinalLine: isClaudeFinalLine,
-        terminate: terminate("claude"),
-      });
-      return {
-        outcome: claudeOutcome(state, supervised),
-        usage: state.usage,
-        ...(state.plan ? { plan: state.plan } : {}),
-        logPath,
-        startedAt,
-        endedAt: new Date(),
-      };
-    }
-
-    let state = initialOpenCodeState();
-    const supervised = await supervise({
-      command: "docker",
-      args: dockerExec(openCodeArgs(agent.model)),
-      stdin: prompt,
+    return performAttempt({
+      adapter: adapterFor(agent.kind),
+      model: agent.model,
+      prompt,
+      limits,
       logPath,
-      deadline: limits.deadline,
-      idleTimeoutMs: limits.idleTimeoutMs,
-      onLine: (line) => {
-        state = applyOpenCodeLine(state, line);
+      launch: (agentCommand) => ({ command: "docker", args: ["exec", "-i", this.container, ...agentCommand] }),
+      stop: async (processName) => {
+        await exec("docker", ["exec", this.container, "pkill", "-KILL", "-f", processName]);
       },
-      terminate: terminate("opencode"),
     });
-    return {
-      outcome: openCodeOutcome(state, supervised),
-      usage: { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0 },
-      logPath,
-      startedAt,
-      endedAt: new Date(),
-    };
   }
 
   exec(command: string, options: { timeoutMs?: number } = {}): Promise<ExecResult> {
