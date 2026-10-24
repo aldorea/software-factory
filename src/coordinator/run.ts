@@ -18,22 +18,19 @@ import { emptyUsage } from "../workers/agent-adapter.ts";
 import { missingRequirements } from "../workers/agents.ts";
 import { inStage, WorkerLayerError } from "../workers/failures.ts";
 import { revParse } from "../workers/git.ts";
-import type { AgentKind, AttemptResult } from "../workers/types.ts";
-import { approvalProblem, gateDecision, runId as makeRunId, runResult, verificationPassed } from "./decisions.ts";
+import type { AgentKind } from "../workers/types.ts";
+import { approvalProblem, runId as makeRunId, runResult, verificationPassed } from "./decisions.ts";
+import { changedPaths, testFilesAt } from "./diff.ts";
 import { evidenceProblems, gatePlan, integrationPlan, type EvidencePlan } from "./evidence.ts";
 import { runEvidence, type EvidenceResult } from "./evidence-run.ts";
+import { firstErrorLine } from "./failures.ts";
+import { gateDecision, requestCheckPaths, type GateDecision } from "./gate.ts";
 import type { RunPorts } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
-import {
-  RUN_LOG_VERSION,
-  writeRunLog,
-  type AttemptRecord,
-  type BlockType,
-  type CheckRecord,
-  type RunLog,
-  type SubtaskRecord,
-} from "./run-log.ts";
+import { RUN_LOG_VERSION, writeRunLog, type BlockType, type CheckRecord, type RunLog, type SubtaskRecord } from "./run-log.ts";
 import { applyTotals, emptyCost, emptyFriction } from "./run-totals.ts";
+import { countedTokens, type StopType } from "./stop-rules.ts";
+import { runSubtaskLoop, type LoopResult } from "./subtask-loop.ts";
 
 export const CREDENTIAL_VARIABLES: Record<AgentKind, string> = {
   "claude-code": "CLAUDE_CODE_OAUTH_TOKEN",
@@ -147,7 +144,15 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     try {
       for (const check of config.checks) {
         const result = await inStage("exec", () => worker.exec(check.command));
-        checks.push({ name: check.name, command: check.command, exitCode: result.exitCode, passed: result.exitCode === 0 });
+        const passed = result.exitCode === 0;
+        const firstError = passed ? undefined : firstErrorLine(`${result.stderr}\n${result.stdout}`);
+        checks.push({
+          name: check.name,
+          command: check.command,
+          exitCode: result.exitCode,
+          passed,
+          ...(firstError !== undefined ? { firstError } : {}),
+        });
       }
       evidence = await runEvidence(worker, plan, {
         app: config.app,
@@ -169,59 +174,72 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     return { checks, ...evidence };
   };
 
-  record.state = "working";
-  await save();
-  const worked = await runWorker(request, ports, prepared, record, runDir, startedAt);
-  const unclassified = worked.failures.find((failure) => !(failure instanceof WorkerLayerError));
-  if (unclassified !== undefined) throw unclassified;
-  for (const failure of worked.failures) await noteFailure(failure, record.id);
-  const attempt = worked.result;
-  if (attempt !== null) record.attempts.push(attemptRecord(1, attempt, workers));
-  if (attempt === null) {
-    record.state = "interrupted";
-    record.reason = "A failure of the worker layer stopped it before its attempt ended.";
-  } else record.state = attempt.outcome.kind === "completed" ? "gating" : "pending";
-  await save();
-
-  if (attempt?.outcome.kind === "completed") {
+  const startSha = await revParse(request.repoDir, branch);
+  const existingTestPaths = await testFilesAt(request.repoDir, startSha);
+  const requestChecks = spec.base ? requestCheckPaths(spec) : [];
+  const gate = async (attempt: number): Promise<GateDecision | null> => {
     const sha = await revParse(request.repoDir, record.branch);
     const gated = await checksOn(
-      `${subtask.id}-gate`,
+      `${subtask.id}-gate-${attempt}`,
       sha,
       { purpose: "gate", subtask: subtask.id, slot: 0 },
       gatePlan(spec, subtask.criteria, config.evidence),
       record.id,
     );
-    if (gated === null) {
-      record.state = "interrupted";
-      record.reason = "A failure of the worker layer stopped its gate.";
-    } else {
-      const { checks, criteria } = gated;
-      const decision = gateDecision(checks, criteria);
-      record.gate = { sha, ...decision, checks, criteria };
-      if (!decision.accepted) {
-        record.gateRejections += 1;
-        record.state = "blocked";
-        record.reason = `The gate rejected it: ${decision.reasons.join("; ")}.`;
-      } else {
-        const merged = await withBranchWorktree(request.repoDir, branch, (worktree) =>
-          mergeBranch(worktree, record.branch, mergeMessage(request.issue, subtask.id)),
-        );
-        if (merged.kind === "merged") record.state = "merged";
-        else {
-          record.conflicts += 1;
-          record.state = "blocked";
-          record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
-        }
-      }
+    if (gated === null) return null;
+    const { checks, criteria } = gated;
+    const decision = gateDecision({
+      changes: await changedPaths(request.repoDir, branch, sha),
+      scope: subtask.scope,
+      protectedPaths: config.protectedPaths,
+      isBase: false,
+      existingTestPaths,
+      authorizedTestChanges: subtask.testChanges,
+      requestCheckPaths: requestChecks,
+      checks,
+      criteria,
+    });
+    record.gate = { sha, accepted: decision.accepted, reasons: decision.reasons, checks, criteria };
+    return decision;
+  };
+  const runTokens = () =>
+    log.subtasks.flatMap((entry) => entry.attempts).reduce((total, attempt) => total + countedTokens(attempt.usage), 0);
+
+  record.state = "working";
+  await save();
+  const worked = await runWorker(request, ports, prepared, runDir, { record, startedAt, gate, runTokens, save });
+  const unclassified = worked.failures.find((failure) => !(failure instanceof WorkerLayerError));
+  if (unclassified !== undefined) throw unclassified;
+  for (const failure of worked.failures) await noteFailure(failure, record.id);
+  const loop = worked.result;
+
+  if (loop === null || loop.kind === "interrupted") {
+    record.state = "interrupted";
+    record.reason =
+      loop === null
+        ? "A failure of the worker layer stopped it before its attempt ended."
+        : "A failure of the worker layer stopped its gate.";
+  } else if (loop.kind === "accepted") {
+    const merged = await withBranchWorktree(request.repoDir, branch, (worktree) =>
+      mergeBranch(worktree, record.branch, mergeMessage(request.issue, subtask.id)),
+    );
+    if (merged.kind === "merged") record.state = "merged";
+    else {
+      record.conflicts += 1;
+      record.state = "blocked";
+      record.reason = `Its merge into ${branch} conflicts in ${merged.files.join(", ")}.`;
     }
-  } else if (attempt?.outcome.kind === "plan-limit") {
-    log.pauseReason = `the plan limit of ${workers.agent} was reached: ${attempt.outcome.message}`;
-  } else if (attempt !== null) {
+  } else if (loop.kind === "paused") {
+    log.pauseReason = `the plan limit of ${workers.agent} was reached: ${loop.message}`;
+  } else {
     record.state = "blocked";
-    const blockType = blockTypeOf(attempt.outcome);
-    if (blockType !== undefined) record.blockType = blockType;
-    record.reason = `Its attempt ended with ${attempt.outcome.kind}${outcomeDetail(attempt) ? `: ${outcomeDetail(attempt)}` : ""}.`;
+    record.blockType = blockTypeOf(loop.stop.type);
+    record.reason = loop.stop.reason;
+    record.block = {
+      type: loop.stop.type,
+      reason: loop.stop.reason,
+      ...(loop.lastFailure !== undefined ? { lastFailure: loop.lastFailure } : {}),
+    };
   }
   await save();
 
@@ -299,17 +317,24 @@ async function prepare(request: RunRequest, ports: RunPorts): Promise<Prepared> 
 }
 
 interface Worked {
-  result: AttemptResult | null;
+  result: LoopResult | null;
   failures: unknown[];
+}
+
+interface LoopWiring {
+  record: SubtaskRecord;
+  startedAt: Date;
+  gate: (attempt: number) => Promise<GateDecision | null>;
+  runTokens: () => number;
+  save: () => Promise<void>;
 }
 
 async function runWorker(
   request: RunRequest,
   ports: RunPorts,
   prepared: Prepared,
-  record: SubtaskRecord,
   runDir: string,
-  startedAt: Date,
+  wiring: LoopWiring,
 ): Promise<Worked> {
   const { config, issue, branch, subtask, workers, credential } = prepared;
   const failures: unknown[] = [];
@@ -318,7 +343,7 @@ async function runWorker(
       id: `${request.issue}-${subtask.id}`,
       repoDir: request.repoDir,
       baseRef: branch,
-      branch: record.branch,
+      branch: wiring.record.branch,
       image: config.image,
       env: {
         ...environment(config, { purpose: "worker", subtask: subtask.id, slot: 0 }),
@@ -331,15 +356,29 @@ async function runWorker(
     return null;
   });
   if (worker === null) return { result: null, failures };
-  let result: AttemptResult | null = null;
+  let result: LoopResult | null = null;
   try {
-    const prompt = await workerPrompt(issue, subtask, config);
-    result = await inStage("attempt", () =>
-      worker.attempt({ kind: workers.agent, model: workers.model }, prompt, {
-        deadline: new Date(startedAt.getTime() + config.limits.subtaskWallClockMs),
-        idleTimeoutMs: config.limits.attemptIdleTimeoutMs,
-      }),
-    );
+    const { agents, limits } = config;
+    result = await runSubtaskLoop({
+      clock: ports.clock,
+      agent: workers,
+      prompt: await workerPrompt(issue, subtask, config),
+      record: wiring.record,
+      limits: {
+        patience: limits.patience,
+        subtaskWallClockMs: limits.subtaskWallClockMs,
+        runWallClockMs: limits.runWallClockMs,
+        attemptIdleTimeoutMs: limits.attemptIdleTimeoutMs,
+        subtaskTokens: agents[workers.agent].tokensPerSubtask,
+        runTokens: agents[workers.agent].tokensPerRun,
+      },
+      runStartedAt: wiring.startedAt,
+      runTokens: wiring.runTokens,
+      attempt: (prompt, attemptLimits) =>
+        inStage("attempt", () => worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits)),
+      gate: wiring.gate,
+      save: wiring.save,
+    });
   } catch (error) {
     failures.push(error);
   }
@@ -382,29 +421,6 @@ export function mergeMessage(issue: number, subtaskId: string): string {
   return `Merge subtask ${subtaskId} of #${issue}\n\nFactory-Subtask: ${subtaskId}`;
 }
 
-function outcomeDetail(result: AttemptResult): string | undefined {
-  const outcome = result.outcome;
-  if (outcome.kind === "agent-error" || outcome.kind === "plan-limit") return outcome.message;
-  if (outcome.kind === "completed") return outcome.summary;
-  return undefined;
-}
-
-function blockTypeOf(outcome: AttemptResult["outcome"]): BlockType | undefined {
-  if (outcome.kind === "deadline" || outcome.kind === "idle-timeout") return "limit";
-  if (outcome.kind === "agent-error") return "environment";
-  return undefined;
-}
-
-function attemptRecord(number: number, result: AttemptResult, agent: RoleChoice): AttemptRecord {
-  const detail = outcomeDetail(result);
-  return {
-    number,
-    agent,
-    outcome: result.outcome.kind,
-    ...(detail !== undefined ? { detail } : {}),
-    usage: result.usage,
-    logPath: result.logPath,
-    startedAt: result.startedAt.toISOString(),
-    endedAt: result.endedAt.toISOString(),
-  };
+function blockTypeOf(stop: StopType): BlockType {
+  return stop === "patience" ? "patience" : "limit";
 }

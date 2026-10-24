@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type { RoleChoice } from "../config/config.ts";
 import type { WorkerLayerFailureKind, WorkerLayerStage } from "../workers/failures.ts";
 import type { AgentKind, AttemptOutcome, TokenUsage } from "../workers/types.ts";
+import type { StopType } from "./stop-rules.ts";
 
 export const RUN_LOG_VERSION = 1;
 
@@ -19,6 +20,7 @@ export interface AttemptRecord {
   agent: RoleChoice;
   outcome: AttemptOutcome["kind"];
   detail?: string;
+  failure?: { signature: string; description: string };
   usage: TokenUsage;
   logPath: string;
   startedAt: string;
@@ -30,6 +32,7 @@ export interface CheckRecord {
   command: string;
   exitCode: number;
   passed: boolean;
+  firstError?: string;
 }
 
 export interface CriterionRecord {
@@ -54,6 +57,12 @@ export interface GateRecord {
   criteria: CriterionRecord[];
 }
 
+export interface BlockRecord {
+  type: StopType;
+  reason: string;
+  lastFailure?: string;
+}
+
 export interface SubtaskRecord {
   id: string;
   criteria: string[];
@@ -61,6 +70,7 @@ export interface SubtaskRecord {
   state: SubtaskState;
   blockType?: BlockType;
   reason?: string;
+  block?: BlockRecord;
   attempts: AttemptRecord[];
   usage: TokenUsage;
   gate?: GateRecord;
