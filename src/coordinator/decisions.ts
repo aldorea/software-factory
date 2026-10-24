@@ -1,5 +1,7 @@
 import { criteriaHash, readApproval, technicalHash } from "../spec/approval.ts";
 import type { CheckRecord, CriterionRecord, RunLog, RunResult } from "./run-log.ts";
+import type { GateDecision, GateRejection } from "./gate.ts";
+import type { TestJudgment } from "./verifier-run.ts";
 
 export function approvalProblem(issue: number, specText: string, issueBody: string): string | null {
   const state = readApproval(specText);
@@ -12,6 +14,44 @@ export function approvalProblem(issue: number, specText: string, issueBody: stri
   if (technicalHash(specText) !== state.approval.technicalHash) changed.push(`specs/${issue}.md changed`);
   if (changed.length === 0) return null;
   return `${changed.join(" and ")} since the approval; review the spec and run factory approve ${issue} again`;
+}
+
+export function verifiedDecision(decision: GateDecision, judgment: TestJudgment): GateDecision {
+  const rejections: GateRejection[] = [
+    ...decision.rejections,
+    ...judgment.missingTests.map((id) => ({
+      kind: "criterion" as const,
+      message: `criterion ${id} (playwright) has no test that carries its ID in the changes of the subtask`,
+      signature: `no-test:${id}`,
+    })),
+    ...judgment.records.flatMap((record): GateRejection[] => {
+      if (record.verdict === "refute") {
+        return [
+          {
+            kind: "verifier",
+            message: `the verifier refuted the test of ${record.id}: ${record.reason ?? ""}`,
+            signature: `verifier:${record.id}:refute`,
+          },
+        ];
+      }
+      if (record.verdict === "error") {
+        return [
+          {
+            kind: "verifier",
+            message: `the verifier gave no usable answer for ${record.id}: ${record.reason ?? ""}`,
+            signature: `verifier:${record.id}:error`,
+          },
+        ];
+      }
+      return [];
+    }),
+  ];
+  return {
+    accepted: rejections.length === 0,
+    reasons: rejections.map((rejection) => rejection.message),
+    rejections,
+    signature: rejections.map((rejection) => rejection.signature).join(" | "),
+  };
 }
 
 export function verificationPassed(checks: CheckRecord[], criteria: CriterionRecord[]): boolean {

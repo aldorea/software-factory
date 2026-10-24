@@ -10,6 +10,7 @@ import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
+import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner, type AttemptCall, type AttemptScript, type ScriptedAttempt } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
@@ -133,7 +134,7 @@ function harness(target: Target, script: (call: AttemptCall, clock: FakeClock) =
     issue: ISSUE,
     credentials: { "claude-code": TOKEN },
   };
-  const run = () => runIssue(request, { runner, github: target.github, notifier, clock });
+  const run = () => runIssue(request, { runner, verifier: new FakeVerifier(), github: target.github, notifier, clock });
   return { runner, notifier, clock, run };
 }
 
@@ -211,7 +212,7 @@ describe("factory run for a one-subtask spec", () => {
   it("should stop before any worker starts when the host has no credential for the agent of the workers", async () => {
     const target = await targetRepo();
     const runner = new FakeWorkerRunner(writesHello);
-    const ports = { runner, github: target.github, notifier: new FakeNotifier(), clock: new FakeClock("2026-10-24T08:00:00Z") };
+    const ports = { runner, verifier: new FakeVerifier(), github: target.github, notifier: new FakeNotifier(), clock: new FakeClock("2026-10-24T08:00:00Z") };
 
     await expect(runIssue({ repoDir: target.repoDir, issue: ISSUE, credentials: {} }, ports)).rejects.toThrow(
       "CLAUDE_CODE_OAUTH_TOKEN is not set",

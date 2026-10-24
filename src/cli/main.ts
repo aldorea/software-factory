@@ -4,6 +4,7 @@ import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
 import { loadConfig } from "../config/load.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
 import { runIssue } from "../coordinator/run.ts";
+import type { Verifier } from "../coordinator/verifier.ts";
 import type { GitHub } from "../github/github.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import type { InteractiveLaunch } from "./launch.ts";
@@ -14,6 +15,7 @@ export interface CliEnv {
   clock: Clock;
   github(repoDir: string): GitHub;
   runner(): WorkerRunner;
+  verifier(repoDir: string): Verifier;
   notifier: Notifier;
   credentials: Partial<Record<AgentKind, string>>;
   launch(launch: InteractiveLaunch): Promise<number>;
@@ -37,7 +39,7 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
     if (command === "run") {
       const report = await runIssue(
         { repoDir, issue, credentials: env.credentials },
-        { runner: env.runner(), github: env.github(repoDir), notifier: env.notifier, clock: env.clock },
+        { runner: env.runner(), verifier: env.verifier(repoDir), github: env.github(repoDir), notifier: env.notifier, clock: env.clock },
       );
       env.out(`Run ${report.log.runId}: ${report.result}, ${report.pullRequest.url}`);
       return 0;

@@ -10,9 +10,9 @@ export interface DiffChange {
   status: ChangeStatus;
 }
 
-export type RejectionKind = "protected" | "request-check" | "existing-test" | "scope" | "check" | "criterion";
+export type RejectionKind = "protected" | "request-check" | "existing-test" | "scope" | "check" | "criterion" | "verifier";
 
-type DiffRejectionKind = Exclude<RejectionKind, "check" | "criterion">;
+type DiffRejectionKind = Exclude<RejectionKind, "check" | "criterion" | "verifier">;
 
 export interface GateRejection {
   kind: RejectionKind;

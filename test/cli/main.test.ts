@@ -10,6 +10,7 @@ import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
+import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
@@ -94,6 +95,7 @@ function cli(cwd: string, github: GitHub = new FakeGitHub([{ number: 42, title: 
     clock: new FakeClock("2026-10-24T08:00:00.000Z"),
     github: () => github,
     runner: () => runner,
+    verifier: () => new FakeVerifier(),
     notifier,
     credentials: { "claude-code": "token" },
     launch: async (launch) => {
