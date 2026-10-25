@@ -96,6 +96,7 @@ export interface SubtaskRecord {
   attempts: AttemptRecord[];
   carriedLoop?: CarriedLoopRecord;
   usage: TokenUsage;
+  verifierUsage?: Partial<Record<AgentKind, TokenUsage>>;
   gate?: GateRecord;
   gateRejections: number;
   verifierRejections: number;

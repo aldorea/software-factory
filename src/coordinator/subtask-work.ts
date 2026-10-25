@@ -6,6 +6,7 @@ import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { criteriaText } from "../spec/issue.ts";
 import type { Subtask } from "../spec/spec.ts";
 import { inStage, WorkerLayerError } from "../workers/failures.ts";
+import { emptyUsage } from "../workers/agent-adapter.ts";
 import { revParse } from "../workers/git.ts";
 import { checksOn } from "./check-container.ts";
 import { verifiedDecision } from "./decisions.ts";
@@ -15,8 +16,8 @@ import { gateDecision, protectedFor, type GateDecision } from "./gate.ts";
 import { environment, paused, stopLimits, type RunContext } from "./run-context.ts";
 import { SUBTASK_TRAILER } from "./run-history.ts";
 import type { CarriedLoopRecord, SubtaskRecord } from "./run-log.ts";
+import { addUsage, agentRunTokens } from "./run-totals.ts";
 import { decideScopeExtension, type ScopeExtensionDecision } from "./scope-extension.ts";
-import { agentTokens } from "./stop-rules.ts";
 import { attemptSubtask, type EnvironmentHit, type LoopResult, type PlanLimitHit } from "./subtask-loop.ts";
 import {
   applyMerge,
@@ -161,6 +162,15 @@ async function gate(context: RunContext, request: GateRequest): Promise<GateDeci
         label: `${label}-attempt-${attempt}`,
       })
     : NO_JUDGMENT;
+  if (judgment.usage !== undefined) {
+    record.verifierUsage = {
+      ...record.verifierUsage,
+      [verifier.agent]: addUsage(record.verifierUsage?.[verifier.agent] ?? emptyUsage(), judgment.usage),
+    };
+  }
+  for (const problem of judgment.usageProblems) {
+    await context.noteFailure(new WorkerLayerError("usage-unreadable", "attempt", problem), record.id);
+  }
   if (judgment.planLimit !== undefined) {
     return { kind: "plan-limit", agent: verifier.agent, ...judgment.planLimit };
   }
@@ -242,7 +252,7 @@ async function workInWorker(context: RunContext, request: WorkerRequest): Promis
       ...(request.carried !== undefined ? { carried: request.carried } : {}),
       limits: { ...stopLimits(config, workers), attemptIdleTimeoutMs: config.limits.attemptIdleTimeoutMs },
       runStartedAt: context.startedAt,
-      runTokens: () => agentTokens(context.log.subtasks.flatMap((entry) => entry.attempts), workers.agent),
+      runTokens: () => agentRunTokens(context.log, workers.agent),
       attempt: (prompt, attemptLimits) =>
         inStage("attempt", () => worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits)),
       gate: request.gate,

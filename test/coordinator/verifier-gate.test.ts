@@ -4,13 +4,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { approveSpec } from "../../src/commands/approve.ts";
 import { runIssue } from "../../src/coordinator/run.ts";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
-import type { VerifierAnswer, VerifierQuestion } from "../../src/coordinator/verifier.ts";
+import type { VerifierQuestion } from "../../src/coordinator/verifier.ts";
 import { revParse } from "../../src/workers/git.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
-import { FakeVerifier } from "../fakes/verifier.ts";
+import { FakeVerifier, type ScriptedAnswer } from "../fakes/verifier.ts";
 import { FakeWorkerRunner, type AttemptScript } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
@@ -116,7 +116,7 @@ async function targetRepo(): Promise<Target> {
 function harness(
   target: Target,
   script: AttemptScript,
-  answer: (question: VerifierQuestion) => VerifierAnswer = () => ({ kind: "accept" }),
+  answer: (question: VerifierQuestion) => ScriptedAnswer = () => ({ kind: "accept" }),
 ) {
   const runner = new FakeWorkerRunner(script);
   const verifier = new FakeVerifier(answer);
@@ -273,5 +273,65 @@ describe("the independent verifier at the gate", () => {
     await run();
 
     expect(verifier.questions.map((question) => question.test)).toEqual([TEST_SOURCE]);
+  });
+});
+
+describe("the usage of the independent verifier", () => {
+  const spent = { inputTokens: 100, cacheCreationInputTokens: 0, cacheReadInputTokens: 5, outputTokens: 20 };
+
+  it("should add the usage of every verifier answer to the cost of the verifier's agent, apart from the workers' agent", async () => {
+    const target = await targetRepo();
+    const weak = 'test("A1 the greeting page says hello", async () => { expect(1).toBe(1); });\n';
+    const { run } = harness(
+      target,
+      (call) => ({
+        files: { "src/greeting.txt": "hello\n", "tests/greeting.spec.ts": call.number === 1 ? weak : TEST_SOURCE },
+        commit: `Attempt ${call.number}`,
+        usage: { inputTokens: 1000 },
+      }),
+      (question) =>
+        question.test === weak ? { kind: "refute", reason: "Asserts nothing.", usage: spent } : { kind: "accept", usage: spent },
+    );
+
+    const report = await run();
+
+    const log = await readRunLog(report.runLogPath);
+    expect(log.subtasks[0]?.verifierUsage).toEqual({
+      opencode: { inputTokens: 200, cacheCreationInputTokens: 0, cacheReadInputTokens: 10, outputTokens: 40 },
+    });
+    expect(log.subtasks[0]?.usage.inputTokens).toBe(2000);
+    expect(log.cost.perAgent.opencode).toEqual({ inputTokens: 200, cacheCreationInputTokens: 0, cacheReadInputTokens: 10, outputTokens: 40 });
+    expect(log.cost.perAgent["claude-code"]?.inputTokens).toBe(2000);
+    expect(log.cost.usage).toEqual({ inputTokens: 2200, cacheCreationInputTokens: 0, cacheReadInputTokens: 10, outputTokens: 40 });
+  });
+
+  it("should count the usage of an answer that errors, because the verifier spent the tokens anyway", async () => {
+    const target = await targetRepo();
+    const { run } = harness(target, writesGreetingAndTest, () => ({ kind: "error", message: "no answer", usage: spent }));
+
+    const report = await run();
+
+    expect(report.log.cost.perAgent.opencode).toEqual({ inputTokens: 300, cacheCreationInputTokens: 0, cacheReadInputTokens: 15, outputTokens: 60 });
+  });
+
+  it("should keep the verdict and record a usage-unreadable failure of the worker layer when the usage cannot be read", async () => {
+    const target = await targetRepo();
+    const { run } = harness(target, writesGreetingAndTest, () => ({
+      kind: "accept",
+      usageProblem: "The token usage of the verifier cannot be read: the session export is not JSON",
+    }));
+
+    const report = await run();
+
+    expect(report.log.subtasks[0]).toMatchObject({ state: "merged", gate: { accepted: true } });
+    expect(report.result).toBe("ready");
+    expect(report.log.workerLayerFailures).toMatchObject([
+      {
+        kind: "usage-unreadable",
+        stage: "attempt",
+        subtask: "S1",
+        message: "The token usage of the verifier cannot be read: the session export is not JSON",
+      },
+    ]);
   });
 });
