@@ -1,6 +1,7 @@
 import type { AgentAdapter, AgentStream } from "./agent-adapter.ts";
 import { WorkerLayerError } from "./failures.ts";
 import { supervise } from "./supervise.ts";
+import { readUsage } from "./usage.ts";
 import type { AttemptLimits, AttemptOutcome, AttemptResult, ExecResult, TokenUsage } from "./types.ts";
 
 export interface AttemptRequest {
@@ -34,7 +35,7 @@ export async function performAttempt(request: AttemptRequest): Promise<AttemptRe
   const outcome = stream.outcome(supervised);
   return {
     outcome,
-    usage: await readUsage(request, stream, outcome),
+    usage: await usageOf(request, stream, outcome),
     ...(plan ? { plan } : {}),
     logPath: request.logPath,
     startedAt,
@@ -42,25 +43,13 @@ export async function performAttempt(request: AttemptRequest): Promise<AttemptRe
   };
 }
 
-async function readUsage(request: AttemptRequest, stream: AgentStream, outcome: AttemptOutcome): Promise<TokenUsage> {
-  const probe = stream.usageProbe;
-  if (probe === undefined) return stream.usage();
-  const command = probe.command();
-  if (command === undefined) {
-    if (outcome.kind === "completed") {
-      throw unreadable(request, "the agent completed with no session to read its token usage from");
-    }
-    return stream.usage();
-  }
-  const result = await request.exec(command);
-  if (result.exitCode !== 0) {
-    throw unreadable(request, `${command.join(" ")} exited with ${result.exitCode}: ${result.stderr.trim()}`);
-  }
-  const reading = probe.parse(result.stdout);
-  if (!reading.ok) throw unreadable(request, reading.problem);
-  return reading.usage;
-}
-
-function unreadable(request: AttemptRequest, problem: string): WorkerLayerError {
-  return new WorkerLayerError("usage-unreadable", "attempt", `The token usage of ${request.adapter.kind} cannot be read: ${problem}`);
+async function usageOf(request: AttemptRequest, stream: AgentStream, outcome: AttemptOutcome): Promise<TokenUsage> {
+  if (stream.usageProbe === undefined) return stream.usage();
+  const reading = await readUsage(stream.usageProbe, stream.usage(), outcome, request.exec);
+  if (reading.ok) return reading.usage;
+  throw new WorkerLayerError(
+    "usage-unreadable",
+    "attempt",
+    `The token usage of ${request.adapter.kind} cannot be read: ${reading.problem}`,
+  );
 }

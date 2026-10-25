@@ -34,6 +34,9 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS || !OPENCODE_KEY)("Verifier in
   it("should answer with text and remove its container", async () => {
     const result = await ask("Reply with the single word OK.");
     expect(result.outcome, result.logPath).toEqual({ kind: "completed", summary: "OK" });
+    expect(result.usageProblem, result.logPath).toBeUndefined();
+    expect(result.usage.inputTokens).toBeGreaterThan(0);
+    expect(result.usage.outputTokens).toBeGreaterThan(0);
     expect(await verifierContainers()).toBe("");
   });
 
