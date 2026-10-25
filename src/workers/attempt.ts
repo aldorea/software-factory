@@ -1,6 +1,7 @@
-import type { AgentAdapter } from "./agent-adapter.ts";
+import type { AgentAdapter, AgentStream } from "./agent-adapter.ts";
+import { WorkerLayerError } from "./failures.ts";
 import { supervise } from "./supervise.ts";
-import type { AttemptLimits, AttemptResult } from "./types.ts";
+import type { AttemptLimits, AttemptOutcome, AttemptResult, ExecResult, TokenUsage } from "./types.ts";
 
 export interface AttemptRequest {
   adapter: AgentAdapter;
@@ -10,6 +11,7 @@ export interface AttemptRequest {
   logPath: string;
   launch: (agentCommand: string[]) => { command: string; args: string[] };
   stop: (processName: string) => Promise<void>;
+  exec: (command: string[]) => Promise<ExecResult>;
 }
 
 export async function performAttempt(request: AttemptRequest): Promise<AttemptResult> {
@@ -29,12 +31,36 @@ export async function performAttempt(request: AttemptRequest): Promise<AttemptRe
     terminate: () => request.stop(adapter.processName),
   });
   const plan = stream.plan();
+  const outcome = stream.outcome(supervised);
   return {
-    outcome: stream.outcome(supervised),
-    usage: stream.usage(),
+    outcome,
+    usage: await readUsage(request, stream, outcome),
     ...(plan ? { plan } : {}),
     logPath: request.logPath,
     startedAt,
     endedAt: new Date(),
   };
+}
+
+async function readUsage(request: AttemptRequest, stream: AgentStream, outcome: AttemptOutcome): Promise<TokenUsage> {
+  const probe = stream.usageProbe;
+  if (probe === undefined) return stream.usage();
+  const command = probe.command();
+  if (command === undefined) {
+    if (outcome.kind === "completed") {
+      throw unreadable(request, "the agent completed with no session to read its token usage from");
+    }
+    return stream.usage();
+  }
+  const result = await request.exec(command);
+  if (result.exitCode !== 0) {
+    throw unreadable(request, `${command.join(" ")} exited with ${result.exitCode}: ${result.stderr.trim()}`);
+  }
+  const reading = probe.parse(result.stdout);
+  if (!reading.ok) throw unreadable(request, reading.problem);
+  return reading.usage;
+}
+
+function unreadable(request: AttemptRequest, problem: string): WorkerLayerError {
+  return new WorkerLayerError("usage-unreadable", "attempt", `The token usage of ${request.adapter.kind} cannot be read: ${problem}`);
 }

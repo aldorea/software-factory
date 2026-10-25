@@ -198,7 +198,7 @@ describe("factory run: the choice of the agent of each role", () => {
 
     expect(await main(["run", "42", "--worker-agent", "opencode:opencode-go/kimi-k2"], env)).toBe(1);
 
-    expect(err.join("\n")).toContain("opencode cannot serve the workers: it misses readsTokenUsage, detectsPlanLimit");
+    expect(err.join("\n")).toContain("opencode cannot serve the workers: it misses detectsPlanLimit");
     expect(runner.workers).toEqual([]);
   });
 

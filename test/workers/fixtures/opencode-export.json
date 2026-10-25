@@ -1,0 +1,88 @@
+{
+  "info": {
+    "id": "ses_e8db759a3ffezu7WMaX4o4J11V",
+    "projectID": "global",
+    "model": {
+      "id": "glm-5.3",
+      "providerID": "opencode-go",
+      "variant": "default"
+    },
+    "cost": 0.015277359999999999,
+    "tokens": {
+      "input": 11138,
+      "output": 10,
+      "reasoning": 0,
+      "cache": {
+        "read": 1356,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1792918726355,
+      "updated": 1792918728165,
+      "idle": 1792918729320
+    },
+    "title": "OK response request",
+    "location": {
+      "directory": "/work/capture"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_17248a6d700136cwJ5oDDgWat7",
+      "time": {
+        "created": 1792918727064
+      },
+      "text": "Reply with the single word OK. Do not use any tool.\n",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_17248a9a2001pQRaCahDXU86yG",
+      "time": {
+        "created": 1792918727154,
+        "streamed": 1792918729288,
+        "completed": 1792918729318
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "glm-5.3",
+        "providerID": "opencode-go",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "OK"
+        }
+      ],
+      "snapshot": {
+        "start": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "end": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0.01522116,
+      "tokens": {
+        "input": 10611,
+        "output": 3,
+        "reasoning": 0,
+        "cache": {
+          "read": 1356,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_17248b268001Fu7jl6IsvKpENh",
+      "time": {
+        "created": 1792918729320
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

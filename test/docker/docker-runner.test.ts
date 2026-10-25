@@ -206,5 +206,7 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
       { deadline: new Date(Date.now() + 120_000), idleTimeoutMs: 90_000 },
     );
     expect(attempt.outcome, attempt.logPath).toEqual({ kind: "completed", summary: "OK" });
+    expect(attempt.usage.inputTokens).toBeGreaterThan(0);
+    expect(attempt.usage.outputTokens).toBeGreaterThan(0);
   });
 });

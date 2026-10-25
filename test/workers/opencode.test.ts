@@ -1,5 +1,18 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyOpenCodeLine, initialOpenCodeState, openCodeArgs, openCodeOutcome } from "../../src/workers/opencode.ts";
+import {
+  applyOpenCodeLine,
+  initialOpenCodeState,
+  openCodeArgs,
+  openCodeExportArgs,
+  openCodeOutcome,
+  parseOpenCodeExport,
+} from "../../src/workers/opencode.ts";
+
+const fixture = (name: string) => readFileSync(join(import.meta.dirname, "fixtures", name), "utf8");
+const realRun = fixture("opencode-run.jsonl").trim().split("\n");
+const realExport = fixture("opencode-export.json");
 
 describe("OpenCode", () => {
   it("should refuse a model outside the subscription provider", () => {
@@ -72,4 +85,54 @@ describe("OpenCode", () => {
     const outcome = openCodeOutcome(initialOpenCodeState(), { stopReason: "exited", exitCode: 2, stderrTail: "bad" });
     expect(outcome).toEqual({ kind: "agent-error", message: "bad", exitCode: 2 });
   });
+
+  it("should keep the session id that every line of a real stream carries", () => {
+    const state = realRun.reduce(applyOpenCodeLine, initialOpenCodeState());
+    expect(state.sessionId).toBe("ses_e8db759a3ffezu7WMaX4o4J11V");
+    expect(state.lastText).toBe("OK");
+  });
+
+  it("should have no session id before the stream carries one", () => {
+    expect(initialOpenCodeState().sessionId).toBeUndefined();
+    expect(applyOpenCodeLine(initialOpenCodeState(), "not json").sessionId).toBeUndefined();
+  });
+
+  it("should export a session with the private server, so it reads the sessions of the run", () => {
+    expect(openCodeExportArgs("ses_abc")).toEqual(["opencode", "session", "export", "--standalone", "ses_abc"]);
+  });
 });
+
+describe("OpenCode export", () => {
+  it("should read the token usage of a real export, with the cache write as the cache creation", () => {
+    expect(parseOpenCodeExport(realExport)).toEqual({
+      ok: true,
+      usage: { inputTokens: 11138, cacheCreationInputTokens: 0, cacheReadInputTokens: 1356, outputTokens: 10 },
+    });
+  });
+
+  it("should count the reasoning tokens as output, because the plan bills them as such", () => {
+    const withReasoning = withTokens({ input: 100, output: 20, reasoning: 7, cache: { read: 3, write: 5 } });
+    expect(parseOpenCodeExport(withReasoning)).toEqual({
+      ok: true,
+      usage: { inputTokens: 100, cacheCreationInputTokens: 5, cacheReadInputTokens: 3, outputTokens: 27 },
+    });
+  });
+
+  it("should report an export that is not JSON as unreadable, not throw", () => {
+    expect(parseOpenCodeExport("Error: session not found")).toMatchObject({ ok: false });
+  });
+
+  it("should report an export with no token counts as unreadable, so a zero never hides a missing number", () => {
+    expect(parseOpenCodeExport(JSON.stringify({ info: { cost: 1 } }))).toMatchObject({ ok: false });
+    expect(parseOpenCodeExport(withTokens({ input: 1, output: "x", reasoning: 0, cache: { read: 0, write: 0 } }))).toMatchObject({
+      ok: false,
+    });
+    expect(parseOpenCodeExport(withTokens({ input: 1, output: 1, reasoning: 0 }))).toMatchObject({ ok: false });
+  });
+});
+
+function withTokens(tokens: unknown): string {
+  const data = JSON.parse(realExport) as { info: Record<string, unknown> };
+  data.info.tokens = tokens;
+  return JSON.stringify(data);
+}

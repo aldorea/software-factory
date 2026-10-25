@@ -100,6 +100,7 @@ class DockerWorker implements Worker {
       stop: async (processName) => {
         await exec("docker", ["exec", this.container, "pkill", "-KILL", "-f", processName]);
       },
+      exec: (command) => exec("docker", ["exec", this.container, ...command]),
     });
   }
 
