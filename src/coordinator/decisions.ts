@@ -58,10 +58,10 @@ export function verificationPassed(checks: CheckRecord[], criteria: CriterionRec
   return checks.every((check) => check.passed) && criteria.every((criterion) => criterion.passed);
 }
 
-export function runResult(log: Pick<RunLog, "subtasks" | "verification" | "pauseReason">): Exclude<RunResult, "running"> {
+export function runResult(log: Pick<RunLog, "subtasks" | "verification" | "pauseReason" | "evidence">): Exclude<RunResult, "running"> {
   if (log.pauseReason !== undefined) return "paused";
   const merged = log.subtasks.every((subtask) => subtask.state === "merged");
-  return merged && log.verification?.passed === true ? "ready" : "draft";
+  return merged && log.verification?.passed === true && log.evidence?.failure === undefined ? "ready" : "draft";
 }
 
 export function runId(issue: number, now: Date): string {

@@ -4,13 +4,18 @@ import type { ExecResult } from "./types.ts";
 export function exec(
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number } = {},
+  options: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {},
 ): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
     execFile(
       command,
       args,
-      { cwd: options.cwd, timeout: options.timeoutMs ?? 0, maxBuffer: 64 * 1024 * 1024 },
+      {
+        cwd: options.cwd,
+        timeout: options.timeoutMs ?? 0,
+        maxBuffer: 64 * 1024 * 1024,
+        env: options.env ? { ...process.env, ...options.env } : undefined,
+      },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== "number") {
           reject(error);
@@ -25,7 +30,7 @@ export function exec(
 export async function execOk(
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number } = {},
+  options: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {},
 ): Promise<string> {
   const result = await exec(command, args, options);
   if (result.exitCode !== 0) {

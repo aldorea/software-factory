@@ -21,6 +21,13 @@ export class FakeGitHub implements GitHub {
     return { ...found };
   }
 
+  repositoryUrlFailure: string | null = null;
+
+  async repositoryUrl(): Promise<string> {
+    if (this.repositoryUrlFailure !== null) throw new Error(this.repositoryUrlFailure);
+    return "https://github.test/aldorea/greeting";
+  }
+
   async findPullRequest(head: string, base: string): Promise<PullRequest | null> {
     const found = this.pullRequests.find((pr) => pr.head === head && pr.base === base);
     return found ? { number: found.number, url: found.url, draft: found.draft } : null;

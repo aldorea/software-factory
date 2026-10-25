@@ -47,6 +47,9 @@ export function ghGitHub(options: GhOptions): GitHub {
       const data = JSON.parse(await gh(["issue", "view", String(issue), "--json", "number,title,body"])) as Issue;
       return { number: data.number, title: data.title, body: data.body };
     },
+    async repositoryUrl(): Promise<string> {
+      return (JSON.parse(await gh(["repo", "view", "--json", "url"])) as { url: string }).url;
+    },
     async findPullRequest(head: string, base: string): Promise<PullRequest | null> {
       const found = JSON.parse(
         await gh(["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", PR_FIELDS, "--limit", "1"]),
