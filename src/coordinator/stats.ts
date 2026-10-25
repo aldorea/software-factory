@@ -1,5 +1,5 @@
 import { WORKER_LAYER_FAILURE_KINDS, type WorkerLayerFailureKind } from "../workers/failures.ts";
-import type { AgentKind } from "../workers/types.ts";
+import type { AgentKind, TokenUsage } from "../workers/types.ts";
 import { BLOCK_TYPES, type CriteriaRecord, type FrictionRecord, type RunLog, type RunResult } from "./run-log.ts";
 import { emptyFriction } from "./run-totals.ts";
 import { countedTokens, formatDuration } from "./stop-rules.ts";
@@ -71,6 +71,9 @@ export function summarizeRuns(logs: readonly RunLog[]): RunStats {
       for (const attempt of subtask.attempts) {
         agent(attempt.agent.agent).attempts += 1;
         agent(attempt.agent.agent).countedTokens += countedTokens(attempt.usage);
+      }
+      for (const [kind, usage] of Object.entries(subtask.verifierUsage ?? {}) as [AgentKind, TokenUsage][]) {
+        agent(kind).countedTokens += countedTokens(usage);
       }
     }
     for (const type of BLOCK_TYPES) stats.friction.blocks[type] += log.friction.blocks[type];

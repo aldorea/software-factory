@@ -76,6 +76,16 @@ describe("the summary of the run logs of a repo", () => {
     expect(stats.perAgent.opencode).toEqual({ runs: 1, attempts: 1, countedTokens: 150, pauses: 1 });
   });
 
+  it("should add the tokens of the verifier to its agent, apart from the attempts", () => {
+    const usage = { inputTokens: 300, cacheCreationInputTokens: 20, cacheReadInputTokens: 5000, outputTokens: 80 };
+    const run = runRecord(0, [
+      subtaskRecord("S1", { attempts: [attemptRecord("claude-code", 1000, 500)], verifierUsage: { opencode: usage } }),
+    ]);
+    const stats = summarizeRuns([run]);
+    expect(stats.perAgent["claude-code"]).toMatchObject({ attempts: 1, countedTokens: 1500 });
+    expect(stats.perAgent.opencode).toMatchObject({ attempts: 0, countedTokens: 400 });
+  });
+
   it("should add up the friction: blocks by type, scope extensions, rejections and conflicts", () => {
     const stats = summarizeRuns(history());
     expect(stats.friction.blocks.patience).toBe(1);

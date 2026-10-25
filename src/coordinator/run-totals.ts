@@ -1,5 +1,5 @@
 import { emptyUsage } from "../workers/agent-adapter.ts";
-import type { TokenUsage } from "../workers/types.ts";
+import type { AgentKind, TokenUsage } from "../workers/types.ts";
 import {
   BLOCK_TYPES,
   type BlockType,
@@ -9,6 +9,7 @@ import {
   type RunLog,
   type SubtaskRecord,
 } from "./run-log.ts";
+import { countedTokens } from "./stop-rules.ts";
 
 export function emptyCost(): CostRecord {
   return { usage: emptyUsage(), perAgent: {}, attempts: 0, wallClockMs: 0, pausedMs: 0 };
@@ -41,15 +42,29 @@ export function applyTotals(log: RunLog, now: Date): void {
   log.criteria = criteriaOf(log);
 }
 
+export function agentRunTokens(log: RunLog, agent: AgentKind): number {
+  const attempts = log.subtasks.flatMap((subtask) => subtask.attempts).filter((attempt) => attempt.agent.agent === agent);
+  const verified = log.subtasks.map((subtask) => subtask.verifierUsage?.[agent] ?? emptyUsage());
+  return [...attempts.map((attempt) => attempt.usage), ...verified].reduce((total, usage) => total + countedTokens(usage), 0);
+}
+
 function costOf(log: RunLog, now: Date): CostRecord {
   const attempts = log.subtasks.flatMap((subtask) => subtask.attempts);
   const perAgent: CostRecord["perAgent"] = {};
-  for (const attempt of attempts) {
-    perAgent[attempt.agent.agent] = addUsage(perAgent[attempt.agent.agent] ?? emptyUsage(), attempt.usage);
+  const charge = (agent: AgentKind, usage: TokenUsage) => {
+    perAgent[agent] = addUsage(perAgent[agent] ?? emptyUsage(), usage);
+  };
+  for (const attempt of attempts) charge(attempt.agent.agent, attempt.usage);
+  const verified: TokenUsage[] = [];
+  for (const subtask of log.subtasks) {
+    for (const [agent, usage] of Object.entries(subtask.verifierUsage ?? {}) as [AgentKind, TokenUsage][]) {
+      charge(agent, usage);
+      verified.push(usage);
+    }
   }
   const end = log.endedAt === undefined ? now.getTime() : Date.parse(log.endedAt);
   return {
-    usage: sumUsage(log.subtasks.map((subtask) => subtask.usage)),
+    usage: addUsage(sumUsage(log.subtasks.map((subtask) => subtask.usage)), sumUsage(verified)),
     perAgent,
     attempts: attempts.length,
     wallClockMs: Math.max(0, end - Date.parse(log.startedAt) - log.cost.pausedMs),

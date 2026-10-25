@@ -35,7 +35,10 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS || !OPENCODE_KEY)("Verifier ad
       test: 'test("A1 the greeting page shows hello", async ({ page }) => {\n  await page.goto("/");\n  await expect(page.getByText("hello")).toBeVisible();\n});',
     });
 
-    expect(answer).toEqual({ kind: "accept" });
+    expect(answer).toMatchObject({ kind: "accept" });
+    expect(answer.usageProblem).toBeUndefined();
+    expect(answer.usage.inputTokens).toBeGreaterThan(0);
+    expect(answer.usage.outputTokens).toBeGreaterThan(0);
   });
 
   it("should refute a test that passes whatever the application does, and give a reason", async () => {

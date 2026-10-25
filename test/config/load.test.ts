@@ -88,7 +88,7 @@ describe("loadConfig", () => {
     );
 
     await expect(loadConfig(dir)).rejects.toThrow(
-      "roles.workers: opencode cannot serve the workers: it misses readsTokenUsage, detectsPlanLimit",
+      "roles.workers: opencode cannot serve the workers: it misses detectsPlanLimit",
     );
   });
 
