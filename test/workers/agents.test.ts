@@ -93,9 +93,9 @@ describe("role requirements", () => {
     expect(agentsForRole("verifier")).toEqual(["opencode"]);
   });
 
-  it("should not offer OpenCode Go as workers until its stream shows usage and a plan limit", () => {
+  it("should not offer OpenCode Go as workers until a pilot observes its plan-limit error, because its usage comes from the session export but its limit error is not documented", () => {
     expect(meetsRole("opencode", "workers")).toBe(false);
-    expect(missingRequirements("opencode", "workers")).toEqual(["readsTokenUsage", "detectsPlanLimit"]);
+    expect(missingRequirements("opencode", "workers")).toEqual(["detectsPlanLimit"]);
   });
 
   it("should not offer Claude Code as verifier, since its tools cannot be denied with a fail-closed check", () => {

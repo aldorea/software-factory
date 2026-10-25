@@ -1,4 +1,4 @@
-import { emptyUsage, type AgentAdapter } from "./agent-adapter.ts";
+import { emptyUsage, type AgentAdapter, type UsageProbe, type UsageReading } from "./agent-adapter.ts";
 import type { SupervisedProcess } from "./supervise.ts";
 import type { AttemptOutcome } from "./types.ts";
 
@@ -29,6 +29,7 @@ export function openCodeArgs(
 
 export interface OpenCodeStreamState {
   lastText: string;
+  sessionId?: string;
   error?: string;
 }
 
@@ -44,6 +45,8 @@ export function applyOpenCodeLine(state: OpenCodeStreamState, line: string): Ope
     return state;
   }
   if (typeof event !== "object" || event === null || !("type" in event)) return state;
+  const seen = sessionIdOf(event);
+  if (seen !== undefined && state.sessionId === undefined) state = { ...state, sessionId: seen };
 
   if (
     event.type === "text" &&
@@ -61,6 +64,53 @@ export function applyOpenCodeLine(state: OpenCodeStreamState, line: string): Ope
   }
 
   return state;
+}
+
+function sessionIdOf(event: object): string | undefined {
+  return "sessionID" in event && typeof event.sessionID === "string" && event.sessionID !== "" ? event.sessionID : undefined;
+}
+
+export function openCodeExportArgs(sessionId: string): string[] {
+  return ["opencode", "session", "export", "--standalone", sessionId];
+}
+
+export function parseOpenCodeExport(text: string): UsageReading {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { ok: false, problem: `the session export is not JSON: ${text.trim().slice(0, 200)}` };
+  }
+  const tokens = isRecord(data) && isRecord(data.info) ? data.info.tokens : undefined;
+  const cache = isRecord(tokens) ? tokens.cache : undefined;
+  if (
+    !isRecord(tokens) ||
+    !isRecord(cache) ||
+    !isCount(tokens.input) ||
+    !isCount(tokens.output) ||
+    !isCount(tokens.reasoning) ||
+    !isCount(cache.read) ||
+    !isCount(cache.write)
+  ) {
+    return { ok: false, problem: "the session export has no token counts in info.tokens" };
+  }
+  return {
+    ok: true,
+    usage: {
+      inputTokens: tokens.input,
+      cacheCreationInputTokens: cache.write,
+      cacheReadInputTokens: cache.read,
+      outputTokens: tokens.output + tokens.reasoning,
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function errorMessage(error: unknown): string {
@@ -87,10 +137,20 @@ export function openCodeOutcome(state: OpenCodeStreamState, supervised: Supervis
   };
 }
 
+export function openCodeUsageProbe(sessionId: () => string | undefined): UsageProbe {
+  return {
+    command() {
+      const id = sessionId();
+      return id === undefined ? undefined : openCodeExportArgs(id);
+    },
+    parse: parseOpenCodeExport,
+  };
+}
+
 export const openCodeAdapter: AgentAdapter = {
   kind: "opencode",
   processName: "opencode",
-  capabilities: { readsTokenUsage: false, detectsPlanLimit: false, deniesEveryTool: true },
+  capabilities: { readsTokenUsage: true, detectsPlanLimit: false, deniesEveryTool: true },
   command: (model) => openCodeArgs(model),
   createStream() {
     let state = initialOpenCodeState();
@@ -99,6 +159,7 @@ export const openCodeAdapter: AgentAdapter = {
         state = applyOpenCodeLine(state, line);
       },
       usage: emptyUsage,
+      usageProbe: openCodeUsageProbe(() => state.sessionId),
       plan: () => undefined,
       outcome: (supervised) => openCodeOutcome(state, supervised),
     };

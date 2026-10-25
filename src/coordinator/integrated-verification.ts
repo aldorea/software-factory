@@ -6,7 +6,7 @@ import { verificationPassed } from "./decisions.ts";
 import { integrationPlan } from "./evidence.ts";
 import { followUpFailure, followUpStop, followUpTasks, verificationSignature } from "./follow-up.ts";
 import { paused, stopLimits, type RunContext } from "./run-context.ts";
-import { agentTokens } from "./stop-rules.ts";
+import { agentRunTokens } from "./run-totals.ts";
 import { blockSubtask, entryOf } from "./subtask-settlement.ts";
 import { workOn } from "./subtask-work.ts";
 
@@ -44,7 +44,7 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
       {
         signatures,
         runElapsedMs: context.ports.clock.now().getTime() - context.startedAt.getTime(),
-        runTokens: agentTokens(log.subtasks.flatMap((entry) => entry.attempts), workers.agent),
+        runTokens: agentRunTokens(log, workers.agent),
       },
       stopLimits(config, workers),
     );

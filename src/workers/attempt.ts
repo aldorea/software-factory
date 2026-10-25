@@ -1,6 +1,8 @@
-import type { AgentAdapter } from "./agent-adapter.ts";
+import type { AgentAdapter, AgentStream } from "./agent-adapter.ts";
+import { WorkerLayerError } from "./failures.ts";
 import { supervise } from "./supervise.ts";
-import type { AttemptLimits, AttemptResult } from "./types.ts";
+import { readUsage } from "./usage.ts";
+import type { AttemptLimits, AttemptOutcome, AttemptResult, ExecResult, TokenUsage } from "./types.ts";
 
 export interface AttemptRequest {
   adapter: AgentAdapter;
@@ -10,6 +12,7 @@ export interface AttemptRequest {
   logPath: string;
   launch: (agentCommand: string[]) => { command: string; args: string[] };
   stop: (processName: string) => Promise<void>;
+  exec: (command: string[]) => Promise<ExecResult>;
 }
 
 export async function performAttempt(request: AttemptRequest): Promise<AttemptResult> {
@@ -29,12 +32,24 @@ export async function performAttempt(request: AttemptRequest): Promise<AttemptRe
     terminate: () => request.stop(adapter.processName),
   });
   const plan = stream.plan();
+  const outcome = stream.outcome(supervised);
   return {
-    outcome: stream.outcome(supervised),
-    usage: stream.usage(),
+    outcome,
+    usage: await usageOf(request, stream, outcome),
     ...(plan ? { plan } : {}),
     logPath: request.logPath,
     startedAt,
     endedAt: new Date(),
   };
+}
+
+async function usageOf(request: AttemptRequest, stream: AgentStream, outcome: AttemptOutcome): Promise<TokenUsage> {
+  if (stream.usageProbe === undefined) return stream.usage();
+  const reading = await readUsage(stream.usageProbe, stream.usage(), outcome, request.exec);
+  if (reading.ok) return reading.usage;
+  throw new WorkerLayerError(
+    "usage-unreadable",
+    "attempt",
+    `The token usage of ${request.adapter.kind} cannot be read: ${reading.problem}`,
+  );
 }

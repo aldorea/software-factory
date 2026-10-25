@@ -1,6 +1,9 @@
-import type { Verifier, VerifierAnswer, VerifierQuestion } from "../../src/coordinator/verifier.ts";
+import type { Verifier, VerifierAnswer, VerifierQuestion, VerifierVerdict } from "../../src/coordinator/verifier.ts";
+import { emptyUsage } from "../../src/workers/agent-adapter.ts";
 
-export type VerifierScript = (question: VerifierQuestion) => VerifierAnswer;
+export type ScriptedAnswer = VerifierVerdict & Partial<Pick<VerifierAnswer, "usage" | "usageProblem">>;
+
+export type VerifierScript = (question: VerifierQuestion) => ScriptedAnswer;
 
 export class FakeVerifier implements Verifier {
   readonly questions: VerifierQuestion[] = [];
@@ -9,6 +12,6 @@ export class FakeVerifier implements Verifier {
 
   async judge(question: VerifierQuestion): Promise<VerifierAnswer> {
     this.questions.push(question);
-    return this.script(question);
+    return { usage: emptyUsage(), ...this.script(question) };
   }
 }

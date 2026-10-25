@@ -51,7 +51,7 @@ describe("the flag of a role", () => {
 
 describe("the requirements of a role", () => {
   it("should refuse an agent that misses a requirement of the role", () => {
-    expect(choiceProblems("workers", KIMI)).toEqual(["opencode cannot serve the workers: it misses readsTokenUsage, detectsPlanLimit"]);
+    expect(choiceProblems("workers", KIMI)).toEqual(["opencode cannot serve the workers: it misses detectsPlanLimit"]);
     expect(choiceProblems("verifier", SONNET)).toEqual(["claude-code cannot serve the verifier: it misses deniesEveryTool"]);
   });
 

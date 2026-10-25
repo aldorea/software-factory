@@ -89,7 +89,7 @@ describe("factory run: the agent of each role is checked before the run starts",
     const target = await targetRepo();
     const { run, runner } = factory(target, writesHello, { roles: { workers: KIMI } });
 
-    await expect(run()).rejects.toThrow("opencode cannot serve the workers: it misses readsTokenUsage, detectsPlanLimit");
+    await expect(run()).rejects.toThrow("opencode cannot serve the workers: it misses detectsPlanLimit");
     expect(runner.workers).toEqual([]);
   });
 

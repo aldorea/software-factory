@@ -1,11 +1,16 @@
 import { join } from "node:path";
+import { emptyUsage } from "../workers/agent-adapter.ts";
+import type { TokenUsage } from "../workers/types.ts";
 import { criterionTest } from "./criterion-test.ts";
 import type { CriterionRecord, VerifierRecord } from "./run-log.ts";
-import type { Verifier, VerifierAnswer } from "./verifier.ts";
+import { addUsage } from "./run-totals.ts";
+import type { Verifier, VerifierAnswer, VerifierVerdict } from "./verifier.ts";
 
 export interface TestJudgment {
   records: VerifierRecord[];
   missingTests: string[];
+  usage?: TokenUsage;
+  usageProblems: string[];
   planLimit?: { message: string; resetsAt?: Date };
 }
 
@@ -19,10 +24,10 @@ export interface JudgmentInput {
   label: string;
 }
 
-export const NO_JUDGMENT: TestJudgment = { records: [], missingTests: [] };
+export const NO_JUDGMENT: TestJudgment = { records: [], missingTests: [], usageProblems: [] };
 
 export async function judgeTests(verifier: Verifier, input: JudgmentInput): Promise<TestJudgment> {
-  const judgment: TestJudgment = { records: [], missingTests: [] };
+  const judgment: TestJudgment = { records: [], missingTests: [], usageProblems: [] };
   for (const criterion of input.criteria) {
     if (criterion.evidence !== "playwright") continue;
     const test = await criterionTest(input.repoDir, input.integrationBranch, input.sha, criterion.id);
@@ -32,6 +37,8 @@ export async function judgeTests(verifier: Verifier, input: JudgmentInput): Prom
     }
     const logPath = join(input.logDir, `${input.label}-verifier-${criterion.id}.jsonl`);
     const answer = await ask(verifier, { id: criterion.id, criterion: input.texts[criterion.id] ?? criterion.id, test, logPath });
+    judgment.usage = addUsage(judgment.usage ?? emptyUsage(), answer.usage);
+    if (answer.usageProblem !== undefined) judgment.usageProblems.push(answer.usageProblem);
     if (answer.kind === "plan-limit") {
       const resetsAt = answer.resetsAt !== undefined ? { resetsAt: answer.resetsAt } : {};
       return { ...judgment, planLimit: { message: answer.message, ...resetsAt } };
@@ -45,10 +52,11 @@ async function ask(verifier: Verifier, question: Parameters<Verifier["judge"]>[0
   return verifier.judge(question).catch((error: unknown) => ({
     kind: "error" as const,
     message: error instanceof Error ? error.message : String(error),
+    usage: emptyUsage(),
   }));
 }
 
-function recordOf(id: string, logPath: string, answer: Exclude<VerifierAnswer, { kind: "plan-limit" }>): VerifierRecord {
+function recordOf(id: string, logPath: string, answer: Exclude<VerifierVerdict, { kind: "plan-limit" }>): VerifierRecord {
   if (answer.kind === "accept") return { id, verdict: "accept", logPath };
   if (answer.kind === "refute") return { id, verdict: "refute", reason: answer.reason, logPath };
   return { id, verdict: "error", reason: answer.message, logPath };

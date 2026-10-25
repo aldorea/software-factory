@@ -4,7 +4,7 @@ import { CREDENTIAL_VARIABLES } from "../config/roles.ts";
 import type { AgentKind, AttemptOutcome } from "../workers/types.ts";
 import { askVerifier } from "../workers/verifier.ts";
 import type { Clock } from "./ports.ts";
-import type { Verifier, VerifierAnswer, VerifierQuestion } from "./verifier.ts";
+import type { Verifier, VerifierVerdict } from "./verifier.ts";
 
 export const QUESTION_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -56,12 +56,16 @@ export function dockerVerifier(setup: VerifierSetup): Verifier {
         logPath: question.logPath,
         limits: { deadline: new Date(setup.clock.now().getTime() + QUESTION_TIMEOUT_MS), idleTimeoutMs: setup.idleTimeoutMs },
       });
-      return answerFrom(result.outcome);
+      return {
+        ...answerFrom(result.outcome),
+        usage: result.usage,
+        ...(result.usageProblem !== undefined ? { usageProblem: result.usageProblem } : {}),
+      };
     },
   };
 }
 
-export function answerFrom(outcome: AttemptOutcome): VerifierAnswer {
+export function answerFrom(outcome: AttemptOutcome): VerifierVerdict {
   if (outcome.kind === "agent-error") return { kind: "error", message: outcome.message };
   if (outcome.kind === "plan-limit") {
     return { kind: "plan-limit", message: outcome.message, ...(outcome.resetsAt !== undefined ? { resetsAt: outcome.resetsAt } : {}) };

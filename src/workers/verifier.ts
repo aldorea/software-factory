@@ -9,10 +9,12 @@ import {
   initialOpenCodeState,
   openCodeArgs,
   openCodeOutcome,
+  openCodeUsageProbe,
   type OpenCodeStreamState,
 } from "./opencode.ts";
 import { exec, execOk } from "./sh.ts";
 import { supervise, type SupervisedProcess } from "./supervise.ts";
+import { readUsage } from "./usage.ts";
 import type { AttemptLimits, AttemptOutcome, AttemptResult } from "./types.ts";
 
 const WORKDIR = "/home/agent/verifier";
@@ -38,7 +40,11 @@ export interface VerifierRequest {
   limits: AttemptLimits;
 }
 
-export async function askVerifier(request: VerifierRequest): Promise<AttemptResult> {
+export interface VerifierResult extends AttemptResult {
+  usageProblem?: string;
+}
+
+export async function askVerifier(request: VerifierRequest): Promise<VerifierResult> {
   const container = `factory-verifier-${randomUUID()}`;
   const secretsDir = await mkdtemp(join(tmpdir(), "factory-"));
   const startedAt = new Date();
@@ -87,9 +93,15 @@ export async function askVerifier(request: VerifierRequest): Promise<AttemptResu
 
     const listing = await execOk("docker", ["exec", container, "ls", "-A", WORKDIR]);
 
+    const outcome = verifierOutcome(state, supervised, listing);
+    const reading = await readUsage(openCodeUsageProbe(() => state.sessionId), emptyUsage(), outcome, (command) =>
+      exec("docker", ["exec", "-w", WORKDIR, "-e", `PWD=${WORKDIR}`, container, ...command]),
+    );
+
     return {
-      outcome: verifierOutcome(state, supervised, listing),
-      usage: emptyUsage(),
+      outcome,
+      usage: reading.ok ? reading.usage : emptyUsage(),
+      ...(reading.ok ? {} : { usageProblem: `The token usage of the verifier cannot be read: ${reading.problem}` }),
       logPath: request.logPath,
       startedAt,
       endedAt: new Date(),
