@@ -115,7 +115,7 @@ Its checks and criteria pass and the gate accepts it.
 | Wall clock, per run | 6 h | Coordinator |
 | Tokens, per run | 8 M | Coordinator |
 
-- The token limits are set per agent in `.factory/config.ts`, because each provider counts tokens differently. The values above are the initial ones for Claude Code; each other agent gets its own initial values, calibrated in the pilot. A run that changes the agent of its workers on resume counts the tokens of each agent against that agent's limit. The wall clock and patience do not depend on the agent.
+- The token limits are set per agent in `.factory/config.ts`, because each provider counts tokens differently. The values above are the initial ones for Claude Code; each other agent gets its own initial values, calibrated in the pilot. A run that changes the agent of its workers on resume counts the tokens of each agent against that agent's limit. The answers of the independent verifier count in the run limit of the verifier's agent, and not in the limit of a subtask. The wall clock and patience do not depend on the agent.
 - Patience and the hard limits are different rules. Patience stops a loop with no progress. A hard limit stops a loop that progresses too slowly or costs too much.
 - A worker cannot change its own limits.
 - A follow-up task is more work on the same subtask: it keeps counting the patience, the tokens and the wall clock of its subtask.
@@ -139,6 +139,8 @@ The coordinator finds what to resume in two records, never in a conversation:
 - **The paused run:** the latest `run.json` of the issue. When its result is `paused`, the run continues with the same run ID: the time in pause comes from it, and each paused subtask continues with the patience, tokens and wall clock it carried. A subtask blocked before the pause stays blocked. With no `run.json`, or a latest one that is not paused, a new run starts, and every subtask that has not merged starts again.
 
 Each agent's adapter reads its plan usage. Claude Code reports it in its `stream-json` output: a `rate_limit_event` gives the status and the utilization of each window (`five_hour`, `seven_day`) with its reset time. The worker layer records it in each attempt.
+
+OpenCode Go does not report its plan limit in a way that has been observed. Its error is undocumented, and only exhausting the quota would capture it. So its adapter does not detect the plan limit, and OpenCode Go is not offered as the workers until a pilot observes that error and the adapter detects it. The independent verifier is offered with only its tool check, as before: until the error is observed, a plan limit that reaches it is reported as an error of the verifier, and the pilot must check it.
 
 ### Blocks during a run
 
@@ -225,7 +227,7 @@ Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-onl
 | Role | Agents it can use |
 |---|---|
 | Refinement | Claude Code, interactive, on the host |
-| Base subtask and workers | Claude Code or OpenCode Go, in Docker. OpenCode Go once its adapter reads its token usage and detects its plan limit |
+| Base subtask and workers | Claude Code or OpenCode Go, in Docker. OpenCode Go once its adapter detects its plan limit: its token usage is already read (see below), its plan-limit error is not yet observed |
 | Independent verifier | OpenCode Go, in Docker: the only agent today whose tools can be denied with a fail-closed check |
 
 The workers and the independent verifier may use the same agent and the same model. Each still runs in its own container with its own clean context.
@@ -234,6 +236,7 @@ Verified on 2026-10-24:
 
 - One `setup-token` token works in 2 containers at the same time.
 - `opencode run --standalone` reads `OPENCODE_API_KEY` from the environment of the container, with no `auth login` and no `auth.json`. With no active Go subscription, the request fails with a 403 and does not fall back to the Console (OpenCode 2.0.16, `opencode-go/beam-free`).
+- The `--format json` stream of OpenCode 2.0.16 holds only `step_start` and `text` events (`opencode-go/glm-5.3`): it has no token usage. Every line carries `sessionID`. `opencode session export --standalone <sessionID>`, run in the same environment after the process ends, prints JSON whose `info.tokens` is `{input, output, reasoning, cache: {read, write}}`. The adapter reads the usage from that export: `input` is the input, `cache.write` the cache creation, `cache.read` the cache read, and `output` plus `reasoning` the output. The same read serves the workers and the independent verifier. The verifier reads it after its directory check, so the export is never a leftover. When the usage cannot be read, the attempt fails with a `usage-unreadable` failure of the worker layer; for a verifier answer, the verdict stays and the same failure is recorded.
 
 ### Parallelism
 
@@ -259,7 +262,7 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 
 - **Result:** ready, draft with blocks, or paused. The criteria that pass, the blocked ones and the human ones.
 - **Agents:** the agent and the model of each role, and any change on resume.
-- **Cost:** tokens per subtask and per run, per agent, attempts per subtask, wall clock with no pauses.
+- **Cost:** tokens per subtask and per run, per agent, attempts per subtask, wall clock with no pauses. The tokens of the independent verifier count in the run and in its agent, and are kept apart from the attempts of the subtask.
 - **Friction:**
   - blocks by type (scope, design question, patience, limit, environment);
   - automatic scope extensions;
