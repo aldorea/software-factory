@@ -8,7 +8,11 @@ export type VerifierScript = (question: VerifierQuestion) => ScriptedAnswer;
 export class FakeVerifier implements Verifier {
   readonly questions: VerifierQuestion[] = [];
 
-  constructor(private readonly script: VerifierScript = () => ({ kind: "accept" })) {}
+  private readonly script: VerifierScript;
+
+  constructor(script: VerifierScript = () => ({ kind: "accept" })) {
+    this.script = script;
+  }
 
   async judge(question: VerifierQuestion): Promise<VerifierAnswer> {
     this.questions.push(question);

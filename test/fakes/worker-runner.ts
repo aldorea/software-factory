@@ -68,10 +68,13 @@ export interface WorkerFaults {
 export class FakeWorkerRunner implements WorkerRunner {
   readonly workers: FakeWorkerRecord[] = [];
 
-  constructor(
-    private readonly script: AttemptScript = () => ({}),
-    private readonly faults: WorkerFaults = {},
-  ) {}
+  private readonly script: AttemptScript;
+  private readonly faults: WorkerFaults;
+
+  constructor(script: AttemptScript = () => ({}), faults: WorkerFaults = {}) {
+    this.script = script;
+    this.faults = faults;
+  }
 
   async start(spec: WorkerSpec): Promise<Worker> {
     const startFault = this.faults.start?.(spec);
@@ -84,12 +87,17 @@ export class FakeWorkerRunner implements WorkerRunner {
 }
 
 class FakeWorker implements Worker {
-  constructor(
-    private readonly record: FakeWorkerRecord,
-    private readonly baseSha: string,
-    private readonly script: AttemptScript,
-    private readonly faults: WorkerFaults,
-  ) {}
+  private readonly record: FakeWorkerRecord;
+  private readonly baseSha: string;
+  private readonly script: AttemptScript;
+  private readonly faults: WorkerFaults;
+
+  constructor(record: FakeWorkerRecord, baseSha: string, script: AttemptScript, faults: WorkerFaults) {
+    this.record = record;
+    this.baseSha = baseSha;
+    this.script = script;
+    this.faults = faults;
+  }
 
   get spec(): WorkerSpec {
     return this.record.spec;
