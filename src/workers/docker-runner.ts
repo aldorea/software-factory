@@ -78,14 +78,19 @@ export class DockerWorkerRunner implements WorkerRunner {
 
 class DockerWorker implements Worker {
   private attempts = 0;
+  readonly spec: WorkerSpec;
+  readonly worktreePath: string;
+  private readonly baseSha: string;
+  private readonly container: string;
+  private readonly secretsDir: string;
 
-  constructor(
-    readonly spec: WorkerSpec,
-    readonly worktreePath: string,
-    private readonly baseSha: string,
-    private readonly container: string,
-    private readonly secretsDir: string,
-  ) {}
+  constructor(spec: WorkerSpec, worktreePath: string, baseSha: string, container: string, secretsDir: string) {
+    this.spec = spec;
+    this.worktreePath = worktreePath;
+    this.baseSha = baseSha;
+    this.container = container;
+    this.secretsDir = secretsDir;
+  }
 
   async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
     this.attempts += 1;
