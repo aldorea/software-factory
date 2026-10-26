@@ -84,6 +84,11 @@ async function mainRepo(): Promise<string> {
   await writeFile(join(dir, "README.md"), "# target\n");
   await git(dir, "add", ".");
   await git(dir, "commit", "-q", "-m", "init");
+  const remoteDir = await temp.make("cli-refine-remote-");
+  await execOk("git", ["init", "-q", "--bare", remoteDir]);
+  await git(dir, "remote", "add", "origin", remoteDir);
+  await git(dir, "push", "-q", "origin", "main");
+  await git(dir, "remote", "set-head", "origin", "--auto");
   return dir;
 }
 
@@ -125,6 +130,8 @@ async function runnableRepo(config: string = CONFIG): Promise<string> {
   await execOk("git", ["init", "-q", "--bare", remoteDir]);
   await git(repoDir, "remote", "add", "origin", remoteDir);
   await git(repoDir, "branch", "main");
+  await git(repoDir, "push", "-q", "origin", "main");
+  await git(repoDir, "remote", "set-head", "origin", "--auto");
   return repoDir;
 }
 
@@ -283,6 +290,8 @@ describe("factory CLI", () => {
     await execOk("git", ["init", "-q", "--bare", remoteDir]);
     await git(repoDir, "remote", "add", "origin", remoteDir);
     await git(repoDir, "branch", "main");
+    await git(repoDir, "push", "-q", "origin", "main");
+    await git(repoDir, "remote", "set-head", "origin", "--auto");
     const { env, out, notifier } = cli(repoDir);
     expect(await main(["approve", "42"], env)).toBe(0);
 

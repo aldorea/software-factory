@@ -24,7 +24,6 @@ export type { RunRequest } from "./run-context.ts";
 export { mergeMessage } from "./subtask-work.ts";
 
 export const REMOTE = "origin";
-export const PULL_REQUEST_BASE = "main";
 
 export interface RunReport {
   result: RunLog["result"];
@@ -35,7 +34,7 @@ export interface RunReport {
 
 export async function runIssue(request: RunRequest, ports: RunPorts): Promise<RunReport> {
   const prepared = await prepare(request, ports);
-  const { issue, branch, spec, plan, parallelism, workers, verifier, humanCriteria } = prepared;
+  const { issue, branch, defaultBranch, spec, plan, parallelism, workers, verifier, humanCriteria } = prepared;
   const subtasks = plan.base ? [plan.base, ...spec.subtasks] : spec.subtasks;
   const now = ports.clock.now();
   const logsDir = join(request.repoDir, ".factory", "logs");
@@ -123,10 +122,10 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   await pushBranch(request.repoDir, REMOTE, branch);
   const text = renderPullRequest(issue, log);
   const draft = log.result !== "ready";
-  const existing = await ports.github.findPullRequest(branch, PULL_REQUEST_BASE);
+  const existing = await ports.github.findPullRequest(branch, defaultBranch);
   const pullRequest = existing
     ? await ports.github.updatePullRequest(existing.number, { ...text, draft })
-    : await ports.github.createPullRequest({ ...text, head: branch, base: PULL_REQUEST_BASE, draft });
+    : await ports.github.createPullRequest({ ...text, head: branch, base: defaultBranch, draft });
   log.pullRequest = { number: pullRequest.number, url: pullRequest.url, draft: pullRequest.draft };
   await save();
 
