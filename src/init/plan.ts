@@ -62,20 +62,17 @@ export function factoryFilesFor(repoDir: string, facts: RepoManifestFacts): Fact
   return factoryFiles({ image: imageName(repoDir), checks, packageManager: packageManager ?? "npm" });
 }
 
-export interface FilePlan {
-  write: FactoryFile[];
-  skip: FactoryFile[];
+export interface PlannedFile {
+  file: FactoryFile;
+  action: "write" | "skip";
 }
 
-export function planFiles(files: FactoryFile[], existing: string[]): FilePlan {
-  return {
-    write: files.filter((file) => !existing.includes(file.path)),
-    skip: files.filter((file) => existing.includes(file.path)),
-  };
+export function planFiles(files: FactoryFile[], existing: string[]): PlannedFile[] {
+  return files.map((file) => ({ file, action: existing.includes(file.path) ? "skip" : "write" }));
 }
 
 export function gitignoreUpdate(current: string | null): string | null {
-  const present = new Set((current ?? "").split("\n").map((line) => line.trim()));
+  const present = new Set((current ?? "").split("\n").map((line) => line.trim().replace(/^\//, "")));
   const missing = GITIGNORE_ENTRIES.filter((entry) => !present.has(entry));
   if (missing.length === 0) return null;
   const base = current === null || current === "" ? "" : current.endsWith("\n") ? current : `${current}\n`;

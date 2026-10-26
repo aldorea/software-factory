@@ -197,6 +197,15 @@ describe("factory init", () => {
     expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("node_modules\n.factory/logs/\n.factory/worktrees/\n.factory/.env\n");
   });
 
+  it("should treat /.factory/logs/ with a leading slash as already ignored, so .gitignore gets no duplicate of it", async () => {
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "", ".gitignore": "/.factory/logs/\n" } });
+    const { env } = cli(dir);
+
+    expect(await main(["init"], env)).toBe(0);
+
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("/.factory/logs/\n.factory/worktrees/\n.factory/.env\n");
+  });
+
   it("should take the target repo from the argument", async () => {
     const dir = await targetRepo({ files: { "pnpm-lock.yaml": "", "package.json": manifest({ test: "vitest" }) } });
     const { env, err } = cli(await temp.make("init-elsewhere-"));

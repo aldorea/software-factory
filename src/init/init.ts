@@ -16,8 +16,9 @@ async function exists(file: string): Promise<boolean> {
   try {
     await access(file);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 
@@ -53,8 +54,8 @@ export async function initRepo(repoDir: string): Promise<string[]> {
     files.filter((_, index) => present[index]).map((file) => file.path),
   );
   const lines: string[] = [];
-  for (const file of files) {
-    if (plan.skip.includes(file)) {
+  for (const { file, action } of plan) {
+    if (action === "skip") {
       lines.push(`skipped ${file.path} (already exists)`);
       continue;
     }
