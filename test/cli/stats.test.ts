@@ -26,6 +26,7 @@ function cli(cwd: string) {
     notifier: new FakeNotifier(),
     credentials: {},
     docker: async () => null,
+    gh: async () => null,
     launch: async () => 0,
     out: (text) => out.push(text),
     err: (text) => err.push(text),

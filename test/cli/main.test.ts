@@ -112,6 +112,7 @@ function cli(
     notifier,
     credentials: { "claude-code": "token", opencode: "key" },
     docker: async () => null,
+    gh: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
@@ -329,6 +330,34 @@ describe("factory CLI", () => {
     expect(err.join("\n")).toContain("factory: Docker is not available");
     expect(runner.workers).toHaveLength(0);
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
+  });
+
+  it("should exit non-zero before it loads the config, asks any role or starts a worker when gh reports a problem", async () => {
+    const repoDir = await temp.make("cli-no-gh-");
+    const { env, err, runner } = cli(repoDir);
+    const questions: RoleQuestion[] = [];
+    env.ask = async (question) => {
+      questions.push(question);
+      return GLM;
+    };
+
+    const code = await main(["run", "42"], { ...env, gh: async () => "gh is not signed in: run gh auth login" });
+
+    expect(code).toBe(1);
+    expect(err).toEqual(["factory: gh is not signed in: run gh auth login"]);
+    expect(questions).toEqual([]);
+    expect(runner.workers).toHaveLength(0);
+    expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
+  });
+
+  it("should report the Docker and the gh problems together so that every missing tool shows up front", async () => {
+    const repoDir = await temp.make("cli-no-tools-");
+    const { env, err } = cli(repoDir);
+
+    const code = await main(["run", "42"], { ...env, docker: async () => "Docker is not running", gh: async () => "gh is not available" });
+
+    expect(code).toBe(1);
+    expect(err).toEqual(["factory: Docker is not running", "factory: gh is not available"]);
   });
 
   it("should exit non-zero with a clear message when gh is missing", async () => {
