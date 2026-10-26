@@ -1,4 +1,4 @@
-import type { Check } from "../config/config.ts";
+import { DEFAULT_LIMITS, type Check } from "../config/config.ts";
 
 export type PackageManager = "pnpm" | "npm";
 
@@ -13,11 +13,11 @@ export interface FactoryFile {
   content: string;
 }
 
-export const BASE_IMAGE = "software-factory/worker:dev";
-export const PNPM_VERSION = "10.19.0";
-export const BASE_PORT = 3100;
-export const SLOT_COUNT = 2;
-export const SLOT_VARIABLES: Readonly<Record<string, string>> = {
+const BASE_IMAGE = "software-factory/worker:dev";
+const PNPM_VERSION = "10.19.0";
+const BASE_PORT = 3100;
+const SLOT_COUNT = Math.max(...Object.values(DEFAULT_LIMITS.agents).map((limits) => limits.maxParallelCeiling));
+const SLOT_VARIABLES: Readonly<Record<string, string>> = {
   E2E_DATABASE_URL: "FACTORY_E2E_DATABASE_URL",
 };
 

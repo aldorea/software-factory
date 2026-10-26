@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_LIMITS } from "../../src/config/config.ts";
 import { loadConfig } from "../../src/config/load.ts";
 import {
   factoryFiles,
@@ -161,6 +162,21 @@ describe("the generated .env.example", () => {
       FACTORY_E2E_DATABASE_URL_0: "",
       FACTORY_E2E_DATABASE_URL_1: "",
     });
+  });
+});
+
+describe("the slots of the generated config and .env.example", () => {
+  const ceiling = Math.max(...Object.values(DEFAULT_LIMITS.agents).map((limits) => limits.maxParallelCeiling));
+
+  it("should list a variable for every slot that the parallelism ceiling of the default limits can reach, so a run never meets a slot with no value", async () => {
+    const dir = await repoWith(INPUT, filledExample());
+
+    const { environment } = await loadConfig(dir);
+
+    expect(Object.keys(parseEnv(renderEnvExample()))).toHaveLength(ceiling);
+    for (let slot = 0; slot < ceiling; slot++) {
+      expect(environment(worker(slot)).E2E_DATABASE_URL).toBe(`value-of-FACTORY_E2E_DATABASE_URL_${slot}`);
+    }
   });
 });
 
