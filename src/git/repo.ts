@@ -1,8 +1,27 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addWorktreeForBranch, listWorktrees, removeWorktree } from "../workers/git.ts";
+import { addWorktreeForBranch, branchExists, listWorktrees, removeWorktree } from "../workers/git.ts";
 import { exec, execOk } from "../workers/sh.ts";
+
+const REMOTE_HEAD_PREFIX = "refs/remotes/origin/";
+
+export async function defaultBranch(repoDir: string): Promise<string> {
+  const head = await exec("git", ["-C", repoDir, "symbolic-ref", "-q", `${REMOTE_HEAD_PREFIX}HEAD`]);
+  const ref = head.stdout.trim();
+  if (head.exitCode !== 0 || !ref.startsWith(REMOTE_HEAD_PREFIX)) {
+    throw new Error(
+      `cannot tell the default branch of ${repoDir}: origin/HEAD is not set; run git remote set-head origin --auto`,
+    );
+  }
+  const branch = ref.slice(REMOTE_HEAD_PREFIX.length);
+  if (!(await branchExists(repoDir, branch))) {
+    throw new Error(
+      `default branch ${branch} has no local copy in ${repoDir}; create it with git branch ${branch} origin/${branch}`,
+    );
+  }
+  return branch;
+}
 
 export async function findIntegrationBranch(repoDir: string, issue: number): Promise<string | null> {
   const out = await execOk("git", [

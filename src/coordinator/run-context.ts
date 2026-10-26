@@ -20,6 +20,7 @@ export interface Prepared {
   config: ResolvedConfig;
   issue: Issue;
   branch: string;
+  defaultBranch: string;
   spec: Spec;
   plan: Schedule;
   parallelism: ParallelismBounds;

@@ -1,7 +1,7 @@
 import type { ResolvedConfig, Role, RoleChoice } from "../config/config.ts";
 import { loadConfig } from "../config/load.ts";
 import { chooseRole, choiceProblems, credentialProblem, ROLES } from "../config/roles.ts";
-import { integrationBranch, showFile } from "../git/repo.ts";
+import { defaultBranch, integrationBranch, showFile } from "../git/repo.ts";
 import { issueCriteria } from "../spec/issue.ts";
 import { parseSpec, validateSpec } from "../spec/spec.ts";
 import { approvalProblem } from "./decisions.ts";
@@ -18,6 +18,7 @@ export async function prepare(request: RunRequest, ports: RunPorts): Promise<Pre
   const issue = await ports.github.readIssue(request.issue);
   const problem = approvalProblem(request.issue, specText, issue.body);
   if (problem !== null) throw new Error(problem);
+  const targetBranch = await defaultBranch(request.repoDir);
 
   const config = await loadConfig(request.repoDir);
   const parsed = parseSpec(specText);
@@ -39,7 +40,7 @@ export async function prepare(request: RunRequest, ports: RunPorts): Promise<Pre
   const credential = request.credentials[workers.agent] as string;
   const limits = config.agents[workers.agent];
   const parallelism = { start: limits.maxParallel, ceiling: limits.maxParallelCeiling };
-  return { config, issue, branch, spec: parsed.spec, plan, parallelism, humanCriteria, workers, verifier, credential };
+  return { config, issue, branch, defaultBranch: targetBranch, spec: parsed.spec, plan, parallelism, humanCriteria, workers, verifier, credential };
 }
 
 function chosenRoles(
