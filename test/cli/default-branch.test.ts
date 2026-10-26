@@ -127,6 +127,18 @@ describe("default branch of the target repo", () => {
     expect(launches).toHaveLength(1);
   });
 
+  it("should resume an existing integration branch with refine even when origin/HEAD is not set, because only creating a branch needs the default branch", async () => {
+    const repoDir = await trunkRepo({ setHead: false });
+    const integration = await git(repoDir, "rev-parse", BRANCH);
+    const { env, err, launches } = cli(repoDir);
+
+    expect(await main(["refine", "42"], env)).toBe(0);
+
+    expect(err).toEqual([]);
+    expect(await git(repoDir, "rev-parse", BRANCH)).toBe(integration);
+    expect(launches).toHaveLength(1);
+  });
+
   it("should ask GitHub for a pull request whose base is the default branch when running", async () => {
     const repoDir = await trunkRepo();
     const { env, github } = cli(repoDir);
