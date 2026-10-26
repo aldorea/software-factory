@@ -102,6 +102,7 @@ function cli(cwd: string) {
     notifier: new FakeNotifier(),
     credentials: { "claude-code": "token", opencode: "key" },
     docker: async () => null,
+    gh: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
