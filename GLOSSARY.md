@@ -37,7 +37,7 @@ _Avoid_: orchestrator
 A CLI that runs on a subscription and does the work of a role: today Claude Code or OpenCode Go.
 
 **Role**:
-What an agent acts as in the factory: the refinement, the workers of a run, or the independent verifier. The developer chooses the agent and the model of each role before a command starts.
+What an agent acts as in the factory: the refinement, the workers of a run, the independent verifier, or the acceptance tester. The developer chooses the agent and the model of each role before a command starts.
 _Avoid_: stage
 
 **Worker**:
@@ -45,7 +45,7 @@ An agent that implements one subtask in its own container, on its own branch.
 _Avoid_: agent (too broad), runner
 
 **Worker layer**:
-The part of the factory that starts, supervises and stops workers and the independent verifier on behalf of the coordinator.
+The part of the factory that starts, supervises and stops workers, the independent verifier and the acceptance tester on behalf of the coordinator.
 
 **Attempt**:
 One invocation of the agent inside a worker, from its start to its report or its stop.
@@ -101,6 +101,13 @@ The coordinator's own verification of a subtask on its branch before it merges, 
 **Independent verifier**:
 An agent with its own clean context that receives only a criterion and its test, judges whether the test proves the criterion, and tries to refute it. It never shares a context with the workers, even when it runs the same agent and model.
 _Avoid_: reviewer, judge
+
+**Acceptance tester**:
+An agent with its own clean context that receives only the text of the criteria and the running app, uses the app as a user would, and leaves a file of evidence for each criterion. It never sees the diff or the tests of the workers. A criterion it fails counts as a failed criterion.
+_Avoid_: verifier, reviewer, QA
+
+**Escaped defect**:
+A defect in a target repo that reached the developer's review or the default branch through a pull request of the factory.
 
 **Integrated verification**:
 The checks and all the criteria run on the integration branch. It is the only source of the evidence in the pull request.
