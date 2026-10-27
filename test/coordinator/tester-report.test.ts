@@ -67,6 +67,6 @@ describe("the evidence of the acceptance tester", () => {
   });
 
   it("should name an evidence path that is not a file the tester left, because the report then claims evidence it does not have", () => {
-    expect(evidenceProblem(verdicts, new Set(["A1/curl.txt"]))).toBe("the evidence A2/shot.png of A2 does not exist");
+    expect(evidenceProblem(verdicts, new Set(["A1/curl.txt"]))).toBe("the evidence A2/shot.png of A2 is not a file in the evidence folder");
   });
 });

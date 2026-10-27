@@ -1,11 +1,5 @@
 import { isAbsolute, normalize, relative } from "node:path";
-
-export interface TesterVerdict {
-  id: string;
-  passed: boolean;
-  observation: string;
-  evidence: string[];
-}
+import type { TesterVerdictRecord as TesterVerdict } from "./run-log.ts";
 
 export type ParsedTesterReport = { ok: true; verdicts: TesterVerdict[] } | { ok: false; problem: string };
 
@@ -84,7 +78,7 @@ function insideFolder(path: string, folder: string): string | null {
 export function evidenceProblem(verdicts: TesterVerdict[], files: ReadonlySet<string>): string | null {
   for (const verdict of verdicts) {
     const missing = verdict.evidence.find((path) => !files.has(path));
-    if (missing !== undefined) return `the evidence ${missing} of ${verdict.id} does not exist`;
+    if (missing !== undefined) return `the evidence ${missing} of ${verdict.id} is not a file in the evidence folder`;
   }
   return null;
 }

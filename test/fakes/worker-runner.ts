@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { emptyUsage } from "../../src/workers/agent-adapter.ts";
 import {
@@ -66,6 +66,7 @@ export interface TesterCall extends AttemptCall {
 
 export interface ScriptedTesterAttempt {
   evidence?: Record<string, string>;
+  links?: Record<string, string>;
   outcome?: AttemptOutcome;
   usage?: Partial<TokenUsage>;
 }
@@ -178,6 +179,10 @@ class FakeWorker implements Worker {
     for (const [path, content] of Object.entries(scripted.evidence ?? {})) {
       await mkdir(dirname(join(evidenceDir, path)), { recursive: true });
       await writeFile(join(evidenceDir, path), content);
+    }
+    for (const [path, target] of Object.entries(scripted.links ?? {})) {
+      await mkdir(dirname(join(evidenceDir, path)), { recursive: true });
+      await symlink(target, join(evidenceDir, path));
     }
     const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${call.number}.jsonl`);
     await mkdir(this.spec.logDir, { recursive: true });

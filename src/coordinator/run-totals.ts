@@ -55,20 +55,20 @@ function costOf(log: RunLog, now: Date): CostRecord {
     perAgent[agent] = addUsage(perAgent[agent] ?? emptyUsage(), usage);
   };
   for (const attempt of attempts) charge(attempt.agent.agent, attempt.usage);
-  const verified: TokenUsage[] = [];
+  const outsideSubtasks: TokenUsage[] = [];
   for (const subtask of log.subtasks) {
     for (const [agent, usage] of Object.entries(subtask.verifierUsage ?? {}) as [AgentKind, TokenUsage][]) {
       charge(agent, usage);
-      verified.push(usage);
+      outsideSubtasks.push(usage);
     }
   }
   for (const [agent, usage] of Object.entries(log.testerUsage ?? {}) as [AgentKind, TokenUsage][]) {
     charge(agent, usage);
-    verified.push(usage);
+    outsideSubtasks.push(usage);
   }
   const end = log.endedAt === undefined ? now.getTime() : Date.parse(log.endedAt);
   return {
-    usage: addUsage(sumUsage(log.subtasks.map((subtask) => subtask.usage)), sumUsage(verified)),
+    usage: addUsage(sumUsage(log.subtasks.map((subtask) => subtask.usage)), sumUsage(outsideSubtasks)),
     perAgent,
     attempts: attempts.length,
     wallClockMs: Math.max(0, end - Date.parse(log.startedAt) - log.cost.pausedMs),

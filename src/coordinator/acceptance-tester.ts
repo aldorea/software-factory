@@ -1,5 +1,5 @@
-import { cp, mkdir, readFile, rm } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 import type { AppStart, RoleChoice } from "../config/config.ts";
 import { CREDENTIAL_VARIABLES } from "../config/roles.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
@@ -8,6 +8,7 @@ import { emptyUsage } from "../workers/agent-adapter.ts";
 import { inStage } from "../workers/failures.ts";
 import type { AttemptOutcome, AttemptResult } from "../workers/types.ts";
 import { inCheckContainer } from "./check-container.ts";
+import { TESTER_EVIDENCE } from "./evidence-branch.ts";
 import { filesIn, startApp } from "./evidence-collection.ts";
 import { outputTail } from "./failures.ts";
 import { followUpStop } from "./follow-up.ts";
@@ -28,7 +29,7 @@ export interface TesterRequest {
 
 export type TesterOutcome = { kind: "tested"; record: TesterRecord } | PlanLimitHit;
 
-type Attempted = { appProblem: string } | { result: AttemptResult };
+type Attempted = { kind: "app-problem"; problem: string } | { kind: "attempted"; result: AttemptResult };
 
 export async function acceptanceTest(context: RunContext, request: TesterRequest): Promise<TesterOutcome> {
   const { config, tester } = context.prepared;
@@ -60,15 +61,18 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
       },
       async (worker) => {
         const appProblem = config.app ? await startApp(worker, config.app) : null;
-        if (appProblem !== null) return { appProblem };
-        const limits = { deadline: new Date(now.getTime() + TESTER_TIMEOUT_MS), idleTimeoutMs: config.limits.attemptIdleTimeoutMs };
-        return { result: await inStage("attempt", () => worker.attempt({ kind: tester.agent, model: tester.model }, prompt, limits)) };
+        if (appProblem !== null) return { kind: "app-problem", problem: appProblem };
+        const deadline = new Date(context.ports.clock.now().getTime() + TESTER_TIMEOUT_MS);
+        const limits = { deadline, idleTimeoutMs: config.limits.attemptIdleTimeoutMs };
+        return { kind: "attempted", result: await inStage("attempt", () => worker.attempt({ kind: tester.agent, model: tester.model }, prompt, limits)) };
       },
     );
     if (attempted === null) return tested(tester, { error: "A failure of the worker layer stopped the acceptance tester." });
-    if ("appProblem" in attempted) return tested(tester, { error: `The app did not start for the acceptance tester: ${attempted.appProblem}` });
+    if (attempted.kind === "app-problem") return tested(tester, { error: `The app did not start for the acceptance tester: ${attempted.problem}` });
 
     const { result } = attempted;
+    const kept = join(TESTER_EVIDENCE, request.label);
+    const files = await keepEvidence(evidenceDir, join(context.runDir, kept));
     log.testerUsage = { ...log.testerUsage, [tester.agent]: addUsage(log.testerUsage?.[tester.agent] ?? emptyUsage(), result.usage) };
     const logPath = relative(context.runDir, result.logPath);
     const { outcome } = result;
@@ -79,12 +83,9 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
 
     const parsed = parseTesterReport(outcome.summary, { ids: request.criteria.map((criterion) => criterion.id), evidenceDir });
     if (!parsed.ok) return tested(tester, { error: `The acceptance tester gave no usable report: ${parsed.problem}.`, logPath });
-    const files = new Set((await filesIn(evidenceDir)).map((file) => relative(evidenceDir, file)));
     const missing = evidenceProblem(parsed.verdicts, files);
     if (missing !== null) return tested(tester, { error: `The acceptance tester gave no usable report: ${missing}.`, logPath });
 
-    const kept = join("tester", request.label);
-    await cp(evidenceDir, join(context.runDir, kept), { recursive: true });
     const verdicts = parsed.verdicts.map((verdict) => ({ ...verdict, evidence: verdict.evidence.map((path) => join(kept, path)) }));
     log.testerFailures = [
       ...(log.testerFailures ?? []),
@@ -96,6 +97,17 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
   } finally {
     await rm(evidenceDir, { recursive: true, force: true });
   }
+}
+
+async function keepEvidence(evidenceDir: string, target: string): Promise<Set<string>> {
+  const kept = new Set<string>();
+  for (const file of await filesIn(evidenceDir)) {
+    const path = relative(evidenceDir, file);
+    await mkdir(dirname(join(target, path)), { recursive: true });
+    await copyFile(file, join(target, path));
+    kept.add(path);
+  }
+  return kept;
 }
 
 function tested(agent: RoleChoice, record: Partial<TesterRecord>): TesterOutcome {

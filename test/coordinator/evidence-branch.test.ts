@@ -35,7 +35,7 @@ describe("the evidence branch", () => {
     const report = await run();
 
     const folder = `${report.log.runId}/A2`;
-    expect(await remoteFiles(target, EVIDENCE_BRANCH)).toEqual([`${report.log.runId}/A1/steps.txt`, `${folder}/A2.png`]);
+    expect(await remoteFiles(target, EVIDENCE_BRANCH)).toEqual([`${folder}/A2.png`, `${report.log.runId}/tester/verification/A1/steps.txt`]);
     expect(await git(target.remoteDir, "show", `${EVIDENCE_BRANCH}:${folder}/A2.png`)).toBe("png-of-the-greeting");
   });
 
@@ -88,10 +88,10 @@ describe("the evidence branch", () => {
     expect(secondReport.log.runId).not.toBe(firstReport.log.runId);
     expect(await git(target.remoteDir, "rev-parse", `${secondCommit}^`)).toBe(firstCommit);
     expect(await remoteFiles(target, EVIDENCE_BRANCH)).toEqual([
-      `${firstReport.log.runId}/A1/steps.txt`,
       `${firstReport.log.runId}/A2/A2.png`,
-      `${secondReport.log.runId}/A1/steps.txt`,
+      `${firstReport.log.runId}/tester/verification/A1/steps.txt`,
       `${secondReport.log.runId}/A2/A2.png`,
+      `${secondReport.log.runId}/tester/verification/A1/steps.txt`,
     ]);
     expect(await git(target.remoteDir, "show", `${firstCommit}:${firstReport.log.runId}/A2/A2.png`)).toBe("png-of-the-first-run");
     expect(target.github.pullRequests).toHaveLength(1);
@@ -113,6 +113,21 @@ describe("the evidence branch", () => {
     const secondCommit = await git(target.remoteDir, "rev-parse", EVIDENCE_BRANCH);
     expect(await git(target.remoteDir, "rev-parse", `${secondCommit}^`)).toBe(firstCommit);
     expect(await remoteFiles(target, EVIDENCE_BRANCH)).toContain(`${firstReport.log.runId}/A2/A2.png`);
+  });
+
+  it("should not take a symlink among the attachments, because its target is a file of the host that must not reach the evidence branch", async () => {
+    const secret = join(await temp.make("host-secret-"), "id_rsa");
+    await writeFile(secret, "PRIVATE KEY OF THE HOST\n");
+    const target = await targetRepo({
+      ...WITH_HUMAN_CRITERION,
+      config: WITH_ATTACHMENTS.replace("cp src/{{id}}.png test-results/", `cp src/{{id}}.png test-results/ && ln -s ${secret} test-results/key.png`),
+    });
+    const { run } = harness(target, writes("png-of-the-greeting\n"));
+
+    const report = await run();
+
+    expect(report.log.verification?.humanCriteria[0]?.attachments).toEqual(["attachments/A2/A2.png"]);
+    expect(await remoteFiles(target, EVIDENCE_BRANCH)).not.toContain(`${report.log.runId}/A2/key.png`);
   });
 
   it("should neither create nor push the branch when no human criterion has attachments and no acceptance tester ran", async () => {

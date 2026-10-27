@@ -1,4 +1,6 @@
-import { relative } from "node:path";
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   passingTester,
@@ -205,7 +207,7 @@ describe("factory run: the acceptance tester", () => {
           { id: "A2", verdict: "pass", observation: "fine", evidence: ["A2/shot.png"] },
         ]),
       },
-      "the evidence A2/shot.png of A2 does not exist",
+      "the evidence A2/shot.png of A2 is not a file in the evidence folder",
     ],
     [
       "that ends in an agent error, as a plan limit of OpenCode Go does until its error is observed",
@@ -226,6 +228,42 @@ describe("factory run: the acceptance tester", () => {
     expect(pullRequest?.draft).toBe(true);
     expect(pullRequest?.body).toContain("the acceptance tester gave no usable verdict");
     expect(pullRequest?.body).toContain(problem);
+  });
+
+  it("should refuse a symlink as evidence and never copy its target, because the target is a file of the host", async () => {
+    const repo = await target();
+    const secret = join(await temp.make("host-secret-"), "id_rsa");
+    await writeFile(secret, "PRIVATE KEY OF THE HOST\n");
+    const linksSecret: TesterScript = () => ({
+      evidence: { "A1/s.txt": "ok\n" },
+      links: { "A2/out.txt": secret },
+      outcome: testerReport([
+        { id: "A1", verdict: "pass", observation: "fine", evidence: ["A1/s.txt"] },
+        { id: "A2", verdict: "fail", observation: "bye", evidence: ["A2/out.txt"] },
+      ]),
+    });
+    const { run, runner } = harness(repo, bothParts, {}, linksSecret);
+
+    const report = await run();
+
+    expect(report.log.verification?.tester?.error).toContain("the evidence A2/out.txt of A2 is not a file in the evidence folder");
+    expect(followUps(runner)).toEqual([]);
+    const runDir = join(repo.repoDir, ".factory", "logs", report.log.runId);
+    expect(existsSync(join(runDir, "tester", "verification", "A2", "out.txt"))).toBe(false);
+    expect(existsSync(join(runDir, "tester", "verification", "A1", "s.txt"))).toBe(true);
+    expect(repo.github.pullRequests[0]?.body).not.toContain("PRIVATE KEY");
+  });
+
+  it("should keep the evidence the tester left in the run log when its report is unusable, so the developer can see why", async () => {
+    const repo = await target();
+    const { run } = harness(repo, bothParts, {}, () => ({ evidence: { "A1/steps.txt": "curl /a\n" }, outcome: { kind: "completed", summary: "All good." } }));
+
+    const report = await run();
+
+    expect(report.log.verification?.tester?.error).toContain("the report has no json block");
+    expect(await readFile(join(repo.repoDir, ".factory", "logs", report.log.runId, "tester", "verification", "A1", "steps.txt"), "utf8")).toBe(
+      "curl /a\n",
+    );
   });
 
   it("should pause the run, not fail it, when the tester reaches the plan limit of its agent", async () => {
@@ -270,7 +308,7 @@ describe("factory run: the acceptance tester in the pull request", () => {
 
     const body = repo.github.pullRequests[0]?.body ?? "";
     const commit = report.log.evidence?.commit ?? "";
-    const base = `https://github.test/aldorea/greeting/blob/${commit}/${report.log.runId}`;
+    const base = `https://github.test/aldorea/greeting/blob/${commit}/${report.log.runId}/tester/verification`;
     expect(body).toContain("- [x] A1 The first part works. Evidence: request `test -e ok-A1`");
     expect(body).toContain(
       `  Acceptance tester: passed. The first part answered. Evidence: [steps.txt](${base}/A1/steps.txt), [shot.png](${base}/A1/shot.png)`,
@@ -285,9 +323,28 @@ describe("factory run: the acceptance tester in the pull request", () => {
 
     const report = await run();
 
-    const folder = report.log.runId;
+    const folder = `${report.log.runId}/tester/verification`;
     expect(await git(repo.remoteDir, "show", `factory-evidence/42:${folder}/A1/shot.png`)).toBe("png-of-a");
     expect(await git(repo.remoteDir, "show", `factory-evidence/42:${folder}/A2/steps.txt`)).toBe("curl /b");
+  });
+
+  it("should keep the folders of the tester's evidence on the evidence branch, so two screenshots with the same name do not overwrite each other", async () => {
+    const repo = await target();
+    const twoSteps: TesterScript = () => ({
+      evidence: { "A1/step1/shot.png": "first", "A1/step2/shot.png": "second", "A2/s.txt": "ok\n" },
+      outcome: testerReport([
+        { id: "A1", verdict: "pass", observation: "fine", evidence: ["A1/step1/shot.png", "A1/step2/shot.png"] },
+        { id: "A2", verdict: "pass", observation: "fine", evidence: ["A2/s.txt"] },
+      ]),
+    });
+    const { run } = harness(repo, bothParts, {}, twoSteps);
+
+    const report = await run();
+
+    const folder = `${report.log.runId}/tester/verification/A1`;
+    expect(await git(repo.remoteDir, "show", `factory-evidence/42:${folder}/step1/shot.png`)).toBe("first");
+    expect(await git(repo.remoteDir, "show", `factory-evidence/42:${folder}/step2/shot.png`)).toBe("second");
+    expect(repo.github.pullRequests[0]?.body).toContain(`${folder}/step2/shot.png`);
   });
 
   it("should uncheck a criterion the tester failed although its command passed, and show both proofs", async () => {

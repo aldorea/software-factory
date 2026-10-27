@@ -89,7 +89,10 @@ async function captureAttachments(worker: Worker, id: string, context: EvidenceC
 export async function filesIn(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   const nested = await Promise.all(
-    entries.map((entry) => (entry.isDirectory() ? filesIn(join(dir, entry.name)) : [join(dir, entry.name)])),
+    entries.map((entry) => {
+      if (entry.isDirectory()) return filesIn(join(dir, entry.name));
+      return entry.isFile() ? [join(dir, entry.name)] : [];
+    }),
   );
   return nested.flat();
 }

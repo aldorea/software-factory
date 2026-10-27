@@ -8,7 +8,10 @@ export function evidenceBranchName(issue: number): string {
   return `factory-evidence/${issue}`;
 }
 
+export const TESTER_EVIDENCE = "tester";
+
 export function evidencePath(runId: string, criterionId: string, attachment: string): string {
+  if (attachment.startsWith(`${TESTER_EVIDENCE}/`)) return `${runId}/${attachment}`;
   return `${runId}/${criterionId}/${basename(attachment)}`;
 }
 
