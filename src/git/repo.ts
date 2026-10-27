@@ -4,6 +4,29 @@ import { join } from "node:path";
 import { addWorktreeForBranch, listWorktrees, removeWorktree } from "../workers/git.ts";
 import { exec, execOk } from "../workers/sh.ts";
 
+export const REMOTE = "origin";
+
+export async function defaultBranch(repoDir: string): Promise<string> {
+  const head = await exec("git", ["-C", repoDir, "symbolic-ref", "--quiet", "--short", `refs/remotes/${REMOTE}/HEAD`]);
+  const ref = head.stdout.trim();
+  if (head.exitCode !== 0 || !ref.startsWith(`${REMOTE}/`)) {
+    throw new Error(`${REMOTE}/HEAD is not set in ${repoDir}, so the default branch is unknown; run git remote set-head ${REMOTE} --auto`);
+  }
+  const branch = ref.slice(REMOTE.length + 1);
+  const local = await exec("git", ["-C", repoDir, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+  if (local.exitCode !== 0) {
+    throw new Error(`the default branch ${branch} has no local copy in ${repoDir}; create it first with git switch ${branch}`);
+  }
+  return branch;
+}
+
+export async function isAncestor(repoDir: string, ancestor: string, descendant: string): Promise<boolean> {
+  const checked = await exec("git", ["-C", repoDir, "merge-base", "--is-ancestor", ancestor, descendant]);
+  if (checked.exitCode === 0) return true;
+  if (checked.exitCode === 1) return false;
+  throw new Error(`git merge-base --is-ancestor ${ancestor} ${descendant} failed: ${checked.stderr.trim()}`);
+}
+
 export async function findIntegrationBranch(repoDir: string, issue: number): Promise<string | null> {
   const out = await execOk("git", [
     "-C",

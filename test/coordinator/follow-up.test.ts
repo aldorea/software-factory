@@ -1,5 +1,5 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
 import { subtaskBranch } from "../../src/coordinator/run.ts";
@@ -37,12 +37,12 @@ interface Check {
 
 const NO_BAD: Check = { name: "no-bad", command: "test ! -e b/bad.txt" };
 
-function configText(extra = "", checks: Check[] = [NO_BAD]): string {
+function configText(extra = "", checks: Check[] = [NO_BAD], request = "test -e ok-{{id}}"): string {
   return `
 export default {
   image: "greeting-worker:dev",
   checks: ${JSON.stringify(checks)},
-  evidence: { request: "test -e ok-{{id}}" },
+  evidence: { request: ${JSON.stringify(request)} },
   environment: () => ({}),
   protectedPaths: ["package.json"],
   roles: {
@@ -54,9 +54,11 @@ export default {
 `;
 }
 
-function target(extra = "", checks?: Check[]) {
-  return targetRepo({ config: configText(extra, checks), issueBody: ISSUE_BODY, spec: SPEC });
+function target(extra = "", checks?: Check[], request?: string) {
+  return targetRepo({ config: configText(extra, checks, request), issueBody: ISSUE_BODY, spec: SPEC });
 }
+
+const TALKATIVE_REQUEST = `test -e ok-{{id}} || { echo "noise of {{id}}"; echo "ok-{{id}} is missing" >&2; exit 1; }`;
 
 const subtaskOf = (call: { spec: { id: string } }) => call.spec.id.replace(`${ISSUE}-`, "");
 
@@ -96,6 +98,50 @@ describe("factory run: follow-up tasks", () => {
     expect(prompt).toContain("The second part works with the first");
     expect(prompt).toContain("test -e ok-A2");
     expect(report.result).toBe("ready");
+  });
+
+  it("should give the follow-up the last lines of the output of the criterion that failed, because the worker may not reproduce the failure", async () => {
+    const repo = await target("", [NO_BAD], TALKATIVE_REQUEST);
+    const { run, runner } = harness(repo, fixesSecondCriterion);
+
+    await run();
+
+    const prompt = followUps(runner)[0]?.attempts[0]?.prompt ?? "";
+    expect(prompt).toContain("The last lines of the output of criterion A2:");
+    expect(prompt).toContain("noise of A2\nok-A2 is missing");
+  });
+
+  it("should keep the last lines of a failed criterion in run.json and its whole output in the run log", async () => {
+    const repo = await target("", [NO_BAD], TALKATIVE_REQUEST);
+    const { run } = harness(repo, firstPass);
+
+    const report = await run();
+
+    const failed = report.log.verification?.criteria.find((criterion) => criterion.id === "A2");
+    expect(failed?.passed).toBe(false);
+    expect(failed?.outputTail).toBe("noise of A2\nok-A2 is missing");
+    expect(failed?.outputLog).toMatch(/^output\/.+\/A2\.log$/);
+    const whole = await readFile(join(dirname(report.runLogPath), failed?.outputLog ?? ""), "utf8");
+    expect(whole).toBe("noise of A2\nok-A2 is missing\n");
+    expect(report.log.verification?.criteria.find((criterion) => criterion.id === "A1")?.outputTail).toBeUndefined();
+  });
+
+  it("should give the attempt after a gate rejection the last lines of the output of the check that failed", async () => {
+    const talkative: Check = { name: "no-bad", command: `! grep -q bad b/b.txt || { echo "b/b.txt says bad"; exit 1; }` };
+    const repo = await target("", [talkative]);
+    const { run, runner } = harness(repo, (call) =>
+      subtaskOf(call) === "S2" && call.number === 1 ? { files: { "b/b.txt": "bad\n" } } : fixesSecondCriterion(call),
+    );
+
+    const report = await run();
+
+    const second = runner.workers.find((worker) => worker.spec.id === `${ISSUE}-S2`)?.attempts[1]?.prompt ?? "";
+    expect(second).toContain("check no-bad failed with exit code 1");
+    expect(second).toContain("The last lines of the output of check no-bad:");
+    expect(second).toContain("b/b.txt says bad");
+    const rejected = subtask(report.log, "S2")?.attempts[0]?.failure;
+    expect(rejected?.output).toContain("b/b.txt says bad");
+    expect(rejected?.description).not.toContain("The last lines of the output");
   });
 
   it("should start the follow-up from the current integration branch, which holds the work of the other subtasks", async () => {
@@ -169,7 +215,10 @@ describe("factory run: follow-up tasks", () => {
   it("should send no follow-up when only a check of the repo fails, because no subtask owns a check", async () => {
     const repo = await target("", [
       NO_BAD,
-      { name: "integrated", command: "git rev-parse --abbrev-ref HEAD | grep -qv verification" },
+      {
+        name: "integrated",
+        command: `git rev-parse --abbrev-ref HEAD | grep -qv verification || { echo "fails only once integrated"; exit 1; }`,
+      },
     ]);
     const { run, runner } = harness(repo, (call) =>
       subtaskOf(call) === "S2" ? { files: { "b/b.txt": "b\n", "ok-A2": "ok\n" } } : firstPass(call),
@@ -181,6 +230,42 @@ describe("factory run: follow-up tasks", () => {
     expect(verifications(runner)).toHaveLength(1);
     expect(report.log.verification?.passed).toBe(false);
     expect(report.result).toBe("draft");
+  });
+
+  it("should record an integration-check block with the check, the SHA and the end of its output when only a check fails, in run.json and in the PR", async () => {
+    const repo = await target("", [
+      NO_BAD,
+      {
+        name: "integrated",
+        command: `git rev-parse --abbrev-ref HEAD | grep -qv verification || { echo "fails only once integrated"; exit 1; }`,
+      },
+    ]);
+    const { run } = harness(repo, (call) => (subtaskOf(call) === "S2" ? { files: { "b/b.txt": "b\n", "ok-A2": "ok\n" } } : firstPass(call)));
+
+    const report = await run();
+
+    const sha = await git(repo.repoDir, "rev-parse", BRANCH);
+    expect(report.log.block?.type).toBe("integration-check");
+    expect(report.log.block?.sha).toBe(sha);
+    expect(report.log.block).toMatchObject({ checks: [{ name: "integrated", outputTail: "fails only once integrated" }] });
+    expect(report.log.block?.type === "integration-check" ? report.log.block.checks : []).toHaveLength(1);
+    expect(report.log.friction.blocks["integration-check"]).toBe(1);
+    expect(report.log.subtasks.every((entry) => entry.state === "merged")).toBe(true);
+    const body = repo.github.pullRequests[0]?.body ?? "";
+    expect(body).toContain(`## Blocks\n\n**integration-check** on \`${sha.slice(0, 12)}\`: The check integrated failed on the integration branch`);
+    expect(body).toContain("fails only once integrated");
+    expect(body).toContain("the run is blocked by integration-check (see Blocks)");
+  });
+
+  it("should record no integration-check block when a criterion fails too, because its follow-up carries the failed checks", async () => {
+    const repo = await target("", [NO_BAD, { name: "integrated", command: "git rev-parse --abbrev-ref HEAD | grep -qv verification" }]);
+    const { run, runner } = harness(repo, firstPass);
+
+    const report = await run();
+
+    expect(followUps(runner).length).toBeGreaterThan(0);
+    expect(followUps(runner)[0]?.attempts[0]?.prompt).toContain("These checks of the repo failed in the same run:");
+    expect(report.log.block).toBeUndefined();
   });
 
   it("should block the subtask and leave the pull request a draft when the follow-up hits patience at its gate", async () => {

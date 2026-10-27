@@ -20,7 +20,7 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 | `factory run <n>` | Implements, verifies and opens the PR |
 | `factory stats` | Summary of the `run.json` files of a repo |
 
-The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker or `gh` is not available.
+The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker is not running, or when `gh` is missing or not signed in (`gh auth status`), before it loads the config or asks for the agent of any role.
 
 Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from a prompt with the default of `.factory/config.ts` already selected; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
 
@@ -74,7 +74,7 @@ Each criterion has one type of evidence:
 The coordinator publishes these attachments on the **evidence branch** `factory-evidence/<n>`, because a path under `.factory/logs/` is outside git and a reviewer on GitHub cannot open it:
 
 - After the integrated verification, the coordinator, on the host, commits the attachments of each human criterion under `<run-id>/<criterion-id>/` and pushes the branch as it pushes the integration branch. No container pushes.
-- The branch has no common history with `main` and is never merged.
+- The branch has no common history with the default branch and is never merged.
 - A run adds a commit on top of the branch and never rewrites the earlier ones. The PR links each human criterion to its files at the pushed commit, so the links keep working after later runs. Images render inline.
 - A run with no attachments does not create the branch.
 - A failure to publish is recorded in `run.json` (`evidence.failure`), stated in the PR, and keeps the PR a draft.
@@ -132,6 +132,7 @@ Its checks and criteria pass and the gate accepts it.
 - A follow-up task is more work on the same subtask: it keeps counting the patience, the tokens and the wall clock of its subtask.
 - The limits per run also stop the follow-up tasks. The time in pause does not count.
 - A stopped subtask is `blocked`, with the reason and the last failure. The subtasks that do not depend on it go on.
+- The reason of a failure goes back to the worker in both loops: the next attempt after a gate rejection, and the follow-up task after the integrated verification. For each check and criterion that failed, the prompt carries the end of its output: its last 40 lines, without colors, at most 4 KB. These initial values are calibrated in the pilot.
 
 ### Plan limit
 
@@ -162,6 +163,7 @@ The coordinator never asks me during a run. It records each block in the PR and 
 | A worker needs a file outside its scope | The coordinator extends the scope only if no subtask of the same wave owns the file and the file is not protected. It records the extension in the run log and in the PR, not in `specs/<n>.md` (the hash stays valid). Otherwise, `blocked`. |
 | A question of design or product | `blocked`. The factory never decides a requirement. I change the spec, approve it again and start the run again. |
 | Patience, a limit or the environment (for example, the app does not become ready) | `blocked`, with the reason. |
+| A check of the repo fails in the integrated verification while every criterion passes | No subtask owns it, so the coordinator sends no follow-up task and guesses no owner: such a failure is usually a gap in the refinement. The run ends with a draft PR and an `integration-check` block in `run.json` and in the PR, with the check, the SHA of the integration branch and the end of its output. When criteria fail too, their follow-up tasks carry the failed checks instead. |
 
 A macOS notification links to the PR when a run ends, pauses or blocks.
 
@@ -271,8 +273,10 @@ The independent verifier and the acceptance tester do not count for this ceiling
 
 ### Git
 
-- The integration branch is `factory/<n>-<slug>`, from `main`. The PR goes to `main`.
+- The integration branch is `factory/<n>-<slug>`, from the local copy of the default branch, with no `git fetch`. The PR goes to the default branch.
+- A missing `origin/HEAD` stops `refine` and `run` with the command that sets it (`git remote set-head origin --auto`). A default branch with no local copy stops them with a message of its own.
 - Each subtask has its own branch from the integration branch.
+- Before the PR is ready, the integration branch must contain the local head of the default branch. When the default branch moved during the run, the coordinator merges it and runs the integrated verification again on the result. A conflict blocks the run with a `default-branch-conflict` block in `run.json` and in the PR, and counts as a conflict at integration.
 
 ## Measurement
 
@@ -282,7 +286,7 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 - **Agents:** the agent and the model of each role, and any change on resume.
 - **Cost:** tokens per subtask and per run, per agent, attempts per subtask, wall clock with no pauses. The tokens of the independent verifier and of the acceptance tester count in the run and in their agent, and are kept apart from the attempts of the subtask.
 - **Friction:**
-  - blocks by type (scope, design question, patience, limit, environment);
+  - blocks by type (scope, design question, patience, limit, environment, integration check);
   - automatic scope extensions;
   - rejections by the gate and by the verifier, and criteria failed by the acceptance tester whose command passed;
   - conflicts at integration (expected: 0).
@@ -292,7 +296,7 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
   - a process hangs;
   - commits or cleanup fail;
   - the token usage cannot be read.
-- **Logs:** the path to the raw log of each attempt.
+- **Logs:** the path to the raw log of each attempt. For each check and criterion that failed, the end of its output, and the path to its whole output in `output/` of the run log.
 - **Quality, after the merge:** changes I made at review, and escapes (bugs that the verification did not find). An escape is an issue with the label `escaped-defect` in the target repo, linked to the PR of the factory that brought it; it is counted with `gh issue list --label escaped-defect`, not by `factory stats`.
 
 `factory stats` summarizes these files for a repo, per agent as well, to compare the subscriptions.

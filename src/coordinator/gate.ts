@@ -1,4 +1,5 @@
 import type { Spec } from "../spec/spec.ts";
+import { outputSection } from "./failures.ts";
 import type { CheckRecord, CriterionRecord } from "./run-log.ts";
 
 export const ALWAYS_PROTECTED = [".factory"];
@@ -18,6 +19,7 @@ export interface GateRejection {
   kind: RejectionKind;
   message: string;
   signature: string;
+  output?: string;
 }
 
 export interface GateInput {
@@ -92,6 +94,7 @@ function checkRejection(check: CheckRecord): GateRejection {
     kind: "check",
     message: `check ${check.name} failed with exit code ${check.exitCode}${detail}`,
     signature: `check:${check.name}${detail}`,
+    ...(check.outputTail !== undefined ? { output: outputSection(`check ${check.name}`, check.outputTail) } : {}),
   };
 }
 
@@ -100,6 +103,7 @@ function criterionRejection(criterion: CriterionRecord): GateRejection {
     kind: "criterion",
     message: `criterion ${criterion.id} (${criterion.evidence}) failed with exit code ${criterion.exitCode}`,
     signature: `criterion:${criterion.id}`,
+    ...(criterion.outputTail !== undefined ? { output: outputSection(`criterion ${criterion.id}`, criterion.outputTail) } : {}),
   };
 }
 

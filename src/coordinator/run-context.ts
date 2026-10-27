@@ -20,6 +20,7 @@ export interface Prepared {
   config: ResolvedConfig;
   issue: Issue;
   branch: string;
+  defaultBranch: string;
   spec: Spec;
   plan: Schedule;
   parallelism: ParallelismBounds;
@@ -44,6 +45,7 @@ export interface RunContext {
   budgets: Map<string, CarriedLoopRecord>;
   gitLock: Lock;
   conflicted: boolean;
+  verifications: number;
   save(): Promise<void>;
   noteFailure(error: unknown, subtaskId: string | null): Promise<void>;
 }

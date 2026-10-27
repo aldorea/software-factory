@@ -7,7 +7,6 @@ import {
   type CriteriaRecord,
   type FrictionRecord,
   type RunLog,
-  type SubtaskRecord,
 } from "./run-log.ts";
 import { countedTokens } from "./stop-rules.ts";
 
@@ -38,7 +37,7 @@ export function sumUsage(usages: Iterable<TokenUsage>): TokenUsage {
 export function applyTotals(log: RunLog, now: Date): void {
   for (const subtask of log.subtasks) subtask.usage = sumUsage(subtask.attempts.map((attempt) => attempt.usage));
   log.cost = costOf(log, now);
-  log.friction = frictionOf(log.subtasks);
+  log.friction = frictionOf(log);
   log.criteria = criteriaOf(log);
 }
 
@@ -72,9 +71,11 @@ function costOf(log: RunLog, now: Date): CostRecord {
   };
 }
 
-function frictionOf(subtasks: SubtaskRecord[]): FrictionRecord {
+function frictionOf(log: RunLog): FrictionRecord {
   const friction = emptyFriction();
-  for (const subtask of subtasks) {
+  if (log.block?.type === "integration-check") friction.blocks["integration-check"] += 1;
+  if (log.block?.type === "default-branch-conflict") friction.integrationConflicts += 1;
+  for (const subtask of log.subtasks) {
     if (subtask.state === "blocked" && subtask.blockType !== undefined) friction.blocks[subtask.blockType] += 1;
     friction.scopeExtensions += subtask.scopeExtensions.length;
     friction.gateRejections += subtask.gateRejections;

@@ -11,7 +11,7 @@ export type RunResult = "running" | "ready" | "draft" | "paused";
 
 export type SubtaskState = "pending" | "working" | "gating" | "merged" | "blocked" | "interrupted" | "not-started";
 
-export const BLOCK_TYPES = ["scope", "design-question", "patience", "limit", "environment"] as const;
+export const BLOCK_TYPES = ["scope", "design-question", "patience", "limit", "environment", "integration-check"] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
@@ -20,7 +20,7 @@ export interface AttemptRecord {
   agent: RoleChoice;
   outcome: AttemptOutcome["kind"];
   detail?: string;
-  failure?: { signature: string; description: string };
+  failure?: { signature: string; description: string; output?: string };
   usage: TokenUsage;
   logPath: string;
   startedAt: string;
@@ -33,6 +33,8 @@ export interface CheckRecord {
   exitCode: number;
   passed: boolean;
   firstError?: string;
+  outputTail?: string;
+  outputLog?: string;
 }
 
 export interface CriterionRecord {
@@ -41,6 +43,8 @@ export interface CriterionRecord {
   command: string;
   exitCode: number;
   passed: boolean;
+  outputTail?: string;
+  outputLog?: string;
 }
 
 export interface HumanCriterionRecord {
@@ -70,6 +74,10 @@ export interface BlockRecord {
   reason: string;
   lastFailure?: string;
 }
+
+export type RunBlockRecord =
+  | { type: "integration-check"; reason: string; sha: string; checks: CheckRecord[] }
+  | { type: "default-branch-conflict"; reason: string; sha: string; files: string[] };
 
 export interface FollowUpRecord {
   round: number;
@@ -194,6 +202,7 @@ export interface RunLog {
   workerLayerFailures: WorkerLayerFailureRecord[];
   subtasks: SubtaskRecord[];
   verification?: VerificationRecord;
+  block?: RunBlockRecord;
   evidence?: EvidenceBranchRecord;
   pullRequest?: PullRequestRecord;
 }

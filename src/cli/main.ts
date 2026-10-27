@@ -32,6 +32,7 @@ export interface CliEnv {
   notifier: Notifier;
   credentials: Partial<Record<AgentKind, string>>;
   docker(): Promise<string | null>;
+  gh(): Promise<string | null>;
   ask?: (question: RoleQuestion) => Promise<RoleChoice>;
   launch(launch: InteractiveLaunch): Promise<number>;
   out(text: string): void;
@@ -118,10 +119,12 @@ function parseCommand(args: string[]): Command | null {
 }
 
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
-  const dockerIssue = await env.docker();
-  if (dockerIssue !== null) {
-    env.err(`factory: ${dockerIssue}`);
-    return 1;
+  for (const probe of [env.docker, env.gh]) {
+    const problem = await probe();
+    if (problem !== null) {
+      env.err(`factory: ${problem}`);
+      return 1;
+    }
   }
   const config = await loadConfig(repoDir);
   const defaults = resumeDefaults(await latestRunLog(join(repoDir, ".factory", "logs"), issue), config.roles);

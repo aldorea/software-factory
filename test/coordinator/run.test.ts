@@ -100,6 +100,7 @@ async function targetRepo(options: TargetOptions = {}): Promise<Target> {
   await git(repoDir, "config", "user.name", "t");
   await git(repoDir, "config", "user.email", "t@t");
   await git(repoDir, "remote", "add", "origin", remoteDir);
+  await git(repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
   await writeFile(join(repoDir, "README.md"), "# greeting\n");
   await writeFile(join(repoDir, ".gitignore"), ".factory/logs/\n.factory/worktrees/\n");
   for (const [path, content] of Object.entries(options.files ?? {})) {
@@ -307,7 +308,9 @@ describe("factory run for a one-subtask spec", () => {
     expect(report.log.verification?.passed).toBe(false);
     expect(report.result).toBe("draft");
     expect(target.github.pullRequests[0]?.draft).toBe(true);
-    expect(target.github.pullRequests[0]?.body).toContain("Draft: the integrated verification failed.");
+    expect(target.github.pullRequests[0]?.body).toContain(
+      "Draft: the integrated verification failed; the run is blocked by integration-check (see Blocks).",
+    );
   });
 
   it("should update the same pull request when the run starts again instead of opening a second one", async () => {
