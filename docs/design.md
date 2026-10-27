@@ -22,7 +22,7 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 
 The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker or `gh` is not available.
 
-Before `factory run` starts, the developer chooses the agent and the model of each role: the workers and the independent verifier. The choice comes from the flags (`--worker-agent`, `--verifier-agent`); else, in a terminal, from a prompt with the default of `.factory/config.ts` already selected; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
+Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from a prompt with the default of `.factory/config.ts` already selected; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
 
 ## Flow
 
@@ -35,8 +35,8 @@ Before `factory run` starts, the developer chooses the agent and the model of ea
    1. The base subtask runs alone, then its gate, then its branch merges into the integration branch.
    2. The other subtasks run in waves, in parallel up to `maxParallel`, each from the integration branch.
    3. Each subtask that passes its gate merges into the integration branch with `git merge`. A conflict blocks the run: it is an error of the refinement, not a task for an agent.
-   4. Integrated verification: the checks of the repo and all the criteria, on the integrated app.
-   5. A failed criterion sends a follow-up task to the subtask that owns it. Then the integrated verification runs again.
+   4. Integrated verification: the checks of the repo and all the criteria, on the integrated app. When they pass, the acceptance tester uses the app against every automatic criterion.
+   5. A failed criterion, by its command or by the acceptance tester, sends a follow-up task to the subtask that owns it. Then the integrated verification runs again.
    6. The coordinator opens or updates the PR.
 
 ### The spec
@@ -89,13 +89,24 @@ A "human" criterion with no reason in the spec means that the refinement is not 
 - **Playwright tests:** the worker writes them. At the gate, an independent verifier, in its own clean context, gets only the text of the criterion and the test, checks that the test proves the criterion, and tries to refute it.
 - **Existing tests:** a change to a test file that existed before the run is rejected unless I authorize it.
 
+### Acceptance tester
+
+The tests above come from the workers, and the independent verifier only reads them. The acceptance tester checks the app itself, the way a user would (see [ADR 0004](adr/0004-acceptance-tester.md)):
+
+- It runs in each round of the integrated verification, only when the checks and the automatic criteria already pass.
+- It tests every Playwright and request criterion of the run, also after a follow-up, and never a human one.
+- It receives only the text of the criteria and the running app. Its prompt forbids reading the diff, the pull request and the tests of the workers; the container cannot enforce it, because the app starts from the code.
+- For each criterion it returns a verdict, what it did and saw, and the paths of the files of its evidence (its scripts, screenshots and output), written in a folder outside the worktree.
+- A criterion it fails counts as a failed criterion: it sends a follow-up task with the observation and its evidence to the subtask that owns it, under the same patience and limits.
+- In the PR, each automatic criterion shows both proofs: the result of its command and the observation of the tester, with a link to its files. Its screenshots go to the evidence branch, as the attachments of the human criteria do.
+
 ### Two levels
 
 | Level | Who | What | Purpose |
 |---|---|---|---|
 | Worker | The worker, in its loop | Checks of the repo and its own criteria | Find failures early |
 | Gate | The coordinator, not the worker | Runs the checks and the verification of the subtask again on its branch, checks the diff against its scope paths and against the existing tests, runs the independent verifier | Do not trust the report of the worker |
-| Integration | The coordinator | Checks of the repo and all the criteria on the integrated app | The evidence of the PR |
+| Integration | The coordinator, then the acceptance tester | Checks of the repo and all the criteria on the integrated app, then the tester's own use of the app against the automatic criteria | The evidence of the PR |
 
 The evidence of the PR comes only from the integrated run on the final SHA. A commit after it makes the coordinator generate the evidence again.
 
@@ -115,7 +126,7 @@ Its checks and criteria pass and the gate accepts it.
 | Wall clock, per run | 6 h | Coordinator |
 | Tokens, per run | 8 M | Coordinator |
 
-- The token limits are set per agent in `.factory/config.ts`, because each provider counts tokens differently. The values above are the initial ones for Claude Code; each other agent gets its own initial values, calibrated in the pilot. A run that changes the agent of its workers on resume counts the tokens of each agent against that agent's limit. The answers of the independent verifier count in the run limit of the verifier's agent, and not in the limit of a subtask. The wall clock and patience do not depend on the agent.
+- The token limits are set per agent in `.factory/config.ts`, because each provider counts tokens differently. The values above are the initial ones for Claude Code; each other agent gets its own initial values, calibrated in the pilot. A run that changes the agent of its workers on resume counts the tokens of each agent against that agent's limit. The answers of the independent verifier and the work of the acceptance tester count in the run limit of their agent, and not in the limit of a subtask. The wall clock and patience do not depend on the agent.
 - Patience and the hard limits are different rules. Patience stops a loop with no progress. A hard limit stops a loop that progresses too slowly or costs too much.
 - A worker cannot change its own limits.
 - A follow-up task is more work on the same subtask: it keeps counting the patience, the tokens and the wall clock of its subtask.
@@ -124,7 +135,7 @@ Its checks and criteria pass and the gate accepts it.
 
 ### Plan limit
 
-When the plan limit of any agent of the run is reached (the workers' or the independent verifier's), the run **pauses**. It is not a failure:
+When the plan limit of any agent of the run is reached (the workers', the independent verifier's or the acceptance tester's), the run **pauses**. It is not a failure:
 
 - No new worker starts, and the pause spends no patience.
 - The wall clock does not count the time in pause.
@@ -140,7 +151,7 @@ The coordinator finds what to resume in two records, never in a conversation:
 
 Each agent's adapter reads its plan usage. Claude Code reports it in its `stream-json` output: a `rate_limit_event` gives the status and the utilization of each window (`five_hour`, `seven_day`) with its reset time. The worker layer records it in each attempt.
 
-OpenCode Go does not report its plan limit in a way that has been observed. Its error is undocumented, and only exhausting the quota would capture it. So its adapter does not detect the plan limit, and OpenCode Go is not offered as the workers until a pilot observes that error and the adapter detects it. The independent verifier is offered with only its tool check, as before: until the error is observed, a plan limit that reaches it is reported as an error of the verifier, and the pilot must check it.
+OpenCode Go does not report its plan limit in a way that has been observed. Its error is undocumented, and only exhausting the quota would capture it. So its adapter does not detect the plan limit, and OpenCode Go is not offered as the workers until a pilot observes that error and the adapter detects it. The independent verifier is offered with only its tool check, as before: until the error is observed, a plan limit that reaches it is reported as an error of the verifier, and the pilot must check it. The acceptance tester is offered on OpenCode Go the same way: until then, a plan limit that reaches it is reported as an error of the tester.
 
 ### Blocks during a run
 
@@ -159,7 +170,7 @@ A macOS notification links to the PR when a run ends, pauses or blocks.
 - **All criteria pass** (except the "human" ones): the coordinator marks the PR "ready for review". Only the coordinator does this.
 - **Anything else:** a draft PR with the real state: the evidence of the criteria that pass, each blocked subtask with its reason and its last failure, and what it needs to continue.
 
-The PR names the agent and the model of each role, and any change on resume. When the independent verifier used the same model as the workers, the PR says so in one line: its independence then rests on its clean context alone.
+The PR names the agent and the model of each role, and any change on resume. When the independent verifier or the acceptance tester used the same model as the workers, the PR says so in one line: its independence then rests on its clean context alone.
 
 The issue, `specs/<n>.md` and the PR are the records. A new session starts again from them, not from a conversation.
 
@@ -197,6 +208,11 @@ The factory does not change the `package.json` of a target repo.
   - with only the credential of its agent;
   - with every tool denied, in an empty directory. For OpenCode, a config denies them; if OpenCode does not load the config, the run fails closed.
   - The container is the second barrier: a tool that escaped the config reaches only a container that is removed.
+- The acceptance tester runs in a container of the same image, created for one round of the integrated verification and removed after it:
+  - with a bind mount of a worktree of the integration branch at the verified SHA, only to start the app;
+  - with its own clean context, never shared with the workers, even when it runs their agent and model;
+  - with its token, the URL of a Neon branch and its own `E2E_PORT`, as a worker;
+  - with its tools, because it uses the app; its evidence goes to a folder outside the worktree, which the coordinator copies to the log of the run.
 - No container has:
   - the `.env` of the repo;
   - `~/.ssh`;
@@ -210,8 +226,9 @@ The factory does not change the `package.json` of a target repo.
   - read its token usage;
   - detect the error of the plan limit;
   - collect its commits;
-  - ask the independent verifier and get its answer, or an error if it used a tool or gave no answer.
-- Each agent has an adapter in the layer. An agent can serve as the workers only if its adapter reads its token usage and detects its plan limit, and as the independent verifier only if every tool can be denied to it with a fail-closed check. An agent that misses one is not offered for that role.
+  - ask the independent verifier and get its answer, or an error if it used a tool or gave no answer;
+  - start the acceptance tester on the integrated app and get its verdict per criterion with the paths of its evidence, or an error if it gave no usable report.
+- Each agent has an adapter in the layer. An agent can serve as the workers only if its adapter reads its token usage and detects its plan limit, as the acceptance tester only if its adapter reads its token usage, and as the independent verifier only if every tool can be denied to it with a fail-closed check. An agent that misses one is not offered for that role.
 - Sandcastle (`mattpocock/sandcastle`) is a design reference only: see [ADR 0002](adr/0002-own-worker-layer.md).
 - A toy repo with trivial tasks tests the layer before `askwell`.
 
@@ -229,8 +246,9 @@ Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-onl
 | Refinement | Claude Code, interactive, on the host |
 | Base subtask and workers | Claude Code or OpenCode Go, in Docker. OpenCode Go once its adapter detects its plan limit: its token usage is already read (see below), its plan-limit error is not yet observed |
 | Independent verifier | OpenCode Go, in Docker: the only agent today whose tools can be denied with a fail-closed check |
+| Acceptance tester | Claude Code or OpenCode Go, in Docker. On OpenCode Go, a plan limit is reported as an error of the tester until its error is observed |
 
-The workers and the independent verifier may use the same agent and the same model. Each still runs in its own container with its own clean context.
+The workers, the independent verifier and the acceptance tester may use the same agent and the same model. Each still runs in its own container with its own clean context.
 
 Verified on 2026-10-24:
 
@@ -249,7 +267,7 @@ Each agent has its own `maxParallel` and ceiling, because each runs on its own s
 | Ceiling | Claude Code: 2 workers. Other agents: an initial value, calibrated in the pilot |
 | Down by one | On each pause for the plan limit of that agent |
 
-The independent verifier does not count for this ceiling.
+The independent verifier and the acceptance tester do not count for this ceiling.
 
 ### Git
 
@@ -262,11 +280,11 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 
 - **Result:** ready, draft with blocks, or paused. The criteria that pass, the blocked ones and the human ones.
 - **Agents:** the agent and the model of each role, and any change on resume.
-- **Cost:** tokens per subtask and per run, per agent, attempts per subtask, wall clock with no pauses. The tokens of the independent verifier count in the run and in its agent, and are kept apart from the attempts of the subtask.
+- **Cost:** tokens per subtask and per run, per agent, attempts per subtask, wall clock with no pauses. The tokens of the independent verifier and of the acceptance tester count in the run and in their agent, and are kept apart from the attempts of the subtask.
 - **Friction:**
   - blocks by type (scope, design question, patience, limit, environment);
   - automatic scope extensions;
-  - rejections by the gate and by the verifier;
+  - rejections by the gate and by the verifier, and criteria failed by the acceptance tester whose command passed;
   - conflicts at integration (expected: 0).
 - **Failures of the worker layer**, apart from the failures of the design:
   - the container does not start;
@@ -275,6 +293,6 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
   - commits or cleanup fail;
   - the token usage cannot be read.
 - **Logs:** the path to the raw log of each attempt.
-- **Quality, after the merge:** changes I made at review, and escapes (bugs that the verification did not find).
+- **Quality, after the merge:** changes I made at review, and escapes (bugs that the verification did not find). An escape is an issue with the label `escaped-defect` in the target repo, linked to the PR of the factory that brought it; it is counted with `gh issue list --label escaped-defect`, not by `factory stats`.
 
 `factory stats` summarizes these files for a repo, per agent as well, to compare the subscriptions.
