@@ -18,7 +18,7 @@ export async function prepare(request: RunRequest, ports: RunPorts): Promise<Pre
   const issue = await ports.github.readIssue(request.issue);
   const problem = approvalProblem(request.issue, specText, issue.body);
   if (problem !== null) throw new Error(problem);
-  const targetBranch = await defaultBranch(request.repoDir);
+  const base = await defaultBranch(request.repoDir);
 
   const config = await loadConfig(request.repoDir);
   const parsed = parseSpec(specText);
@@ -40,7 +40,7 @@ export async function prepare(request: RunRequest, ports: RunPorts): Promise<Pre
   const credential = request.credentials[workers.agent] as string;
   const limits = config.agents[workers.agent];
   const parallelism = { start: limits.maxParallel, ceiling: limits.maxParallelCeiling };
-  return { config, issue, branch, defaultBranch: targetBranch, spec: parsed.spec, plan, parallelism, humanCriteria, workers, verifier, credential };
+  return { config, issue, branch, defaultBranch: base, spec: parsed.spec, plan, parallelism, humanCriteria, workers, verifier, credential };
 }
 
 function chosenRoles(

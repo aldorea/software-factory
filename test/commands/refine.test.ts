@@ -162,6 +162,21 @@ describe("refinement preparation", () => {
     );
   });
 
+  it("should check the default branch before it reads the issue, so a local problem is found without the network", async () => {
+    const repoDir = await targetRepo();
+    await git(repoDir, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+
+    await expect(prepareRefinement({ repoDir, issue: 9, github: github() })).rejects.toThrow("git remote set-head origin --auto");
+  });
+
+  it("should reuse an existing integration branch even when origin/HEAD is not set, because it needs no default branch", async () => {
+    const repoDir = await targetRepo();
+    await git(repoDir, "branch", "factory/42-saved-searches", "main");
+    await git(repoDir, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+
+    expect((await prepareRefinement({ repoDir, issue: 42, github: github() })).created).toBe(false);
+  });
+
   it("should fail with the message of the tracker when the issue does not exist", async () => {
     const repoDir = await targetRepo();
 

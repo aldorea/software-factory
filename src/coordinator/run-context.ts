@@ -45,6 +45,7 @@ export interface RunContext {
   budgets: Map<string, CarriedLoopRecord>;
   gitLock: Lock;
   conflicted: boolean;
+  verifications: number;
   save(): Promise<void>;
   noteFailure(error: unknown, subtaskId: string | null): Promise<void>;
 }

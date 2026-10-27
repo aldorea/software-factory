@@ -12,7 +12,7 @@ A personal factory that takes a GitHub issue of a TypeScript repo and returns a 
 
 - Agents run only on subscriptions: today the Claude Code CLI with a `setup-token` token, and the OpenCode CLI with an OpenCode Go key and `opencode-go/` models ([ADR 0001](docs/adr/0001-subscriptions-only.md)). They are interchangeable: the developer chooses the agent and model of each role before a run ([ADR 0003](docs/adr/0003-interchangeable-agents.md)). Do not remove or degrade the support of an agent.
 - The worker layer is our own code; Sandcastle is read for reference only ([ADR 0002](docs/adr/0002-own-worker-layer.md)).
-- The coordinator stays deterministic: every LLM call happens in a worker or in the independent verifier.
+- The coordinator stays deterministic: every LLM call happens in a worker, in the independent verifier or in the acceptance tester.
 - A container receives only what the design lists for it. Host secrets (`.env`, `~/.ssh`, the `gh` session) stay on the host, and only the coordinator pushes and opens pull requests.
 
 ## Code, comments and tests

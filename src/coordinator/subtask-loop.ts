@@ -161,7 +161,8 @@ function coveredFailure(paths: string[]): AttemptFailure {
 }
 
 async function retryPrompt(base: string, failure: AttemptFailure): Promise<string> {
-  const section = renderTemplate(await readPromptTemplate("retry"), { failure: failure.description });
+  const text = failure.output === undefined ? failure.description : `${failure.description}\n\n${failure.output}`;
+  const section = renderTemplate(await readPromptTemplate("retry"), { failure: text });
   return `${base}\n\n${section}`;
 }
 

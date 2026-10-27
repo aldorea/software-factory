@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { pushBranch } from "../git/repo.ts";
+import { pushBranch, REMOTE } from "../git/repo.ts";
 import type { PullRequest } from "../github/github.ts";
 import { emptyUsage } from "../workers/agent-adapter.ts";
 import { WorkerLayerError } from "../workers/failures.ts";
@@ -7,6 +7,7 @@ import { runId as makeRunId, runResult } from "./decisions.ts";
 import { testFilesAt } from "./diff.ts";
 import { requestCheckPaths } from "./gate.ts";
 import { evidenceBranchName, evidenceFiles, publishEvidence } from "./evidence-branch.ts";
+import { includeDefaultBranch } from "./default-branch.ts";
 import { verifyIntegration } from "./integrated-verification.ts";
 import { adjustMaxParallel } from "./parallelism.ts";
 import type { RunPorts } from "./ports.ts";
@@ -23,7 +24,7 @@ import { startSubtask } from "./subtask-work.ts";
 export type { RunRequest } from "./run-context.ts";
 export { mergeMessage } from "./subtask-work.ts";
 
-export const REMOTE = "origin";
+export { REMOTE } from "../git/repo.ts";
 
 export interface RunReport {
   result: RunLog["result"];
@@ -97,6 +98,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     budgets: new Map(),
     gitLock: new Lock(),
     conflicted: log.subtasks.some((record) => record.state === "blocked" && record.conflictFiles !== undefined),
+    verifications: 0,
     save,
     async noteFailure(error, subtaskId) {
       if (!(error instanceof WorkerLayerError)) throw error;
@@ -114,6 +116,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   await inWaves(plan, log.maxParallel, (subtask, slot) => startSubtask(context, subtask, slot));
   if (!paused(context)) await verifyIntegration(context, subtasks);
+  await includeDefaultBranch(context, subtasks);
   await publishHumanEvidence(context);
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();

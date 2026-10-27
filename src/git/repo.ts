@@ -4,23 +4,26 @@ import { join } from "node:path";
 import { addWorktreeForBranch, branchExists, listWorktrees, removeWorktree } from "../workers/git.ts";
 import { exec, execOk } from "../workers/sh.ts";
 
-const REMOTE_HEAD_PREFIX = "refs/remotes/origin/";
+export const REMOTE = "origin";
 
 export async function defaultBranch(repoDir: string): Promise<string> {
-  const head = await exec("git", ["-C", repoDir, "symbolic-ref", "-q", `${REMOTE_HEAD_PREFIX}HEAD`]);
+  const head = await exec("git", ["-C", repoDir, "symbolic-ref", "--quiet", "--short", `refs/remotes/${REMOTE}/HEAD`]);
   const ref = head.stdout.trim();
-  if (head.exitCode !== 0 || !ref.startsWith(REMOTE_HEAD_PREFIX)) {
-    throw new Error(
-      `cannot tell the default branch of ${repoDir}: origin/HEAD is not set; run git remote set-head origin --auto`,
-    );
+  if (head.exitCode !== 0 || !ref.startsWith(`${REMOTE}/`)) {
+    throw new Error(`${REMOTE}/HEAD is not set in ${repoDir}, so the default branch is unknown; run git remote set-head ${REMOTE} --auto`);
   }
-  const branch = ref.slice(REMOTE_HEAD_PREFIX.length);
+  const branch = ref.slice(REMOTE.length + 1);
   if (!(await branchExists(repoDir, branch))) {
-    throw new Error(
-      `default branch ${branch} has no local copy in ${repoDir}; create it with git branch ${branch} origin/${branch}`,
-    );
+    throw new Error(`the default branch ${branch} has no local copy in ${repoDir}; create it first with git switch ${branch}`);
   }
   return branch;
+}
+
+export async function isAncestor(repoDir: string, ancestor: string, descendant: string): Promise<boolean> {
+  const checked = await exec("git", ["-C", repoDir, "merge-base", "--is-ancestor", ancestor, descendant]);
+  if (checked.exitCode === 0) return true;
+  if (checked.exitCode === 1) return false;
+  throw new Error(`git merge-base --is-ancestor ${ancestor} ${descendant} failed: ${checked.stderr.trim()}`);
 }
 
 export async function findIntegrationBranch(repoDir: string, issue: number): Promise<string | null> {
