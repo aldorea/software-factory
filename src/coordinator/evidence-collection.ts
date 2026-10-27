@@ -48,7 +48,7 @@ export async function collectEvidence(worker: Worker, plan: EvidencePlan, contex
   return { criteria, human };
 }
 
-async function startApp(worker: Worker, app: AppStart): Promise<string | null> {
+export async function startApp(worker: Worker, app: AppStart): Promise<string | null> {
   const started = await worker.exec(`(${app.start}) >/dev/null 2>&1 &`);
   if (started.exitCode !== 0) return `the app did not start: ${app.start} exited with ${started.exitCode}`;
   if (app.ready === undefined) return null;
@@ -86,10 +86,13 @@ async function captureAttachments(worker: Worker, id: string, context: EvidenceC
   return kept;
 }
 
-async function filesIn(dir: string): Promise<string[]> {
+export async function filesIn(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   const nested = await Promise.all(
-    entries.map((entry) => (entry.isDirectory() ? filesIn(join(dir, entry.name)) : [join(dir, entry.name)])),
+    entries.map((entry) => {
+      if (entry.isDirectory()) return filesIn(join(dir, entry.name));
+      return entry.isFile() ? [join(dir, entry.name)] : [];
+    }),
   );
   return nested.flat();
 }

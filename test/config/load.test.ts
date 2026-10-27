@@ -18,6 +18,7 @@ const config = {
   roles: {
     workers: { agent: "claude-code", model: "sonnet" },
     verifier: { agent: "opencode", model: "opencode-go/kimi-k2" },
+    tester: { agent: "claude-code", model: "opus" },
   },
   agents: { "claude-code": { maxParallel: 2 } },
 };
@@ -45,6 +46,7 @@ describe("loadConfig", () => {
     expect(config.app).toEqual({ start: "pnpm dev", readyTimeoutMs: DEFAULT_READY_TIMEOUT_MS });
     expect(config.protectedPaths).toEqual(["package.json", "pnpm-lock.yaml"]);
     expect(config.roles.workers).toEqual({ agent: "claude-code", model: "sonnet" });
+    expect(config.roles.tester).toEqual({ agent: "claude-code", model: "opus" });
     expect(config.environment({ purpose: "worker", subtask: "S1", slot: 1 })).toEqual({ E2E_PORT: "4001" });
     expect(config.agents["claude-code"]).toEqual({ ...DEFAULT_LIMITS.agents["claude-code"], maxParallel: 2 });
     expect(config.agents.opencode).toEqual(DEFAULT_LIMITS.agents.opencode);
@@ -90,6 +92,14 @@ describe("loadConfig", () => {
     await expect(loadConfig(dir)).rejects.toThrow(
       "roles.workers: opencode cannot serve the workers: it misses detectsPlanLimit",
     );
+  });
+
+  it("should accept OpenCode Go as the default acceptance tester, because the tester needs only its token usage read", async () => {
+    const dir = await repoWithConfig(
+      VALID.replace('tester: { agent: "claude-code", model: "opus" }', 'tester: { agent: "opencode", model: "opencode-go/kimi-k2" }'),
+    );
+
+    expect((await loadConfig(dir)).roles.tester).toEqual({ agent: "opencode", model: "opencode-go/kimi-k2" });
   });
 
   it("should load a config with no default agents, because the flags or the prompt of factory run can give them", async () => {

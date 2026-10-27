@@ -113,7 +113,8 @@ describe("factory run at the plan limit", () => {
 
 describe("factory run on a paused or partially done run", () => {
   const isS1 = (call: AttemptCall) => call.spec.branch.endsWith("/S1");
-  const working = (runner: FakeWorkerRunner) => runner.workers.filter((worker) => worker.attempts.length > 0);
+  const working = (runner: FakeWorkerRunner) =>
+    runner.workers.filter((worker) => worker.attempts.length > 0 && worker.spec.outputDir === undefined);
 
   it("should skip the merged subtasks, reuse the existing subtask branch and update the same pull request", async () => {
     const target = await targetRepo(TWO_SUBTASKS);

@@ -54,6 +54,7 @@ export default {
   roles: {
     workers: { agent: "claude-code", model: "sonnet" },
     verifier: { agent: "opencode", model: "opencode-go/kimi-k2" },
+    tester: { agent: "claude-code", model: "opus" },
   },
   agents: { "claude-code": { maxParallel: ${options.maxParallel ?? 1} } },
   evidence: { request: "true # {{id}}" },

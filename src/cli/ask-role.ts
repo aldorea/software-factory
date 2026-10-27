@@ -3,7 +3,7 @@ import type { RoleChoice } from "../config/config.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { RoleQuestion } from "./main.ts";
 
-const ROLE_NAMES = { workers: "the workers", verifier: "the independent verifier" } as const;
+const ROLE_NAMES = { workers: "the workers", verifier: "the independent verifier", tester: "the acceptance tester" } as const;
 
 export async function askRoleInTerminal(question: RoleQuestion): Promise<RoleChoice> {
   const terminal = createInterface({ input: process.stdin, output: process.stdout });

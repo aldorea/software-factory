@@ -35,7 +35,7 @@ export interface RunReport {
 
 export async function runIssue(request: RunRequest, ports: RunPorts): Promise<RunReport> {
   const prepared = await prepare(request, ports);
-  const { issue, branch, defaultBranch, spec, plan, parallelism, workers, verifier, humanCriteria } = prepared;
+  const { issue, branch, defaultBranch, spec, plan, parallelism, workers, verifier, tester, humanCriteria } = prepared;
   const subtasks = plan.base ? [plan.base, ...spec.subtasks] : spec.subtasks;
   const now = ports.clock.now();
   const logsDir = join(request.repoDir, ".factory", "logs");
@@ -46,7 +46,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     integrationBranch: branch,
     startedAt: now.toISOString(),
     result: "running",
-    agents: { workers, verifier, changes: [] },
+    agents: { workers, verifier, tester, changes: [] },
     criteria: { passing: [], blocked: [], human: humanCriteria, pending: [] },
     cost: emptyCost(),
     friction: emptyFriction(),
@@ -117,7 +117,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   await inWaves(plan, log.maxParallel, (subtask, slot) => startSubtask(context, subtask, slot));
   if (!paused(context)) await verifyIntegration(context, subtasks);
   await includeDefaultBranch(context, subtasks);
-  await publishHumanEvidence(context);
+  await publishEvidenceBranch(context);
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();
   await save();
@@ -140,10 +140,11 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   return { result: log.result, pullRequest, runLogPath, log };
 }
 
-async function publishHumanEvidence(context: RunContext): Promise<void> {
+async function publishEvidenceBranch(context: RunContext): Promise<void> {
   const { log, request } = context;
   delete log.evidence;
-  const files = evidenceFiles(log.runId, context.runDir, log.verification?.humanCriteria ?? []);
+  const tested = (log.verification?.tester?.verdicts ?? []).map((verdict) => ({ id: verdict.id, attachments: verdict.evidence }));
+  const files = evidenceFiles(log.runId, context.runDir, [...(log.verification?.humanCriteria ?? []), ...tested]);
   if (files.length === 0) return;
   const record: EvidenceBranchRecord = { branch: evidenceBranchName(request.issue) };
   log.evidence = record;

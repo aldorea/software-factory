@@ -36,11 +36,12 @@ export async function prepare(request: RunRequest, ports: RunPorts): Promise<Pre
   const plan = schedule(parsed.spec);
 
   const asksVerifier = Object.values(parsed.spec.criteria).some((criterion) => criterion.evidence === "playwright");
-  const { workers, verifier } = chosenRoles(request, config, { workers: true, verifier: asksVerifier });
+  const testsApp = Object.values(parsed.spec.criteria).some((criterion) => criterion.evidence !== "human");
+  const { workers, verifier, tester } = chosenRoles(request, config, { workers: true, verifier: asksVerifier, tester: testsApp });
   const credential = request.credentials[workers.agent] as string;
   const limits = config.agents[workers.agent];
   const parallelism = { start: limits.maxParallel, ceiling: limits.maxParallelCeiling };
-  return { config, issue, branch, defaultBranch: base, spec: parsed.spec, plan, parallelism, humanCriteria, workers, verifier, credential };
+  return { config, issue, branch, defaultBranch: base, spec: parsed.spec, plan, parallelism, humanCriteria, workers, verifier, tester, credential };
 }
 
 function chosenRoles(

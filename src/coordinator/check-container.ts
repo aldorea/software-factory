@@ -23,11 +23,30 @@ export interface CheckOutcome extends EvidenceResult {
 }
 
 export async function checksOn(context: RunContext, request: CheckRequest): Promise<CheckOutcome | null> {
+  return inCheckContainer(
+    context,
+    { label: request.label, sha: request.sha, env: environment(context.prepared.config, request.purpose), subtaskId: request.subtaskId },
+    (worker) => checksIn(context, worker, request),
+  );
+}
+
+export interface CheckContainer {
+  label: string;
+  sha: string;
+  env: Record<string, string>;
+  subtaskId: string | null;
+  outputDir?: string;
+}
+
+export async function inCheckContainer<T>(
+  context: RunContext,
+  request: CheckContainer,
+  use: (worker: Worker) => Promise<T>,
+): Promise<T | null> {
   const { repoDir } = context.request;
   const { config } = context.prepared;
   const id = context.log.runId;
   const checkBranch = `factory-check/${id}/${request.label}`;
-  const env = environment(config, request.purpose);
   const worker = await context.gitLock
     .exclusive(async () => {
       await createBranchAt(repoDir, checkBranch, request.sha);
@@ -38,8 +57,9 @@ export async function checksOn(context: RunContext, request: CheckRequest): Prom
           baseRef: checkBranch,
           branch: checkBranch,
           image: config.image,
-          env,
+          env: request.env,
           logDir: context.runDir,
+          ...(request.outputDir !== undefined ? { outputDir: request.outputDir } : {}),
         }),
       );
     })
@@ -49,10 +69,10 @@ export async function checksOn(context: RunContext, request: CheckRequest): Prom
       return null;
     });
   if (worker === null) return null;
-  let outcome: CheckOutcome | null = null;
+  let outcome: T | null = null;
   let preserved = false;
   try {
-    outcome = await checksIn(context, worker, request);
+    outcome = await use(worker);
   } catch (error) {
     await context.noteFailure(error, request.subtaskId);
   } finally {

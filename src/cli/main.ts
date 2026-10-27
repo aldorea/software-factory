@@ -43,7 +43,7 @@ export interface CliEnv {
 const COMMANDS = ["refine", "approve", "validate", "run"];
 const USAGE = [
   `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`,
-  "       factory run <issue> [target-repo] [--worker-agent <agent>:<model>] [--verifier-agent <agent>:<model>]",
+  "       factory run <issue> [target-repo] [--worker-agent <agent>:<model>] [--verifier-agent <agent>:<model>] [--tester-agent <agent>:<model>]",
   "       factory stats [target-repo]",
   "       factory init [target-repo]",
 ].join("\n");
@@ -101,7 +101,7 @@ function parseCommand(args: string[]): Command | null {
       args,
       allowPositionals: true,
       strict: true,
-      options: { "worker-agent": { type: "string" }, "verifier-agent": { type: "string" } },
+      options: { "worker-agent": { type: "string" }, "verifier-agent": { type: "string" }, "tester-agent": { type: "string" } },
     });
   } catch {
     return null;
@@ -113,9 +113,11 @@ function parseCommand(args: string[]): Command | null {
   }
   const workers = parsed.values["worker-agent"];
   const verifier = parsed.values["verifier-agent"];
+  const tester = parsed.values["tester-agent"];
   const flags: RoleFlags = {
     ...(workers !== undefined ? { workers } : {}),
     ...(verifier !== undefined ? { verifier } : {}),
+    ...(tester !== undefined ? { tester } : {}),
   };
   if (command !== "run" && Object.keys(flags).length > 0) return null;
   return { command, issue, ...(repoArg !== undefined ? { repoArg } : {}), flags };

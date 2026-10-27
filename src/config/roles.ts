@@ -3,11 +3,12 @@ import { AGENT_KINDS, missingRequirements } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { RoleChoice } from "./config.ts";
 
-export const ROLES: Role[] = ["workers", "verifier"];
+export const ROLES: Role[] = ["workers", "verifier", "tester"];
 
 export const ROLE_FLAGS: Record<Role, string> = {
   workers: "--worker-agent",
   verifier: "--verifier-agent",
+  tester: "--tester-agent",
 };
 
 export const CREDENTIAL_VARIABLES: Record<AgentKind, string> = {

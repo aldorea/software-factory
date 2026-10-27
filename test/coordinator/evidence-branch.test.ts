@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { exec } from "../../src/workers/sh.ts";
 import type { AttemptScript } from "../fakes/worker-runner.ts";
-import { BRANCH, CONFIG, git, harness, targetRepo, temp, WITH_HUMAN_CRITERION, type Target } from "./harness.ts";
+import { BRANCH, CONFIG, git, harness, specText, targetRepo, temp, WITH_HUMAN_CRITERION, type Target } from "./harness.ts";
 
 afterEach(() => temp.removeAll());
 
@@ -28,14 +28,14 @@ async function remoteFiles(target: Target, ref: string): Promise<string[]> {
 }
 
 describe("the evidence branch", () => {
-  it("should push the attachments of each human criterion to factory-evidence/<n> under a folder per run and criterion", async () => {
+  it("should push the attachments of each human criterion and the evidence of the acceptance tester to factory-evidence/<n> under a folder per run and criterion", async () => {
     const target = await withAttachments();
     const { run } = harness(target, writes("png-of-the-greeting\n"));
 
     const report = await run();
 
     const folder = `${report.log.runId}/A2`;
-    expect(await remoteFiles(target, EVIDENCE_BRANCH)).toEqual([`${folder}/A2.png`]);
+    expect(await remoteFiles(target, EVIDENCE_BRANCH)).toEqual([`${folder}/A2.png`, `${report.log.runId}/tester/verification/A1/steps.txt`]);
     expect(await git(target.remoteDir, "show", `${EVIDENCE_BRANCH}:${folder}/A2.png`)).toBe("png-of-the-greeting");
   });
 
@@ -89,7 +89,9 @@ describe("the evidence branch", () => {
     expect(await git(target.remoteDir, "rev-parse", `${secondCommit}^`)).toBe(firstCommit);
     expect(await remoteFiles(target, EVIDENCE_BRANCH)).toEqual([
       `${firstReport.log.runId}/A2/A2.png`,
+      `${firstReport.log.runId}/tester/verification/A1/steps.txt`,
       `${secondReport.log.runId}/A2/A2.png`,
+      `${secondReport.log.runId}/tester/verification/A1/steps.txt`,
     ]);
     expect(await git(target.remoteDir, "show", `${firstCommit}:${firstReport.log.runId}/A2/A2.png`)).toBe("png-of-the-first-run");
     expect(target.github.pullRequests).toHaveLength(1);
@@ -113,13 +115,37 @@ describe("the evidence branch", () => {
     expect(await remoteFiles(target, EVIDENCE_BRANCH)).toContain(`${firstReport.log.runId}/A2/A2.png`);
   });
 
-  it("should neither create nor push the branch when no human criterion has attachments", async () => {
-    const withoutAttachments = await targetRepo({ ...WITH_HUMAN_CRITERION });
+  it("should not take a symlink among the attachments, because its target is a file of the host that must not reach the evidence branch", async () => {
+    const secret = join(await temp.make("host-secret-"), "id_rsa");
+    await writeFile(secret, "PRIVATE KEY OF THE HOST\n");
+    const target = await targetRepo({
+      ...WITH_HUMAN_CRITERION,
+      config: WITH_ATTACHMENTS.replace("cp src/{{id}}.png test-results/", `cp src/{{id}}.png test-results/ && ln -s ${secret} test-results/key.png`),
+    });
+    const { run } = harness(target, writes("png-of-the-greeting\n"));
+
+    const report = await run();
+
+    expect(report.log.verification?.humanCriteria[0]?.attachments).toEqual(["attachments/A2/A2.png"]);
+    expect(await remoteFiles(target, EVIDENCE_BRANCH)).not.toContain(`${report.log.runId}/A2/key.png`);
+  });
+
+  it("should neither create nor push the branch when no human criterion has attachments and no acceptance tester ran", async () => {
+    const withoutAttachments = await targetRepo({
+      spec: specText({
+        files: { A1: ["src/greeting.txt"] },
+        base: null,
+        subtasks: [{ id: "S1", criteria: ["A1"], scope: ["src/"], dependsOn: [], testChanges: [] }],
+        criteria: { A1: { evidence: "human", level: "integration", reason: "Looks are subjective" } },
+      }),
+    });
     const bare = harness(withoutAttachments, writes("png-of-the-greeting\n"));
 
     const report = await bare.run();
 
-    expect(report.log.verification?.humanCriteria).toEqual([{ id: "A2", reason: "Looks are subjective", attachments: [] }]);
+    expect(report.log.verification?.humanCriteria).toEqual([{ id: "A1", reason: "Looks are subjective", attachments: [] }]);
+    expect(report.log.verification?.tester).toBeUndefined();
+    expect(bare.runner.workers.some((worker) => worker.spec.id.endsWith("-tester"))).toBe(false);
     expect(report.log.evidence).toBeUndefined();
     expect(await git(withoutAttachments.remoteDir, "branch", "--list", EVIDENCE_BRANCH)).toBe("");
     expect(await git(withoutAttachments.repoDir, "branch", "--list", EVIDENCE_BRANCH)).toBe("");
