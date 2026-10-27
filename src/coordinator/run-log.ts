@@ -75,12 +75,9 @@ export interface BlockRecord {
   lastFailure?: string;
 }
 
-export interface RunBlockRecord {
-  type: "integration-check";
-  reason: string;
-  sha: string;
-  checks: CheckRecord[];
-}
+export type RunBlockRecord =
+  | { type: "integration-check"; reason: string; sha: string; checks: CheckRecord[] }
+  | { type: "default-branch-conflict"; reason: string; sha: string; files: string[] };
 
 export interface FollowUpRecord {
   round: number;

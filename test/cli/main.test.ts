@@ -73,6 +73,7 @@ async function targetRepo(spec: string, config: string | null = CONFIG): Promise
   await writeFile(join(dir, "specs", "42.md"), spec);
   await git(dir, "add", ".");
   await git(dir, "commit", "-q", "-m", "Spec #42");
+  await git(dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
   return dir;
 }
 
@@ -84,6 +85,7 @@ async function mainRepo(): Promise<string> {
   await writeFile(join(dir, "README.md"), "# target\n");
   await git(dir, "add", ".");
   await git(dir, "commit", "-q", "-m", "init");
+  await git(dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
   return dir;
 }
 
@@ -369,5 +371,84 @@ describe("factory CLI", () => {
     expect(await main(["refine", "42"], env)).toBe(1);
     expect(launches).toHaveLength(0);
     expect(err.join("\n")).toContain("issue #42 does not exist");
+  });
+});
+
+describe("factory CLI: the default branch of the target repo", () => {
+  async function bareRemote(repoDir: string, head: string): Promise<string> {
+    const remoteDir = await temp.make("cli-remote-");
+    await execOk("git", ["init", "-q", "--bare", "-b", head, remoteDir]);
+    await git(repoDir, "remote", "set-url", "origin", remoteDir).catch(() => git(repoDir, "remote", "add", "origin", remoteDir));
+    return remoteDir;
+  }
+
+  const saved = () => new FakeGitHub([{ number: 42, title: "Saved searches", body: "" }]);
+
+  it("should start the integration branch from the local copy of the default branch that origin/HEAD names, with no fetch", async () => {
+    const repoDir = await mainRepo();
+    await git(repoDir, "branch", "-m", "main", "trunk");
+    await bareRemote(repoDir, "trunk");
+    await git(repoDir, "push", "-q", "origin", "trunk");
+    await git(repoDir, "remote", "set-head", "origin", "--auto");
+    await git(repoDir, "commit", "-q", "--allow-empty", "-m", "Only on the local trunk");
+    const { env } = cli(repoDir, saved());
+
+    expect(await main(["refine", "42"], env)).toBe(0);
+
+    const worktree = join(repoDir, ".factory", "worktrees", "42-saved-searches");
+    expect(await git(worktree, "rev-parse", "HEAD")).toBe(await git(repoDir, "rev-parse", "trunk"));
+    expect(await git(worktree, "rev-parse", "HEAD")).not.toBe(await git(repoDir, "rev-parse", "origin/trunk"));
+  });
+
+  it("should ask GitHub for a pull request whose base is the default branch", async () => {
+    const repoDir = await targetRepo(ONE_SUBTASK_SPEC);
+    await bareRemote(repoDir, "trunk");
+    await git(repoDir, "branch", "trunk");
+    await git(repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk");
+    const github = new FakeGitHub([{ number: 42, title: "x", body: issueBody }]);
+    const { env } = cli(repoDir, github);
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    expect(github.pullRequests.map((pullRequest) => pullRequest.base)).toEqual(["trunk"]);
+  });
+
+  it("should stop refine and run with the command that sets origin/HEAD when it is not set, as after git remote add", async () => {
+    const refineRepo = await mainRepo();
+    await git(refineRepo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+    const refining = cli(refineRepo, saved());
+    const runRepo = await targetRepo(ONE_SUBTASK_SPEC);
+    await bareRemote(runRepo, "main");
+    await git(runRepo, "branch", "main");
+    await git(runRepo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+    const running = cli(runRepo);
+    expect(await main(["approve", "42"], running.env)).toBe(0);
+
+    expect(await main(["refine", "42"], refining.env)).toBe(1);
+    expect(await main(["run", "42"], running.env)).toBe(1);
+
+    expect(refining.err.join("\n")).toContain("origin/HEAD is not set");
+    expect(refining.err.join("\n")).toContain("git remote set-head origin --auto");
+    expect(running.err.join("\n")).toContain("git remote set-head origin --auto");
+    expect(refining.launches).toHaveLength(0);
+    expect(running.runner.workers).toHaveLength(0);
+  });
+
+  it("should stop refine and run with a message of its own when the default branch has no local copy", async () => {
+    const refineRepo = await mainRepo();
+    await git(refineRepo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk");
+    const refining = cli(refineRepo, saved());
+    const runRepo = await targetRepo(ONE_SUBTASK_SPEC);
+    await bareRemote(runRepo, "main");
+    const running = cli(runRepo);
+    expect(await main(["approve", "42"], running.env)).toBe(0);
+
+    expect(await main(["refine", "42"], refining.env)).toBe(1);
+    expect(await main(["run", "42"], running.env)).toBe(1);
+
+    expect(refining.err.join("\n")).toContain("the default branch trunk has no local copy");
+    expect(running.err.join("\n")).toContain("the default branch main has no local copy");
+    expect(running.runner.workers).toHaveLength(0);
   });
 });

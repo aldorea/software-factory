@@ -86,6 +86,7 @@ export async function targetRepo(options: { config?: string | null; issueBody?: 
   await git(repoDir, "config", "user.name", "t");
   await git(repoDir, "config", "user.email", "t@t");
   await git(repoDir, "remote", "add", "origin", remoteDir);
+  await git(repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
   await writeFile(join(repoDir, "README.md"), "# greeting\n");
   await writeFile(join(repoDir, ".gitignore"), ".factory/logs/\n.factory/worktrees/\n");
   const config = options.config === undefined ? CONFIG : options.config;

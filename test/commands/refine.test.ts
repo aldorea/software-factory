@@ -22,6 +22,7 @@ async function targetRepo(): Promise<string> {
   await writeFile(join(dir, "README.md"), "# target\n");
   await git(dir, "add", ".");
   await git(dir, "commit", "-q", "-m", "init");
+  await git(dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
   return dir;
 }
 

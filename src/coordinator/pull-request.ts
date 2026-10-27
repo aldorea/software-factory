@@ -91,7 +91,10 @@ function subtaskLine(subtask: SubtaskRecord): string {
 function blockSections(log: RunLog): string[] {
   const { block } = log;
   if (block === undefined) return [];
-  const outputs = block.checks.flatMap((check) => (check.outputTail !== undefined ? [outputSection(`check ${check.name}`, check.outputTail)] : []));
+  const outputs =
+    block.type === "integration-check"
+      ? block.checks.flatMap((check) => (check.outputTail !== undefined ? [outputSection(`check ${check.name}`, check.outputTail)] : []))
+      : [];
   return [[`## Blocks`, `**${block.type}** on \`${block.sha.slice(0, 12)}\`: ${block.reason}`, ...outputs].join("\n\n")];
 }
 

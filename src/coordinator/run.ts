@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { pushBranch } from "../git/repo.ts";
+import { pushBranch, REMOTE } from "../git/repo.ts";
 import type { PullRequest } from "../github/github.ts";
 import { emptyUsage } from "../workers/agent-adapter.ts";
 import { WorkerLayerError } from "../workers/failures.ts";
@@ -7,6 +7,7 @@ import { runId as makeRunId, runResult } from "./decisions.ts";
 import { testFilesAt } from "./diff.ts";
 import { requestCheckPaths } from "./gate.ts";
 import { evidenceBranchName, evidenceFiles, publishEvidence } from "./evidence-branch.ts";
+import { includeDefaultBranch } from "./default-branch.ts";
 import { verifyIntegration } from "./integrated-verification.ts";
 import { adjustMaxParallel } from "./parallelism.ts";
 import type { RunPorts } from "./ports.ts";
@@ -23,8 +24,7 @@ import { startSubtask } from "./subtask-work.ts";
 export type { RunRequest } from "./run-context.ts";
 export { mergeMessage } from "./subtask-work.ts";
 
-export const REMOTE = "origin";
-export const PULL_REQUEST_BASE = "main";
+export { REMOTE } from "../git/repo.ts";
 
 export interface RunReport {
   result: RunLog["result"];
@@ -115,6 +115,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
 
   await inWaves(plan, log.maxParallel, (subtask, slot) => startSubtask(context, subtask, slot));
   if (!paused(context)) await verifyIntegration(context, subtasks);
+  await includeDefaultBranch(context, subtasks);
   await publishHumanEvidence(context);
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();
@@ -123,10 +124,10 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   await pushBranch(request.repoDir, REMOTE, branch);
   const text = renderPullRequest(issue, log);
   const draft = log.result !== "ready";
-  const existing = await ports.github.findPullRequest(branch, PULL_REQUEST_BASE);
+  const existing = await ports.github.findPullRequest(branch, prepared.defaultBranch);
   const pullRequest = existing
     ? await ports.github.updatePullRequest(existing.number, { ...text, draft })
-    : await ports.github.createPullRequest({ ...text, head: branch, base: PULL_REQUEST_BASE, draft });
+    : await ports.github.createPullRequest({ ...text, head: branch, base: prepared.defaultBranch, draft });
   log.pullRequest = { number: pullRequest.number, url: pullRequest.url, draft: pullRequest.draft };
   await save();
 

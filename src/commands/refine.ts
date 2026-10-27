@@ -2,10 +2,9 @@ import { join } from "node:path";
 import type { InteractiveLaunch } from "../cli/launch.ts";
 import type { GitHub } from "../github/github.ts";
 import { addWorktree, addWorktreeForBranch, listWorktrees, revParse } from "../workers/git.ts";
-import { findIntegrationBranch } from "../git/repo.ts";
+import { defaultBranch, findIntegrationBranch } from "../git/repo.ts";
 
 const MAX_SLUG_LENGTH = 40;
-const BASE_BRANCH = "main";
 
 export function refineLaunch(input: { worktree: string; issue: number; factoryRoot: string }): InteractiveLaunch {
   return {
@@ -36,7 +35,7 @@ export async function prepareRefinement(input: {
     await addWorktreeForBranch(input.repoDir, worktree, branch);
     return { branch, worktree, created: false };
   }
-  await addWorktree(input.repoDir, worktree, branch, await revParse(input.repoDir, BASE_BRANCH));
+  await addWorktree(input.repoDir, worktree, branch, await revParse(input.repoDir, await defaultBranch(input.repoDir)));
   return { branch, worktree, created: true };
 }
 

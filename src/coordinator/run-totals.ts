@@ -73,7 +73,8 @@ function costOf(log: RunLog, now: Date): CostRecord {
 
 function frictionOf(log: RunLog): FrictionRecord {
   const friction = emptyFriction();
-  if (log.block !== undefined) friction.blocks[log.block.type] += 1;
+  if (log.block?.type === "integration-check") friction.blocks["integration-check"] += 1;
+  if (log.block?.type === "default-branch-conflict") friction.integrationConflicts += 1;
   for (const subtask of log.subtasks) {
     if (subtask.state === "blocked" && subtask.blockType !== undefined) friction.blocks[subtask.blockType] += 1;
     friction.scopeExtensions += subtask.scopeExtensions.length;

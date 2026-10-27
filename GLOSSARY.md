@@ -69,6 +69,10 @@ The paths that only the base subtask may change: schema, lockfile, package manif
 **Scope extension**:
 A path the coordinator adds to a subtask's scope during a run, recorded in the run log and the pull request, never in the spec.
 
+**Default branch**:
+The branch of the target repo that `origin/HEAD` points to. The integration branch starts from its local copy, and the pull request targets it.
+_Avoid_: main, trunk, master
+
 **Integration branch**:
 The branch of a run, `factory/<n>-<slug>`, where each accepted subtask merges and from which the pull request is opened.
 

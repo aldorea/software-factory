@@ -74,7 +74,7 @@ Each criterion has one type of evidence:
 The coordinator publishes these attachments on the **evidence branch** `factory-evidence/<n>`, because a path under `.factory/logs/` is outside git and a reviewer on GitHub cannot open it:
 
 - After the integrated verification, the coordinator, on the host, commits the attachments of each human criterion under `<run-id>/<criterion-id>/` and pushes the branch as it pushes the integration branch. No container pushes.
-- The branch has no common history with `main` and is never merged.
+- The branch has no common history with the default branch and is never merged.
 - A run adds a commit on top of the branch and never rewrites the earlier ones. The PR links each human criterion to its files at the pushed commit, so the links keep working after later runs. Images render inline.
 - A run with no attachments does not create the branch.
 - A failure to publish is recorded in `run.json` (`evidence.failure`), stated in the PR, and keeps the PR a draft.
@@ -273,8 +273,10 @@ The independent verifier and the acceptance tester do not count for this ceiling
 
 ### Git
 
-- The integration branch is `factory/<n>-<slug>`, from `main`. The PR goes to `main`.
+- The integration branch is `factory/<n>-<slug>`, from the local copy of the default branch, with no `git fetch`. The PR goes to the default branch.
+- A missing `origin/HEAD` stops `refine` and `run` with the command that sets it (`git remote set-head origin --auto`). A default branch with no local copy stops them with a message of its own.
 - Each subtask has its own branch from the integration branch.
+- Before the PR is ready, the integration branch must contain the local head of the default branch. When the default branch moved during the run, the coordinator merges it and runs the integrated verification again on the result. A conflict blocks the run with a `default-branch-conflict` block in `run.json` and in the PR, and counts as a conflict at integration.
 
 ## Measurement
 

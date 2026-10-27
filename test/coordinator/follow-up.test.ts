@@ -247,7 +247,8 @@ describe("factory run: follow-up tasks", () => {
     const sha = await git(repo.repoDir, "rev-parse", BRANCH);
     expect(report.log.block?.type).toBe("integration-check");
     expect(report.log.block?.sha).toBe(sha);
-    expect(report.log.block?.checks.map((check) => [check.name, check.outputTail])).toEqual([["integrated", "fails only once integrated"]]);
+    expect(report.log.block).toMatchObject({ checks: [{ name: "integrated", outputTail: "fails only once integrated" }] });
+    expect(report.log.block?.type === "integration-check" ? report.log.block.checks : []).toHaveLength(1);
     expect(report.log.friction.blocks["integration-check"]).toBe(1);
     expect(report.log.subtasks.every((entry) => entry.state === "merged")).toBe(true);
     const body = repo.github.pullRequests[0]?.body ?? "";
