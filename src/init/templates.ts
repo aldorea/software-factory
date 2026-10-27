@@ -84,6 +84,8 @@ USER root
 RUN npm install -g pnpm@\${PNPM_VERSION} \\
   && rm -rf /root/.npm
 
+ENV npm_config_store_dir=/home/agent/.pnpm-store
+
 USER agent
 RUN pnpm --version
 `;

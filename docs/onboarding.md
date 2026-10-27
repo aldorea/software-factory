@@ -46,6 +46,7 @@ What the generated files assume, and what you may need to change:
 - **The image name** is `<repo folder>-factory-worker:dev`, with the folder name cut to the characters that Docker allows.
 - **Evidence and app.** The generated config has no `app` and no `evidence` commands. Add them before a run that has Playwright or request criteria: a criterion whose type has no command stops the run before any worker starts.
 - **Anything else the image needs** (Playwright, a browser) goes in `.factory/Dockerfile`.
+- **The pnpm store stays outside the worktree.** The worktree is a bind mount, so pnpm would put its store inside it, leave the worktree dirty and keep the subtask branch checked out. The generated pnpm Dockerfile sets `npm_config_store_dir=/home/agent/.pnpm-store`; a Dockerfile written by hand needs the same line.
 
 A mistake in the config is reported field by field when it loads. `factory validate <issue>` loads it too.
 

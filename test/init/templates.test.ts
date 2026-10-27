@@ -136,6 +136,10 @@ describe("the generated .factory/Dockerfile", () => {
     expect(renderDockerfile("pnpm")).toContain("npm install -g pnpm@");
   });
 
+  it("should keep the pnpm store out of the bind-mounted worktree, because a store there leaves the worktree dirty and keeps its branch checked out", () => {
+    expect(renderDockerfile("pnpm")).toMatch(/^ENV npm_config_store_dir=\/home\/agent\/\.pnpm-store$/m);
+  });
+
   it("should not install pnpm when the lockfile names npm, because the base image already has npm", () => {
     const dockerfile = renderDockerfile("npm");
 
