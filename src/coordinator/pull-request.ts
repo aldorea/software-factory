@@ -4,7 +4,15 @@ import { criteriaText } from "../spec/issue.ts";
 import type { RoleChoice } from "../config/config.ts";
 import { evidencePath } from "./evidence-branch.ts";
 import { outputSection } from "./failures.ts";
-import type { AgentChangeRecord, CheckRecord, CriterionRecord, HumanCriterionRecord, RunLog, SubtaskRecord } from "./run-log.ts";
+import type {
+  AgentChangeRecord,
+  CheckRecord,
+  CriterionRecord,
+  HumanCriterionRecord,
+  RunLog,
+  SubtaskRecord,
+  TesterRecord,
+} from "./run-log.ts";
 
 export interface PullRequestText {
   title: string;
@@ -29,22 +37,25 @@ export function renderPullRequest(issue: Issue, log: RunLog): PullRequestText {
 const ROLE_NAMES: Record<AgentChangeRecord["role"], string> = {
   workers: "the workers",
   verifier: "the independent verifier",
+  tester: "the acceptance tester",
 };
 
 function agentsSection(log: RunLog): string {
-  const { workers, verifier, changes } = log.agents;
+  const { workers, verifier, tester, changes } = log.agents;
   const lines = [
     `- Workers: ${choiceText(workers)}`,
     ...(verifier ? [`- Independent verifier: ${choiceText(verifier)}`] : []),
+    ...(tester ? [`- Acceptance tester: ${choiceText(tester)}`] : []),
     ...changes.map(
       (change) => `- On resume at ${change.at}, ${ROLE_NAMES[change.role]} changed from ${choiceText(change.from)} to ${choiceText(change.to)}`,
     ),
   ];
-  const shared =
-    verifier !== undefined && verifier.agent === workers.agent && verifier.model === workers.model
-      ? ["\nThe independent verifier used the same model as the workers: its independence rests on its clean context alone."]
-      : [];
-  return [`## Agents\n\n${lines.join("\n")}`, ...shared].join("\n");
+  const sameModel = (choice: RoleChoice | undefined) => choice !== undefined && choice.agent === workers.agent && choice.model === workers.model;
+  const shared = [
+    ...(sameModel(verifier) ? ["The independent verifier used the same model as the workers: its independence rests on its clean context alone."] : []),
+    ...(sameModel(tester) ? ["The acceptance tester used the same model as the workers: its independence rests on its clean context alone."] : []),
+  ];
+  return [`## Agents\n\n${lines.join("\n")}`, ...(shared.length > 0 ? [`\n${shared.join("\n")}`] : [])].join("\n");
 }
 
 function choiceText(choice: RoleChoice): string {
@@ -62,8 +73,13 @@ function resultLine(log: RunLog): string {
   if (blocked.length > 0) failed.push(`subtasks not merged: ${blocked.join(", ")}`);
   if (log.verification?.environment !== undefined) {
     failed.push(`the integrated verification failed: ${log.verification.environment}`);
+  } else if (log.verification?.tester?.error !== undefined) {
+    failed.push(`the acceptance tester gave no usable verdict: ${log.verification.tester.error.replace(/[.\s]*$/, "")}`);
   } else if (log.verification && !log.verification.passed) {
-    const failing = log.verification.criteria.filter((criterion) => !criterion.passed).map((criterion) => criterion.id);
+    const rejected = new Set((log.verification.tester?.verdicts ?? []).filter((verdict) => !verdict.passed).map((verdict) => verdict.id));
+    const failing = log.verification.criteria
+      .filter((criterion) => !criterion.passed || rejected.has(criterion.id))
+      .map((criterion) => criterion.id);
     failed.push(
       `the integrated verification failed${failing.length > 0 ? ` (criteria not passing: ${failing.join(", ")})` : ""}`,
     );
@@ -112,6 +128,7 @@ function verificationSection(log: RunLog): string {
   const lines = [
     ...log.verification.checks.map(checkLine),
     ...(log.verification.environment !== undefined ? [`- [ ] The app: ${log.verification.environment}`] : []),
+    ...(log.verification.tester?.error !== undefined ? [`- [ ] The acceptance tester: ${log.verification.tester.error}`] : []),
   ];
   return `## Integrated verification on \`${log.verification.sha.slice(0, 12)}\`\n\n${lines.join("\n")}`;
 }
@@ -126,9 +143,9 @@ function criteriaSections(issue: Issue, log: RunLog): string[] {
   if (!log.verification) return [];
   const texts = criteriaText(issue.body);
   const label = (id: string) => (texts[id] ?? id).replace(/[.\s]*$/, "");
-  const sections = [
-    `## Criteria on \`${log.verification.sha.slice(0, 12)}\`\n\n${log.verification.criteria.map((criterion) => criterionLine(criterion, label)).join("\n")}`,
-  ];
+  const tester = log.verification.tester;
+  const lines = log.verification.criteria.map((criterion) => criterionLine(criterion, label, tester, log));
+  const sections = [`## Criteria on \`${log.verification.sha.slice(0, 12)}\`\n\n${lines.join("\n")}`];
   if (log.verification.humanCriteria.length > 0) {
     const lines = log.verification.humanCriteria.map((criterion) => humanLine(criterion, label, log));
     sections.push(`## Human criteria for your review\n\n${[...evidenceNotes(log), ...lines].join("\n")}`);
@@ -136,25 +153,33 @@ function criteriaSections(issue: Issue, log: RunLog): string[] {
   return sections;
 }
 
-function criterionLine(criterion: CriterionRecord, label: (id: string) => string): string {
+function criterionLine(criterion: CriterionRecord, label: (id: string) => string, tester: TesterRecord | undefined, log: RunLog): string {
   const evidence = `${label(criterion.id)}. Evidence: ${criterion.evidence} \`${criterion.command}\``;
-  return criterion.passed ? `- [x] ${evidence}` : `- [ ] ${evidence} failed with exit code ${criterion.exitCode}`;
+  if (!criterion.passed) return `- [ ] ${evidence} failed with exit code ${criterion.exitCode}`;
+  const verdict = tester?.verdicts.find((entry) => entry.id === criterion.id);
+  if (verdict === undefined) return `- [x] ${evidence}`;
+  const observation = `  Acceptance tester: ${verdict.passed ? "passed" : "failed"}. ${verdict.observation.replace(/[.\s]*$/, "")}. Evidence:`;
+  return `- [${verdict.passed ? "x" : " "}] ${evidence}${verdict.passed ? "" : " passed"}\n${observation} ${filesText(criterion.id, verdict.evidence, log)}`;
 }
 
 function humanLine(criterion: HumanCriterionRecord, label: (id: string) => string, log: RunLog): string {
   const head = `- [ ] ${label(criterion.id)}. Reason: ${criterion.reason.replace(/[.\s]*$/, "")}. Attachments:`;
   if (criterion.attachments.length === 0) return `${head} none`;
+  return `${head} ${filesText(criterion.id, criterion.attachments, log)}`;
+}
+
+function filesText(id: string, files: string[], log: RunLog): string {
   const evidence = log.evidence;
   if (evidence?.failure === undefined && evidence?.commit !== undefined && evidence.repositoryUrl !== undefined) {
-    const links = criterion.attachments.map((attachment) => {
-      const name = basename(attachment);
-      const url = evidenceUrl(evidence.repositoryUrl ?? "", evidence.commit ?? "", evidencePath(log.runId, criterion.id, attachment));
+    const links = files.map((file) => {
+      const name = basename(file);
+      const url = evidenceUrl(evidence.repositoryUrl ?? "", evidence.commit ?? "", evidencePath(log.runId, id, file));
       return { name, url, image: IMAGE_EXTENSIONS.test(name) };
     });
     const images = links.filter((link) => link.image).map((link) => `\n  ![${link.name}](${link.url}?raw=true)`);
-    return `${head} ${links.map((link) => `[${link.name}](${link.url})`).join(", ")}${images.join("")}`;
+    return `${links.map((link) => `[${link.name}](${link.url})`).join(", ")}${images.join("")}`;
   }
-  return `${head} ${criterion.attachments.map((path) => `\`.factory/logs/${log.runId}/${path}\``).join(", ")}`;
+  return files.map((path) => `\`.factory/logs/${log.runId}/${path}\``).join(", ");
 }
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg)$/i;

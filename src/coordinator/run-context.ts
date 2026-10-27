@@ -27,6 +27,7 @@ export interface Prepared {
   humanCriteria: string[];
   workers: RoleChoice;
   verifier: RoleChoice;
+  tester: RoleChoice;
   credential: string;
 }
 

@@ -59,6 +59,37 @@ export interface FakeWorkerRecord {
 
 export type AttemptScript = (call: AttemptCall) => ScriptedAttempt | Promise<ScriptedAttempt>;
 
+export interface TesterCall extends AttemptCall {
+  criteria: string[];
+  evidenceDir: string;
+}
+
+export interface ScriptedTesterAttempt {
+  evidence?: Record<string, string>;
+  outcome?: AttemptOutcome;
+  usage?: Partial<TokenUsage>;
+}
+
+export type TesterScript = (call: TesterCall) => ScriptedTesterAttempt | Promise<ScriptedTesterAttempt>;
+
+export interface ReportedVerdict {
+  id: string;
+  verdict: "pass" | "fail";
+  observation: string;
+  evidence: string[];
+}
+
+export function testerReport(verdicts: ReportedVerdict[]): AttemptOutcome {
+  return { kind: "completed", summary: `I used the app.\n\n\`\`\`json\n${JSON.stringify({ criteria: verdicts })}\n\`\`\`` };
+}
+
+export const passingTester: TesterScript = ({ criteria }) => ({
+  evidence: Object.fromEntries(criteria.map((id) => [`${id}/steps.txt`, `curl the app for ${id}\n200 OK\n`])),
+  outcome: testerReport(
+    criteria.map((id) => ({ id, verdict: "pass", observation: `The app did what ${id} says.`, evidence: [`${id}/steps.txt`] })),
+  ),
+});
+
 export interface WorkerFaults {
   start?: (spec: WorkerSpec) => Error | undefined;
   attempt?: (call: AttemptCall) => Error | undefined;
@@ -71,9 +102,12 @@ export class FakeWorkerRunner implements WorkerRunner {
   private readonly script: AttemptScript;
   private readonly faults: WorkerFaults;
 
-  constructor(script: AttemptScript = () => ({}), faults: WorkerFaults = {}) {
+  private readonly tester: TesterScript;
+
+  constructor(script: AttemptScript = () => ({}), faults: WorkerFaults = {}, tester: TesterScript = passingTester) {
     this.script = script;
     this.faults = faults;
+    this.tester = tester;
   }
 
   async start(spec: WorkerSpec): Promise<Worker> {
@@ -82,7 +116,7 @@ export class FakeWorkerRunner implements WorkerRunner {
     const worktreePath = await prepareWorktree(spec);
     const record: FakeWorkerRecord = { spec, worktreePath, attempts: [], execs: [], closed: false };
     this.workers.push(record);
-    return new FakeWorker(record, await mergeBase(spec.repoDir, spec.baseRef, spec.branch), this.script, this.faults);
+    return new FakeWorker(record, await mergeBase(spec.repoDir, spec.baseRef, spec.branch), this.script, this.faults, this.tester);
   }
 }
 
@@ -91,12 +125,14 @@ class FakeWorker implements Worker {
   private readonly baseSha: string;
   private readonly script: AttemptScript;
   private readonly faults: WorkerFaults;
+  private readonly tester: TesterScript;
 
-  constructor(record: FakeWorkerRecord, baseSha: string, script: AttemptScript, faults: WorkerFaults) {
+  constructor(record: FakeWorkerRecord, baseSha: string, script: AttemptScript, faults: WorkerFaults, tester: TesterScript) {
     this.record = record;
     this.baseSha = baseSha;
     this.script = script;
     this.faults = faults;
+    this.tester = tester;
   }
 
   get spec(): WorkerSpec {
@@ -113,6 +149,7 @@ class FakeWorker implements Worker {
     const attemptFault = this.faults.attempt?.(call);
     if (attemptFault) throw attemptFault;
     const startedAt = new Date();
+    if (this.spec.outputDir !== undefined) return this.test(call, this.spec.outputDir, startedAt);
     const scripted = await this.script(call);
     for (const [path, content] of Object.entries(scripted.files ?? {})) {
       await mkdir(dirname(join(this.worktreePath, path)), { recursive: true });
@@ -129,6 +166,25 @@ class FakeWorker implements Worker {
       outcome: scripted.outcome ?? { kind: "completed", summary: "done" },
       usage: { ...emptyUsage(), ...scripted.usage },
       ...(scripted.plan ? { plan: scripted.plan } : {}),
+      logPath,
+      startedAt,
+      endedAt: new Date(),
+    };
+  }
+
+  private async test(call: AttemptCall, evidenceDir: string, startedAt: Date): Promise<AttemptResult> {
+    const criteria = [...call.prompt.matchAll(/^- (A[0-9]+) \(/gm)].map((match) => match[1] as string);
+    const scripted = await this.tester({ ...call, criteria, evidenceDir });
+    for (const [path, content] of Object.entries(scripted.evidence ?? {})) {
+      await mkdir(dirname(join(evidenceDir, path)), { recursive: true });
+      await writeFile(join(evidenceDir, path), content);
+    }
+    const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${call.number}.jsonl`);
+    await mkdir(this.spec.logDir, { recursive: true });
+    await writeFile(logPath, `${JSON.stringify({ type: "fake-tester", number: call.number })}\n`);
+    return {
+      outcome: scripted.outcome ?? { kind: "completed", summary: "done" },
+      usage: { ...emptyUsage(), ...scripted.usage },
       logPath,
       startedAt,
       endedAt: new Date(),

@@ -32,7 +32,7 @@ export interface EvidenceCommands {
 
 export const ID_PLACEHOLDER = "{{id}}";
 
-export type EnvironmentPurpose = "worker" | "gate" | "verification";
+export type EnvironmentPurpose = "worker" | "gate" | "verification" | "tester";
 
 export interface WorkerEnvironmentContext {
   purpose: EnvironmentPurpose;
@@ -210,7 +210,7 @@ function readEvidence(value: unknown, problems: string[]): EvidenceCommands {
 function readRoles(value: unknown, problems: string[]): Partial<Record<Role, RoleChoice>> {
   if (value === undefined) return {};
   if (!isRecord(value)) {
-    problems.push("roles must give the default agent and model of the workers and the verifier");
+    problems.push("roles must give the default agent and model of the workers, the verifier and the tester");
     return {};
   }
   const roles: Partial<Record<Role, RoleChoice>> = {};

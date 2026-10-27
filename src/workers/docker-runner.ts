@@ -41,7 +41,13 @@ export class DockerWorkerRunner implements WorkerRunner {
     try {
       const envFile = join(secretsDir, "env");
       await writeFile(envFile, toEnvFile(spec.env), { mode: 0o600 });
-      const mounts = ["-v", `${worktreePath}:${worktreePath}`, "-v", `${gitDir}:${gitDir}`];
+      const mounts = [
+        "-v",
+        `${worktreePath}:${worktreePath}`,
+        "-v",
+        `${gitDir}:${gitDir}`,
+        ...(spec.outputDir !== undefined ? ["-v", `${spec.outputDir}:${spec.outputDir}`] : []),
+      ];
       const resources = [
         ...(spec.cpus !== undefined ? ["--cpus", spec.cpus] : []),
         ...(spec.memory !== undefined ? ["--memory", spec.memory] : []),

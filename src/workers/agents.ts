@@ -13,6 +13,7 @@ export const AGENT_KINDS: AgentKind[] = ["claude-code", "opencode"];
 export const ROLE_REQUIREMENTS: Record<Role, (keyof AgentCapabilities)[]> = {
   workers: ["readsTokenUsage", "detectsPlanLimit"],
   verifier: ["deniesEveryTool"],
+  tester: ["readsTokenUsage"],
 };
 
 export function adapterFor(kind: AgentKind): AgentAdapter {

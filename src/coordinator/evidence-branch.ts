@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { pushBranch } from "../git/repo.ts";
 import { exec, execOk } from "../workers/sh.ts";
-import type { HumanCriterionRecord } from "./run-log.ts";
 
 export function evidenceBranchName(issue: number): string {
   return `factory-evidence/${issue}`;
@@ -18,8 +17,13 @@ export interface EvidenceFile {
   path: string;
 }
 
-export function evidenceFiles(runId: string, runDir: string, humanCriteria: HumanCriterionRecord[]): EvidenceFile[] {
-  return humanCriteria.flatMap((criterion) =>
+export interface CriterionFiles {
+  id: string;
+  attachments: string[];
+}
+
+export function evidenceFiles(runId: string, runDir: string, criteria: CriterionFiles[]): EvidenceFile[] {
+  return criteria.flatMap((criterion) =>
     criterion.attachments.map((attachment) => ({
       source: join(runDir, attachment),
       path: evidencePath(runId, criterion.id, attachment),

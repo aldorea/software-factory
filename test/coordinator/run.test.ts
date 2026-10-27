@@ -71,6 +71,7 @@ export default {
   roles: {
     workers: { agent: "claude-code", model: "sonnet" },
     verifier: { agent: "opencode", model: "opencode-go/kimi-k2" },
+    tester: { agent: "claude-code", model: "opus" },
   },
 };
 `;
@@ -251,14 +252,14 @@ describe("factory run for a one-subtask spec", () => {
     expect(runner.workers[0]?.attempts[0]?.agent).toEqual({ kind: "claude-code", model: "sonnet" });
   });
 
-  it("should run the gate and the integrated checks in fresh workers through exec, never in the worker that made the change", async () => {
+  it("should run the gate, the integrated checks and the acceptance tester in fresh workers, never in the worker that made the change", async () => {
     const target = await targetRepo();
     const { run, runner } = harness(target, writesHello);
 
     await run();
 
-    const [worker, gate, verification] = runner.workers;
-    expect(runner.workers).toHaveLength(3);
+    const [worker, gate, verification, tester] = runner.workers;
+    expect(runner.workers).toHaveLength(4);
     expect(worker?.execs).toEqual([]);
     expect(gate?.attempts).toEqual([]);
     expect(gate?.execs).toEqual([
@@ -270,6 +271,9 @@ describe("factory run for a one-subtask spec", () => {
       { command: "grep -q hello src/greeting.txt", exitCode: 0 },
       { command: "grep -q hello src/greeting.txt # A1", exitCode: 0 },
     ]);
+    expect(tester?.spec.id).toMatch(/-verification-tester$/);
+    expect(tester?.attempts).toHaveLength(1);
+    expect(tester?.execs).toEqual([]);
     expect(runner.workers.every((record) => record.closed)).toBe(true);
     expect(await listWorktrees(target.repoDir)).toEqual([{ path: target.repoDir, branch: "main" }]);
   });

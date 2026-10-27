@@ -194,6 +194,18 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("DockerWorkerRunner", { timeo
     }
   });
 
+  it("should mount the output folder at the same path, so the host reads the evidence the container leaves outside the worktree", async () => {
+    const outputDir = await temp.make("toy-evidence-");
+    const worker = await runner.start(await spec("output-dir", { outputDir }));
+    open.push(worker);
+
+    const result = await worker.exec(`mkdir -p ${outputDir}/A1 && echo seen > ${outputDir}/A1/steps.txt`);
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(await readFile(join(outputDir, "A1", "steps.txt"), "utf8")).toBe("seen\n");
+    expect(existsSync(join(worker.worktreePath, "A1"))).toBe(false);
+  });
+
   it.skipIf(!OPENCODE_KEY)("should run OpenCode Go in a container with the key in its environment", async () => {
     const worker = await runner.start(
       await spec("opencode-go", { env: { ...identity, OPENCODE_API_KEY: OPENCODE_KEY ?? "" } }),

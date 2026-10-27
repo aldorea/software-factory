@@ -105,7 +105,7 @@ export async function workOn(
   return outcome;
 }
 
-function pauseRun(context: RunContext, limit: PlanLimitHit): void {
+export function pauseRun(context: RunContext, limit: PlanLimitHit): void {
   const { log, ports } = context;
   if (log.pauseReason !== undefined) return;
   log.pauseReason = `the plan limit of ${limit.agent} was reached: ${limit.message}`;

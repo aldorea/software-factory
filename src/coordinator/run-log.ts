@@ -112,6 +112,26 @@ export interface SubtaskRecord {
   scopeExtensions: string[];
 }
 
+export interface TesterVerdictRecord {
+  id: string;
+  passed: boolean;
+  observation: string;
+  evidence: string[];
+}
+
+export interface TesterRecord {
+  agent: RoleChoice;
+  verdicts: TesterVerdictRecord[];
+  error?: string;
+  logPath?: string;
+}
+
+export interface TesterFailureRecord {
+  sha: string;
+  criterion: string;
+  observation: string;
+}
+
 export interface VerificationRecord {
   sha: string;
   passed: boolean;
@@ -119,6 +139,7 @@ export interface VerificationRecord {
   criteria: CriterionRecord[];
   humanCriteria: HumanCriterionRecord[];
   environment?: string;
+  tester?: TesterRecord;
 }
 
 export interface EvidenceBranchRecord {
@@ -135,7 +156,7 @@ export interface PullRequestRecord {
 }
 
 export interface AgentChangeRecord {
-  role: "workers" | "verifier";
+  role: "workers" | "verifier" | "tester";
   from: RoleChoice;
   to: RoleChoice;
   at: string;
@@ -144,6 +165,7 @@ export interface AgentChangeRecord {
 export interface AgentsRecord {
   workers: RoleChoice;
   verifier?: RoleChoice;
+  tester?: RoleChoice;
   changes: AgentChangeRecord[];
 }
 
@@ -167,6 +189,7 @@ export interface FrictionRecord {
   scopeExtensions: number;
   gateRejections: number;
   verifierRejections: number;
+  testerRejections: number;
   integrationConflicts: number;
 }
 
@@ -202,6 +225,8 @@ export interface RunLog {
   workerLayerFailures: WorkerLayerFailureRecord[];
   subtasks: SubtaskRecord[];
   verification?: VerificationRecord;
+  testerUsage?: Partial<Record<AgentKind, TokenUsage>>;
+  testerFailures?: TesterFailureRecord[];
   block?: RunBlockRecord;
   evidence?: EvidenceBranchRecord;
   pullRequest?: PullRequestRecord;

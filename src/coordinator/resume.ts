@@ -7,7 +7,12 @@ export function resumeDefaults(
 ): Partial<Record<Role, RoleChoice>> {
   if (previous === null || previous.result !== "paused") return configured;
   const verifier = previous.agents.verifier ?? configured.verifier;
-  return { workers: previous.agents.workers, ...(verifier !== undefined ? { verifier } : {}) };
+  const tester = previous.agents.tester ?? configured.tester;
+  return {
+    workers: previous.agents.workers,
+    ...(verifier !== undefined ? { verifier } : {}),
+    ...(tester !== undefined ? { tester } : {}),
+  };
 }
 
 export interface ResumeInput {
@@ -43,6 +48,7 @@ export function resumedLog({ fresh, previous, merged, now }: ResumeInput): RunLo
     agents: {
       workers: fresh.agents.workers,
       ...(fresh.agents.verifier !== undefined ? { verifier: fresh.agents.verifier } : {}),
+      ...(fresh.agents.tester !== undefined ? { tester: fresh.agents.tester } : {}),
       changes: [...previous.agents.changes, ...agentChanges(previous, fresh, now)],
     },
     cost: { ...previous.cost, pausedMs: previous.cost.pausedMs + Math.max(0, now.getTime() - pausedAt) },
@@ -71,10 +77,10 @@ function agentChanges(previous: RunLog, fresh: RunLog, now: Date): AgentChangeRe
   if (!same(previous.agents.workers, fresh.agents.workers)) {
     changes.push({ role: "workers", from: previous.agents.workers, to: fresh.agents.workers, at });
   }
-  const before = previous.agents.verifier;
-  const after = fresh.agents.verifier;
-  if (before !== undefined && after !== undefined && !same(before, after)) {
-    changes.push({ role: "verifier", from: before, to: after, at });
+  for (const role of ["verifier", "tester"] as const) {
+    const before = previous.agents[role];
+    const after = fresh.agents[role];
+    if (before !== undefined && after !== undefined && !same(before, after)) changes.push({ role, from: before, to: after, at });
   }
   return changes;
 }

@@ -13,6 +13,7 @@ export interface WorkerSpec {
   image: string;
   env: Record<string, string>;
   logDir: string;
+  outputDir?: string;
   cpus?: string;
   memory?: string;
 }

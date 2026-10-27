@@ -101,6 +101,7 @@ describe("the run record written by factory run", () => {
       scopeExtensions: 0,
       gateRejections: 3,
       verifierRejections: 0,
+      testerRejections: 0,
       integrationConflicts: 0,
     });
   });

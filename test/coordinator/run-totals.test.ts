@@ -115,6 +115,7 @@ describe("the totals of a run record", () => {
       scopeExtensions: 2,
       gateRejections: 2,
       verifierRejections: 1,
+      testerRejections: 0,
       integrationConflicts: 1,
     });
   });
@@ -139,6 +140,33 @@ describe("the tokens of an agent in a run", () => {
 
     expect(agentRunTokens(record, "opencode")).toBe(157);
     expect(agentRunTokens(record, "claude-code")).toBe(10);
+  });
+
+  it("should count the work of the acceptance tester in the run limit of its agent, not in a subtask", () => {
+    const record = log([subtask("S1", { attempts: [attempt("claude-code", 5, 5)] })], {
+      testerUsage: { opencode: { inputTokens: 30, cacheCreationInputTokens: 2, cacheReadInputTokens: 700, outputTokens: 8 } },
+    });
+
+    applyTotals(record, new Date("2026-10-24T08:10:00.000Z"));
+
+    expect(agentRunTokens(record, "opencode")).toBe(40);
+    expect(agentRunTokens(record, "claude-code")).toBe(10);
+    expect(record.subtasks[0]?.usage).toEqual({ ...emptyUsage(), inputTokens: 5, outputTokens: 5 });
+    expect(record.cost.perAgent.opencode).toEqual({ inputTokens: 30, cacheCreationInputTokens: 2, cacheReadInputTokens: 700, outputTokens: 8 });
+    expect(record.cost.usage).toEqual({ inputTokens: 35, cacheCreationInputTokens: 2, cacheReadInputTokens: 700, outputTokens: 13 });
+  });
+
+  it("should count each criterion the acceptance tester failed while its command passed as friction", () => {
+    const record = log([subtask("S1")], {
+      testerFailures: [
+        { sha: "a".repeat(40), criterion: "A1", observation: "bye" },
+        { sha: "b".repeat(40), criterion: "A1", observation: "still bye" },
+      ],
+    });
+
+    applyTotals(record, new Date("2026-10-24T08:10:00.000Z"));
+
+    expect(record.friction.testerRejections).toBe(2);
   });
 });
 

@@ -35,7 +35,7 @@ function history(): RunLog[] {
         verifierRejections: 2,
       }),
     ],
-    { result: "draft", durationMs: 20 * 60_000 },
+    { result: "draft", durationMs: 20 * 60_000, testerFailures: [{ sha: "def", criterion: "A1", observation: "It said bye." }] },
   );
   const paused = { ...pausedRun(2, "opencode", "claude-code"), result: "paused" as const };
   const failed = failedRun(3, "opencode");
@@ -101,7 +101,15 @@ describe("the summary of the run logs of a repo", () => {
     expect(stats.friction.scopeExtensions).toBe(1);
     expect(stats.friction.gateRejections).toBe(1);
     expect(stats.friction.verifierRejections).toBe(2);
+    expect(stats.friction.testerRejections).toBe(1);
     expect(stats.friction.integrationConflicts).toBe(1);
+  });
+
+  it("should count no tester rejections in a run.json written before the acceptance tester existed", () => {
+    const old = runRecord(0, [subtaskRecord("S1")]);
+    const { testerRejections: _testerRejections, ...friction } = old.friction;
+
+    expect(summarizeRuns([{ ...old, friction: friction as typeof old.friction }]).friction.testerRejections).toBe(0);
   });
 
   it("should count the failures of the worker layer by kind", () => {
@@ -131,6 +139,7 @@ describe("the printed summary", () => {
     expect(text).toContain("Scope extensions: 1");
     expect(text).toContain("Gate rejections: 1");
     expect(text).toContain("Verifier rejections: 2");
+    expect(text).toContain("Acceptance tester rejections: 1");
     expect(text).toContain("Integration conflicts: 1");
     expect(text).toContain("Worker-layer failures: container-start 1");
     expect(text).toContain("claude-code: 3 runs, 5 attempts, 11500 tokens, 0 pauses");

@@ -80,6 +80,7 @@ export function summarizeRuns(logs: readonly RunLog[]): RunStats {
     stats.friction.scopeExtensions += log.friction.scopeExtensions;
     stats.friction.gateRejections += log.friction.gateRejections;
     stats.friction.verifierRejections += log.friction.verifierRejections;
+    stats.friction.testerRejections += log.friction.testerRejections ?? 0;
     stats.friction.integrationConflicts += log.friction.integrationConflicts;
     for (const failure of log.workerLayerFailures) {
       stats.workerLayerFailures[failure.kind] = (stats.workerLayerFailures[failure.kind] ?? 0) + 1;
@@ -125,6 +126,7 @@ export function formatStats(stats: RunStats, unreadable: readonly string[] = [])
     `  Scope extensions: ${friction.scopeExtensions}`,
     `  Gate rejections: ${friction.gateRejections}`,
     `  Verifier rejections: ${friction.verifierRejections}`,
+    `  Acceptance tester rejections: ${friction.testerRejections}`,
     `  Integration conflicts: ${friction.integrationConflicts}`,
     "",
     `Worker-layer failures: ${failures.length > 0 ? failures.join(", ") : "none"}`,

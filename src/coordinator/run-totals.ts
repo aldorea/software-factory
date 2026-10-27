@@ -16,7 +16,7 @@ export function emptyCost(): CostRecord {
 
 export function emptyFriction(): FrictionRecord {
   const blocks = Object.fromEntries(BLOCK_TYPES.map((type) => [type, 0])) as Record<BlockType, number>;
-  return { blocks, scopeExtensions: 0, gateRejections: 0, verifierRejections: 0, integrationConflicts: 0 };
+  return { blocks, scopeExtensions: 0, gateRejections: 0, verifierRejections: 0, testerRejections: 0, integrationConflicts: 0 };
 }
 
 export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
@@ -44,7 +44,8 @@ export function applyTotals(log: RunLog, now: Date): void {
 export function agentRunTokens(log: RunLog, agent: AgentKind): number {
   const attempts = log.subtasks.flatMap((subtask) => subtask.attempts).filter((attempt) => attempt.agent.agent === agent);
   const verified = log.subtasks.map((subtask) => subtask.verifierUsage?.[agent] ?? emptyUsage());
-  return [...attempts.map((attempt) => attempt.usage), ...verified].reduce((total, usage) => total + countedTokens(usage), 0);
+  const tested = log.testerUsage?.[agent] ?? emptyUsage();
+  return [...attempts.map((attempt) => attempt.usage), ...verified, tested].reduce((total, usage) => total + countedTokens(usage), 0);
 }
 
 function costOf(log: RunLog, now: Date): CostRecord {
@@ -61,6 +62,10 @@ function costOf(log: RunLog, now: Date): CostRecord {
       verified.push(usage);
     }
   }
+  for (const [agent, usage] of Object.entries(log.testerUsage ?? {}) as [AgentKind, TokenUsage][]) {
+    charge(agent, usage);
+    verified.push(usage);
+  }
   const end = log.endedAt === undefined ? now.getTime() : Date.parse(log.endedAt);
   return {
     usage: addUsage(sumUsage(log.subtasks.map((subtask) => subtask.usage)), sumUsage(verified)),
@@ -75,6 +80,7 @@ function frictionOf(log: RunLog): FrictionRecord {
   const friction = emptyFriction();
   if (log.block?.type === "integration-check") friction.blocks["integration-check"] += 1;
   if (log.block?.type === "default-branch-conflict") friction.integrationConflicts += 1;
+  friction.testerRejections = log.testerFailures?.length ?? 0;
   for (const subtask of log.subtasks) {
     if (subtask.state === "blocked" && subtask.blockType !== undefined) friction.blocks[subtask.blockType] += 1;
     friction.scopeExtensions += subtask.scopeExtensions.length;

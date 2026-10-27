@@ -7,7 +7,7 @@ export interface AgentCapabilities {
   deniesEveryTool: boolean;
 }
 
-export type Role = "workers" | "verifier";
+export type Role = "workers" | "verifier" | "tester";
 
 export type UsageReading = { ok: true; usage: TokenUsage } | { ok: false; problem: string };
 

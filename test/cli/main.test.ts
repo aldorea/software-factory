@@ -33,6 +33,7 @@ const CONFIG = `export default {
   roles: {
     workers: { agent: "claude-code", model: "sonnet" },
     verifier: { agent: "opencode", model: "opencode-go/kimi-k2" },
+    tester: { agent: "claude-code", model: "sonnet" },
   },
 };
 `;
@@ -144,6 +145,7 @@ const SONNET: RoleChoice = { agent: "claude-code", model: "sonnet" };
 const KIMI: RoleChoice = { agent: "opencode", model: "opencode-go/kimi-k2" };
 const GLM: RoleChoice = { agent: "opencode", model: "opencode-go/glm-4.6" };
 const NO_ROLES = CONFIG.replace(/  roles: \{[\s\S]*?\n  \},\n/, "");
+const NO_TESTER = CONFIG.replace(/    tester: .*\n/, "");
 
 describe("factory run: the choice of the agent of each role", () => {
   it("should take the agent and the model of each role from the flags over the config default", async () => {
@@ -151,10 +153,13 @@ describe("factory run: the choice of the agent of each role", () => {
     const { env } = cli(repoDir);
     expect(await main(["approve", "42"], env)).toBe(0);
 
-    const code = await main(["run", "42", "--worker-agent", "claude-code:opus", "--verifier-agent=opencode:opencode-go/glm-4.6"], env);
+    const code = await main(
+      ["run", "42", "--worker-agent", "claude-code:opus", "--verifier-agent=opencode:opencode-go/glm-4.6", "--tester-agent", "opencode:opencode-go/kimi-k2"],
+      env,
+    );
 
     expect(code).toBe(0);
-    expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, changes: [] });
+    expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, tester: KIMI, changes: [] });
   });
 
   it("should ask in a terminal for each role with no flag, offering only the agents that meet the role and preselecting the config default", async () => {
@@ -169,8 +174,11 @@ describe("factory run: the choice of the agent of each role", () => {
 
     expect(await main(["run", "42", "--worker-agent", "claude-code:opus"], env)).toBe(0);
 
-    expect(questions).toEqual([{ role: "verifier", offered: ["opencode"], preselected: KIMI }]);
-    expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, changes: [] });
+    expect(questions).toEqual([
+      { role: "verifier", offered: ["opencode"], preselected: KIMI },
+      { role: "tester", offered: ["claude-code", "opencode"], preselected: SONNET },
+    ]);
+    expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, tester: GLM, changes: [] });
   });
 
   it("should take the config default with no flag outside a terminal", async () => {
@@ -180,7 +188,7 @@ describe("factory run: the choice of the agent of each role", () => {
 
     expect(await main(["run", "42"], env)).toBe(0);
 
-    expect((await lastRunLog(repoDir)).agents).toEqual({ workers: SONNET, verifier: KIMI, changes: [] });
+    expect((await lastRunLog(repoDir)).agents).toEqual({ workers: SONNET, verifier: KIMI, tester: SONNET, changes: [] });
   });
 
   it("should refuse to start, with no worker, when neither a flag, a prompt nor the config gives the agent of a role", async () => {
@@ -191,6 +199,17 @@ describe("factory run: the choice of the agent of each role", () => {
     expect(await main(["run", "42", "--worker-agent", "claude-code:sonnet"], env)).toBe(1);
 
     expect(err.join("\n")).toContain("no agent for the verifier: pass --verifier-agent <agent>:<model> or set roles.verifier");
+    expect(runner.workers).toEqual([]);
+  });
+
+  it("should refuse to start, with no worker, when no source gives the agent of the acceptance tester", async () => {
+    const repoDir = await runnableRepo(NO_TESTER);
+    const { env, err, runner } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("no agent for the tester: pass --tester-agent <agent>:<model> or set roles.tester");
     expect(runner.workers).toEqual([]);
   });
 
@@ -223,6 +242,7 @@ describe("factory run: the choice of the agent of each role", () => {
     expect(questions.map((question) => [question.role, question.preselected])).toEqual([
       ["workers", OPUS],
       ["verifier", KIMI],
+      ["tester", SONNET],
     ]);
     expect((await lastRunLog(repoDir)).agents.changes).toEqual([
       { role: "workers", from: OPUS, to: SONNET, at: "2026-10-24T08:00:00.000Z" },
