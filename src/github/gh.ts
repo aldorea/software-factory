@@ -19,6 +19,23 @@ function toPullRequest(data: GhPullRequest): PullRequest {
   return { number: data.number, url: data.url, draft: data.isDraft };
 }
 
+export async function ghProblem(command = "gh"): Promise<string | null> {
+  let result: ExecResult;
+  try {
+    result = await exec(command, ["auth", "status"], { timeoutMs: 30_000 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return `gh is not available: install the GitHub CLI (${command}) and run gh auth login before factory run`;
+    }
+    throw error;
+  }
+  if (result.exitCode !== 0) {
+    const detail = result.stderr.trim();
+    return `gh is not signed in: ${command} auth status failed with exit code ${result.exitCode}${detail === "" ? "" : `: ${detail}`}; run gh auth login`;
+  }
+  return null;
+}
+
 export function ghGitHub(options: GhOptions): GitHub {
   const command = options.command ?? "gh";
   async function gh(args: string[]): Promise<string> {

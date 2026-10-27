@@ -7,7 +7,7 @@ import { main, type CliEnv, type RoleQuestion } from "../../src/cli/main.ts";
 import type { RoleChoice } from "../../src/config/config.ts";
 import { parseRunLog } from "../../src/coordinator/run-log.ts";
 import type { GitHub } from "../../src/github/github.ts";
-import { ghGitHub } from "../../src/github/gh.ts";
+import { ghGitHub, ghProblem } from "../../src/github/gh.ts";
 import { readApproval } from "../../src/spec/approval.ts";
 import { dockerProblem } from "../../src/workers/docker.ts";
 import { execOk } from "../../src/workers/sh.ts";
@@ -109,6 +109,7 @@ function cli(
     notifier,
     credentials: { "claude-code": "token", opencode: "key" },
     docker: async () => null,
+    gh: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
@@ -320,6 +321,28 @@ describe("factory CLI", () => {
 
     expect(code).toBe(1);
     expect(err.join("\n")).toContain("factory: Docker is not available");
+    expect(runner.workers).toHaveLength(0);
+    expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
+  });
+
+  it("should exit non-zero before any role question and any worker when gh is not ready, because the pull request needs it", async () => {
+    const repoDir = await runnableRepo();
+    const { env, err, runner } = cli(repoDir);
+    const questions: RoleQuestion[] = [];
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    const code = await main(["run", "42"], {
+      ...env,
+      gh: () => ghProblem("factory-test-no-such-gh"),
+      ask: async (question) => {
+        questions.push(question);
+        throw new Error("no role question is expected");
+      },
+    });
+
+    expect(code).toBe(1);
+    expect(err.join("\n")).toContain("factory: gh is not available");
+    expect(questions).toHaveLength(0);
     expect(runner.workers).toHaveLength(0);
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
   });
