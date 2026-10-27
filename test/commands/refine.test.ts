@@ -22,7 +22,11 @@ async function targetRepo(): Promise<string> {
   await writeFile(join(dir, "README.md"), "# target\n");
   await git(dir, "add", ".");
   await git(dir, "commit", "-q", "-m", "init");
-  await git(dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  const remoteDir = await temp.make("refine-remote-");
+  await execOk("git", ["init", "-q", "--bare", remoteDir]);
+  await git(dir, "remote", "add", "origin", remoteDir);
+  await git(dir, "push", "-q", "origin", "main");
+  await git(dir, "remote", "set-head", "origin", "--auto");
   return dir;
 }
 
@@ -97,10 +101,10 @@ describe("interactive launch", () => {
 });
 
 describe("refinement preparation", () => {
-  it("should create the integration branch from main and its worktree when both are missing", async () => {
+  it("should create the integration branch from the default branch and its worktree when both are missing", async () => {
     const repoDir = await targetRepo();
     await git(repoDir, "checkout", "-q", "-b", "elsewhere");
-    await git(repoDir, "commit", "-q", "--allow-empty", "-m", "not on main");
+    await git(repoDir, "commit", "-q", "--allow-empty", "-m", "not on the default branch");
 
     const prepared = await prepareRefinement({ repoDir, issue: 42, github: github() });
 

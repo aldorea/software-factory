@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addWorktreeForBranch, listWorktrees, removeWorktree } from "../workers/git.ts";
+import { addWorktreeForBranch, branchExists, listWorktrees, removeWorktree } from "../workers/git.ts";
 import { exec, execOk } from "../workers/sh.ts";
 
 export const REMOTE = "origin";
@@ -13,8 +13,7 @@ export async function defaultBranch(repoDir: string): Promise<string> {
     throw new Error(`${REMOTE}/HEAD is not set in ${repoDir}, so the default branch is unknown; run git remote set-head ${REMOTE} --auto`);
   }
   const branch = ref.slice(REMOTE.length + 1);
-  const local = await exec("git", ["-C", repoDir, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
-  if (local.exitCode !== 0) {
+  if (!(await branchExists(repoDir, branch))) {
     throw new Error(`the default branch ${branch} has no local copy in ${repoDir}; create it first with git switch ${branch}`);
   }
   return branch;

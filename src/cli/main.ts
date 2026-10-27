@@ -12,6 +12,7 @@ import { runIssue } from "../coordinator/run.ts";
 import { formatStats, summarizeRuns } from "../coordinator/stats.ts";
 import type { Verifier } from "../coordinator/verifier.ts";
 import type { GitHub } from "../github/github.ts";
+import { initRepo } from "../init/init.ts";
 import { agentsForRole } from "../workers/agents.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import type { InteractiveLaunch } from "./launch.ts";
@@ -44,6 +45,7 @@ const USAGE = [
   `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`,
   "       factory run <issue> [target-repo] [--worker-agent <agent>:<model>] [--verifier-agent <agent>:<model>] [--tester-agent <agent>:<model>]",
   "       factory stats [target-repo]",
+  "       factory init [target-repo]",
 ].join("\n");
 
 type RoleFlags = Partial<Record<Role, string>>;
@@ -57,6 +59,7 @@ interface Command {
 
 export async function main(args: string[], env: CliEnv): Promise<number> {
   if (args[0] === "stats") return stats(args.slice(1), env);
+  if (args[0] === "init") return init(args.slice(1), env);
   const parsed = parseCommand(args);
   if (parsed === null) {
     env.err(USAGE);
@@ -121,12 +124,10 @@ function parseCommand(args: string[]): Command | null {
 }
 
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
-  for (const probe of [env.docker, env.gh]) {
-    const problem = await probe();
-    if (problem !== null) {
-      env.err(`factory: ${problem}`);
-      return 1;
-    }
+  const toolProblems = [await env.docker(), await env.gh()].filter((problem) => problem !== null);
+  if (toolProblems.length > 0) {
+    for (const problem of toolProblems) env.err(`factory: ${problem}`);
+    return 1;
   }
   const config = await loadConfig(repoDir);
   const defaults = resumeDefaults(await latestRunLog(join(repoDir, ".factory", "logs"), issue), config.roles);
@@ -165,6 +166,20 @@ async function refine(repoDir: string, issue: number, env: CliEnv): Promise<numb
     const workspace = await prepareRefinement({ repoDir, issue, github: env.github(repoDir) });
     env.out(`${workspace.created ? "Created" : "Reusing"} ${workspace.branch} in ${workspace.worktree}`);
     return await env.launch(refineLaunch({ worktree: workspace.worktree, issue, factoryRoot: env.factoryRoot }));
+  } catch (error) {
+    env.err(`factory: ${(error as Error).message}`);
+    return 1;
+  }
+}
+
+async function init(args: string[], env: CliEnv): Promise<number> {
+  if (args.length > 1) {
+    env.err(USAGE);
+    return 2;
+  }
+  try {
+    for (const line of await initRepo(resolve(env.cwd, args[0] ?? "."))) env.out(line);
+    return 0;
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);
     return 1;

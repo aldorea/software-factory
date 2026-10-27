@@ -86,7 +86,11 @@ async function mainRepo(): Promise<string> {
   await writeFile(join(dir, "README.md"), "# target\n");
   await git(dir, "add", ".");
   await git(dir, "commit", "-q", "-m", "init");
-  await git(dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  const remoteDir = await temp.make("cli-refine-remote-");
+  await execOk("git", ["init", "-q", "--bare", remoteDir]);
+  await git(dir, "remote", "add", "origin", remoteDir);
+  await git(dir, "push", "-q", "origin", "main");
+  await git(dir, "remote", "set-head", "origin", "--auto");
   return dir;
 }
 
@@ -129,6 +133,8 @@ async function runnableRepo(config: string = CONFIG): Promise<string> {
   await execOk("git", ["init", "-q", "--bare", remoteDir]);
   await git(repoDir, "remote", "add", "origin", remoteDir);
   await git(repoDir, "branch", "main");
+  await git(repoDir, "push", "-q", "origin", "main");
+  await git(repoDir, "remote", "set-head", "origin", "--auto");
   return repoDir;
 }
 
@@ -306,6 +312,8 @@ describe("factory CLI", () => {
     await execOk("git", ["init", "-q", "--bare", remoteDir]);
     await git(repoDir, "remote", "add", "origin", remoteDir);
     await git(repoDir, "branch", "main");
+    await git(repoDir, "push", "-q", "origin", "main");
+    await git(repoDir, "remote", "set-head", "origin", "--auto");
     const { env, out, notifier } = cli(repoDir);
     expect(await main(["approve", "42"], env)).toBe(0);
 
@@ -345,6 +353,24 @@ describe("factory CLI", () => {
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
   });
 
+  it("should exit non-zero before it loads the config, asks any role or starts a worker when gh reports a problem", async () => {
+    const repoDir = await temp.make("cli-no-gh-");
+    const { env, err, runner } = cli(repoDir);
+    const questions: RoleQuestion[] = [];
+    env.ask = async (question) => {
+      questions.push(question);
+      return GLM;
+    };
+
+    const code = await main(["run", "42"], { ...env, gh: async () => "gh is not signed in: run gh auth login" });
+
+    expect(code).toBe(1);
+    expect(err).toEqual(["factory: gh is not signed in: run gh auth login"]);
+    expect(questions).toEqual([]);
+    expect(runner.workers).toHaveLength(0);
+    expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
+  });
+
   it("should exit non-zero before any role question and any worker when gh is not ready, because the pull request needs it", async () => {
     const repoDir = await runnableRepo();
     const { env, err, runner } = cli(repoDir);
@@ -365,6 +391,16 @@ describe("factory CLI", () => {
     expect(questions).toHaveLength(0);
     expect(runner.workers).toHaveLength(0);
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
+  });
+
+  it("should report the Docker and the gh problems together so that every missing tool shows up front", async () => {
+    const repoDir = await temp.make("cli-no-tools-");
+    const { env, err } = cli(repoDir);
+
+    const code = await main(["run", "42"], { ...env, docker: async () => "Docker is not running", gh: async () => "gh is not available" });
+
+    expect(code).toBe(1);
+    expect(err).toEqual(["factory: Docker is not running", "factory: gh is not available"]);
   });
 
   it("should exit non-zero with a clear message when gh is missing", async () => {

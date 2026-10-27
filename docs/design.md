@@ -16,11 +16,13 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 | Command | What it does |
 |---|---|
 | `factory refine <n>` | Interactive refinement of issue `<n>` |
-| `factory approve <n>` | Approves the spec with a hash |
+| `factory validate <n>` | Checks `specs/<n>.md` on the integration branch against the issue and the config, and changes nothing |
+| `factory approve <n>` | Validates the spec and approves it with a hash |
 | `factory run <n>` | Implements, verifies and opens the PR |
 | `factory stats` | Summary of the `run.json` files of a repo |
+| `factory init` | Prepares `.factory/` in a target repo |
 
-The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker is not running, or when `gh` is missing or not signed in (`gh auth status`), before it loads the config or asks for the agent of any role.
+The target repo is the current directory, or the last argument. The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker is not running, or when `gh` is missing or not signed in (`gh auth status`). It reports every such problem before it loads the config or asks for the agent of any role. To set a repo up, see the [onboarding guide](onboarding.md).
 
 Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from a prompt with the default of `.factory/config.ts` already selected; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
 
@@ -182,12 +184,13 @@ The issue, `specs/<n>.md` and the PR are the records. A new session starts again
 
 - **`software-factory`** (this repo): the coordinator, the gates, the worker layer, the skills (refinement, independent verifier), the prompts and the `factory` CLI. It takes the target repo as an argument.
 - **Each target repo:** a `.factory/` folder:
-  - `config.ts`: checks, app start and the command that tells when the app is ready, e2e commands, environment, protected paths, the default agent and model of each role, and per agent its token limits and `maxParallel`. It uses the types that this repo exports.
-  - `Dockerfile`: the image of the workers of that repo.
+  - `config.ts`: checks, app start and the command that tells when the app is ready, e2e commands, environment, protected paths, the default agent and model of each role, and per agent its token limits and `maxParallel`. It imports nothing from this repo, so it works wherever the two repos live, and the factory validates it when it loads and reports each mistake by field. It reads its own `.factory/.env` and fails with a clear message when a value is missing: the factory never loads `.env`, and only the values that `environment` returns reach a container.
+  - `Dockerfile`: the image of the workers of that repo, from the factory's base image.
   - `.env.example`, and `.env` in `.gitignore`.
+  - `package.json` with `"type": "module"`, so that the config loads as an ES module.
   - `logs/` and `worktrees/`, in `.gitignore`.
 
-The factory does not change the `package.json` of a target repo.
+`factory init` writes the files that are missing, never overwrites one, and the factory does not change the `package.json` of a target repo.
 
 ### Coordinator
 
@@ -273,7 +276,7 @@ The independent verifier and the acceptance tester do not count for this ceiling
 
 ### Git
 
-- The integration branch is `factory/<n>-<slug>`, from the local copy of the default branch, with no `git fetch`. The PR goes to the default branch.
+- The **default branch** of a target repo is the one that `origin/HEAD` points to. The integration branch is `factory/<n>-<slug>`, from its local copy, and the PR goes to the default branch. The factory never fetches: the developer updates the default branch before `factory refine`.
 - A missing `origin/HEAD` stops `refine` and `run` with the command that sets it (`git remote set-head origin --auto`). A default branch with no local copy stops them with a message of its own.
 - Each subtask has its own branch from the integration branch.
 - Before the PR is ready, the integration branch must contain the local head of the default branch. When the default branch moved during the run, the coordinator merges it and runs the integrated verification again on the result. A conflict blocks the run with a `default-branch-conflict` block in `run.json` and in the PR, and counts as a conflict at integration.
