@@ -11,7 +11,7 @@ export type RunResult = "running" | "ready" | "draft" | "paused";
 
 export type SubtaskState = "pending" | "working" | "gating" | "merged" | "blocked" | "interrupted" | "not-started";
 
-export const BLOCK_TYPES = ["scope", "design-question", "patience", "limit", "environment"] as const;
+export const BLOCK_TYPES = ["scope", "design-question", "patience", "limit", "environment", "integration-check"] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
@@ -73,6 +73,13 @@ export interface BlockRecord {
   type: StopType | "scope" | "design-question" | "environment";
   reason: string;
   lastFailure?: string;
+}
+
+export interface RunBlockRecord {
+  type: "integration-check";
+  reason: string;
+  sha: string;
+  checks: CheckRecord[];
 }
 
 export interface FollowUpRecord {
@@ -198,6 +205,7 @@ export interface RunLog {
   workerLayerFailures: WorkerLayerFailureRecord[];
   subtasks: SubtaskRecord[];
   verification?: VerificationRecord;
+  block?: RunBlockRecord;
   evidence?: EvidenceBranchRecord;
   pullRequest?: PullRequestRecord;
 }

@@ -86,6 +86,14 @@ describe("the summary of the run logs of a repo", () => {
     expect(stats.perAgent.opencode).toMatchObject({ attempts: 0, countedTokens: 400 });
   });
 
+  it("should count the integration-check blocks as zero in a run.json written before that block type existed", () => {
+    const [ready, ...rest] = history();
+    if (ready === undefined) throw new Error("history has no runs");
+    const { "integration-check": _, ...older } = ready.friction.blocks;
+    const stats = summarizeRuns([{ ...ready, friction: { ...ready.friction, blocks: older as typeof ready.friction.blocks } }, ...rest]);
+    expect(stats.friction.blocks["integration-check"]).toBe(0);
+  });
+
   it("should add up the friction: blocks by type, scope extensions, rejections and conflicts", () => {
     const stats = summarizeRuns(history());
     expect(stats.friction.blocks.patience).toBe(1);

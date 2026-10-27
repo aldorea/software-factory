@@ -3,6 +3,7 @@ import type { Issue } from "../github/github.ts";
 import { criteriaText } from "../spec/issue.ts";
 import type { RoleChoice } from "../config/config.ts";
 import { evidencePath } from "./evidence-branch.ts";
+import { outputSection } from "./failures.ts";
 import type { AgentChangeRecord, CheckRecord, CriterionRecord, HumanCriterionRecord, RunLog, SubtaskRecord } from "./run-log.ts";
 
 export interface PullRequestText {
@@ -15,6 +16,7 @@ export function renderPullRequest(issue: Issue, log: RunLog): PullRequestText {
     `Implements #${issue.number}: ${issue.title}.\n\nCloses #${issue.number}`,
     `## Result\n\n${resultLine(log)}`,
     `## Subtasks\n\n${log.subtasks.map(subtaskLine).join("\n")}`,
+    ...blockSections(log),
     ...scopeExtensionSections(log),
     verificationSection(log),
     ...criteriaSections(issue, log),
@@ -84,6 +86,13 @@ function subtaskLine(subtask: SubtaskRecord): string {
     ...(lastFailure ? [`  Last failure: ${lastFailure}`] : []),
   ];
   return lines.join("\n");
+}
+
+function blockSections(log: RunLog): string[] {
+  const { block } = log;
+  if (block === undefined) return [];
+  const outputs = block.checks.flatMap((check) => (check.outputTail !== undefined ? [outputSection(`check ${check.name}`, check.outputTail)] : []));
+  return [[`## Blocks`, `**${block.type}** on \`${block.sha.slice(0, 12)}\`: ${block.reason}`, ...outputs].join("\n\n")];
 }
 
 function scopeExtensionSections(log: RunLog): string[] {

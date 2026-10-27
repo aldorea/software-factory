@@ -215,7 +215,10 @@ describe("factory run: follow-up tasks", () => {
   it("should send no follow-up when only a check of the repo fails, because no subtask owns a check", async () => {
     const repo = await target("", [
       NO_BAD,
-      { name: "integrated", command: "git rev-parse --abbrev-ref HEAD | grep -qv verification" },
+      {
+        name: "integrated",
+        command: `git rev-parse --abbrev-ref HEAD | grep -qv verification || { echo "fails only once integrated"; exit 1; }`,
+      },
     ]);
     const { run, runner } = harness(repo, (call) =>
       subtaskOf(call) === "S2" ? { files: { "b/b.txt": "b\n", "ok-A2": "ok\n" } } : firstPass(call),
@@ -227,6 +230,40 @@ describe("factory run: follow-up tasks", () => {
     expect(verifications(runner)).toHaveLength(1);
     expect(report.log.verification?.passed).toBe(false);
     expect(report.result).toBe("draft");
+  });
+
+  it("should record an integration-check block with the check, the SHA and the end of its output when only a check fails, in run.json and in the PR", async () => {
+    const repo = await target("", [
+      NO_BAD,
+      {
+        name: "integrated",
+        command: `git rev-parse --abbrev-ref HEAD | grep -qv verification || { echo "fails only once integrated"; exit 1; }`,
+      },
+    ]);
+    const { run } = harness(repo, (call) => (subtaskOf(call) === "S2" ? { files: { "b/b.txt": "b\n", "ok-A2": "ok\n" } } : firstPass(call)));
+
+    const report = await run();
+
+    const sha = await git(repo.repoDir, "rev-parse", BRANCH);
+    expect(report.log.block?.type).toBe("integration-check");
+    expect(report.log.block?.sha).toBe(sha);
+    expect(report.log.block?.checks.map((check) => [check.name, check.outputTail])).toEqual([["integrated", "fails only once integrated"]]);
+    expect(report.log.friction.blocks["integration-check"]).toBe(1);
+    expect(report.log.subtasks.every((entry) => entry.state === "merged")).toBe(true);
+    const body = repo.github.pullRequests[0]?.body ?? "";
+    expect(body).toContain(`## Blocks\n\n**integration-check** on \`${sha.slice(0, 12)}\`: The check integrated failed on the integration branch`);
+    expect(body).toContain("fails only once integrated");
+  });
+
+  it("should record no integration-check block when a criterion fails too, because its follow-up carries the failed checks", async () => {
+    const repo = await target("", [NO_BAD, { name: "integrated", command: "git rev-parse --abbrev-ref HEAD | grep -qv verification" }]);
+    const { run, runner } = harness(repo, firstPass);
+
+    const report = await run();
+
+    expect(followUps(runner).length).toBeGreaterThan(0);
+    expect(followUps(runner)[0]?.attempts[0]?.prompt).toContain("These checks of the repo failed in the same run:");
+    expect(report.log.block).toBeUndefined();
   });
 
   it("should block the subtask and leave the pull request a draft when the follow-up hits patience at its gate", async () => {

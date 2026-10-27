@@ -4,7 +4,7 @@ import { revParse } from "../workers/git.ts";
 import { checksOn } from "./check-container.ts";
 import { verificationPassed } from "./decisions.ts";
 import { integrationPlan } from "./evidence.ts";
-import { followUpFailure, followUpStop, followUpTasks, verificationSignature } from "./follow-up.ts";
+import { followUpFailure, followUpStop, followUpTasks, integrationCheckBlock, verificationSignature } from "./follow-up.ts";
 import { paused, stopLimits, type RunContext } from "./run-context.ts";
 import { agentRunTokens } from "./run-totals.ts";
 import { blockSubtask, entryOf } from "./subtask-settlement.ts";
@@ -16,6 +16,7 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
   const { log } = context;
   const stateOf = (subtaskId: string) => entryOf(context.records, subtaskId, "record").state;
   const signatures: string[] = [];
+  delete log.block;
   for (let round = 1; ; round += 1) {
     const sha = await revParse(repoDir, branch);
     const verified = await checksOn(context, {
@@ -38,7 +39,11 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
     log.verification = { sha, passed, checks, criteria, humanCriteria: human };
     if (passed || context.conflicted) break;
     const tasks = followUpTasks(subtasks, criteria, stateOf);
-    if (tasks.length === 0) break;
+    if (tasks.length === 0) {
+      const block = integrationCheckBlock(sha, checks, criteria);
+      if (block !== null) log.block = block;
+      break;
+    }
     signatures.push(verificationSignature(criteria));
     const stop = followUpStop(
       {

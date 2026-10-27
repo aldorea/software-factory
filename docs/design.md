@@ -163,6 +163,7 @@ The coordinator never asks me during a run. It records each block in the PR and 
 | A worker needs a file outside its scope | The coordinator extends the scope only if no subtask of the same wave owns the file and the file is not protected. It records the extension in the run log and in the PR, not in `specs/<n>.md` (the hash stays valid). Otherwise, `blocked`. |
 | A question of design or product | `blocked`. The factory never decides a requirement. I change the spec, approve it again and start the run again. |
 | Patience, a limit or the environment (for example, the app does not become ready) | `blocked`, with the reason. |
+| A check of the repo fails in the integrated verification while every criterion passes | No subtask owns it, so the coordinator sends no follow-up task and guesses no owner: such a failure is usually a gap in the refinement. The run ends with a draft PR and an `integration-check` block in `run.json` and in the PR, with the check, the SHA of the integration branch and the end of its output. When criteria fail too, their follow-up tasks carry the failed checks instead. |
 
 A macOS notification links to the PR when a run ends, pauses or blocks.
 
@@ -283,7 +284,7 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 - **Agents:** the agent and the model of each role, and any change on resume.
 - **Cost:** tokens per subtask and per run, per agent, attempts per subtask, wall clock with no pauses. The tokens of the independent verifier and of the acceptance tester count in the run and in their agent, and are kept apart from the attempts of the subtask.
 - **Friction:**
-  - blocks by type (scope, design question, patience, limit, environment);
+  - blocks by type (scope, design question, patience, limit, environment, integration check);
   - automatic scope extensions;
   - rejections by the gate and by the verifier, and criteria failed by the acceptance tester whose command passed;
   - conflicts at integration (expected: 0).

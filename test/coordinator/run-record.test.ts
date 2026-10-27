@@ -97,7 +97,7 @@ describe("the run record written by factory run", () => {
 
     expect(report.log.workerLayerFailures).toEqual([]);
     expect(report.log.friction).toEqual({
-      blocks: { scope: 0, "design-question": 0, patience: 1, limit: 0, environment: 0 },
+      blocks: { scope: 0, "design-question": 0, patience: 1, limit: 0, environment: 0, "integration-check": 0 },
       scopeExtensions: 0,
       gateRejections: 3,
       verifierRejections: 0,
@@ -111,7 +111,7 @@ describe("the run record written by factory run", () => {
     const report = await harness(target, () => ({ outcome: { kind: "deadline" } })).run();
 
     expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "patience" });
-    expect(report.log.friction.blocks).toEqual({ scope: 0, "design-question": 0, patience: 1, limit: 0, environment: 0 });
+    expect(report.log.friction.blocks).toEqual({ scope: 0, "design-question": 0, patience: 1, limit: 0, environment: 0, "integration-check": 0 });
   });
 
   it("should count the block of a subtask by a hard limit as a limit", async () => {
@@ -124,7 +124,7 @@ describe("the run record written by factory run", () => {
     const report = await h.run();
 
     expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "limit" });
-    expect(report.log.friction.blocks).toEqual({ scope: 0, "design-question": 0, patience: 0, limit: 1, environment: 0 });
+    expect(report.log.friction.blocks).toEqual({ scope: 0, "design-question": 0, patience: 0, limit: 1, environment: 0, "integration-check": 0 });
   });
 
   it("should count an integration conflict when the subtask cannot merge into the integration branch", async () => {
@@ -166,7 +166,7 @@ describe("the run record written by factory run", () => {
       },
     ]);
     expect(report.log.subtasks[0]).toMatchObject({ state: "interrupted", attempts: [] });
-    expect(report.log.friction.blocks).toEqual({ scope: 0, "design-question": 0, patience: 0, limit: 0, environment: 0 });
+    expect(report.log.friction.blocks).toEqual({ scope: 0, "design-question": 0, patience: 0, limit: 0, environment: 0, "integration-check": 0 });
     expect(report.log.criteria).toMatchObject({ blocked: [], pending: ["A1"] });
     expect(target.github.pullRequests[0]?.draft).toBe(true);
     expect(target.github.pullRequests[0]?.body).toContain("1 failure of the worker layer");

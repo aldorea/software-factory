@@ -111,7 +111,7 @@ describe("the totals of a run record", () => {
     applyTotals(record, new Date("2026-10-24T08:10:00.000Z"));
 
     expect(record.friction).toEqual({
-      blocks: { scope: 2, "design-question": 0, patience: 0, limit: 0, environment: 0 },
+      blocks: { scope: 2, "design-question": 0, patience: 0, limit: 0, environment: 0, "integration-check": 0 },
       scopeExtensions: 2,
       gateRejections: 2,
       verifierRejections: 1,

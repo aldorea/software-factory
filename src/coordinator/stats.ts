@@ -76,7 +76,7 @@ export function summarizeRuns(logs: readonly RunLog[]): RunStats {
         agent(kind).countedTokens += countedTokens(usage);
       }
     }
-    for (const type of BLOCK_TYPES) stats.friction.blocks[type] += log.friction.blocks[type];
+    for (const type of BLOCK_TYPES) stats.friction.blocks[type] += log.friction.blocks[type] ?? 0;
     stats.friction.scopeExtensions += log.friction.scopeExtensions;
     stats.friction.gateRejections += log.friction.gateRejections;
     stats.friction.verifierRejections += log.friction.verifierRejections;

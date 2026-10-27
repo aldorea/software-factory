@@ -1,6 +1,6 @@
 import type { Subtask } from "../spec/spec.ts";
 import { outputSection } from "./failures.ts";
-import type { CheckRecord, CriterionRecord, SubtaskState } from "./run-log.ts";
+import type { CheckRecord, CriterionRecord, RunBlockRecord, SubtaskState } from "./run-log.ts";
 import { stopReason, type StopLimits, type StopReason } from "./stop-rules.ts";
 
 export interface FollowUpTask {
@@ -68,4 +68,16 @@ export function followUpFailure(
   ];
   const failed = [...lines, ...(checks.length > 0 ? ["", "These checks of the repo failed in the same run:", ...checks] : [])];
   return [`The integrated verification on ${sha.slice(0, 12)} failed:`, failed.join("\n"), ...outputs].join("\n\n");
+}
+
+export function integrationCheckBlock(sha: string, checks: CheckRecord[], criteria: CriterionRecord[]): RunBlockRecord | null {
+  const failed = checks.filter((check) => !check.passed);
+  if (failed.length === 0 || criteria.some((criterion) => !criterion.passed)) return null;
+  const names = failed.map((check) => check.name).join(", ");
+  return {
+    type: "integration-check",
+    reason: `The ${failed.length === 1 ? "check" : "checks"} ${names} failed on the integration branch while every criterion passed, so no subtask owns the failure.`,
+    sha,
+    checks: failed,
+  };
 }
