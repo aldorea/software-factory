@@ -121,6 +121,7 @@ async function targetRepo(options: TargetOptions): Promise<Target> {
   await git(repoDir, "add", ".");
   await git(repoDir, "commit", "-q", "-m", "init");
   await git(repoDir, "push", "-q", "origin", "main");
+  await git(repoDir, "remote", "set-head", "origin", "--auto");
   await git(repoDir, "switch", "-q", "-c", BRANCH);
   await mkdir(join(repoDir, "specs"));
   await writeFile(join(repoDir, "specs", "42.md"), spec);

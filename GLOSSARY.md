@@ -71,7 +71,7 @@ A path the coordinator adds to a subtask's scope during a run, recorded in the r
 
 **Default branch**:
 The branch of the target repo that `origin/HEAD` points to. The integration branch starts from its local copy, and the pull request targets it.
-_Avoid_: main, trunk, master
+_Avoid_: base branch, main, trunk, master
 
 **Integration branch**:
 The branch of a run, `factory/<n>-<slug>`, where each accepted subtask merges and from which the pull request is opened.
@@ -80,7 +80,7 @@ The branch of a run, `factory/<n>-<slug>`, where each accepted subtask merges an
 Work sent back to the subtask that owns a criterion that failed the integrated verification.
 
 **Evidence branch**:
-The branch `factory-evidence/<n>`, with no common history with `main` and never merged, where the coordinator publishes the attachments of the human criteria so that the pull request can link them.
+The branch `factory-evidence/<n>`, with no common history with the default branch and never merged, where the coordinator publishes the attachments of the human criteria so that the pull request can link them.
 
 **Run log**:
 The record of a run in `.factory/logs/<run-id>/`, outside git: `run.json` and the raw log of each attempt.
