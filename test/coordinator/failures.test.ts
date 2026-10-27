@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { firstErrorLine, gateFailure, outcomeFailure } from "../../src/coordinator/failures.ts";
+import {
+  firstErrorLine,
+  gateFailure,
+  outcomeFailure,
+  outputSection,
+  outputTail,
+  TAIL_BYTES,
+  TAIL_LINES,
+} from "../../src/coordinator/failures.ts";
 import type { GateDecision } from "../../src/coordinator/gate.ts";
 
 describe("outcomeFailure", () => {
@@ -53,6 +61,55 @@ describe("firstErrorLine", () => {
   });
 });
 
+describe("outputTail", () => {
+  it("should keep only the last 40 lines, because the cause of a failure is usually at the end of its output", () => {
+    const output = Array.from({ length: 100 }, (_, index) => `line ${index + 1}`).join("\n");
+
+    const tail = outputTail(output)?.split("\n") ?? [];
+
+    expect(TAIL_LINES).toBe(40);
+    expect(tail).toHaveLength(40);
+    expect(tail[0]).toBe("line 61");
+    expect(tail.at(-1)).toBe("line 100");
+  });
+
+  it("should remove the colors and the empty lines at both ends", () => {
+    expect(outputTail("\n\n\u001b[31mError: boom\u001b[0m   \n\n  at a.ts:1\n\n\n")).toBe("Error: boom\n\n  at a.ts:1");
+  });
+
+  it("should keep at most 4 KB, dropping whole lines from the start", () => {
+    const output = Array.from({ length: 30 }, (_, index) => `${index + 1} ${"é".repeat(200)}`).join("\n");
+
+    const tail = outputTail(output) ?? "";
+
+    expect(TAIL_BYTES).toBe(4096);
+    expect(Buffer.byteLength(tail)).toBeLessThanOrEqual(4096);
+    expect(tail.split("\n").every((line) => /^\d+ é{200}$/.test(line))).toBe(true);
+    expect(tail.endsWith(`30 ${"é".repeat(200)}`)).toBe(true);
+  });
+
+  it("should keep the end of a single line longer than 4 KB without a broken character", () => {
+    const tail = outputTail(`start ${"é".repeat(5000)} end`) ?? "";
+
+    expect(Buffer.byteLength(tail)).toBeLessThanOrEqual(4096);
+    expect(tail.endsWith(" end")).toBe(true);
+    expect(tail).not.toContain("\uFFFD");
+  });
+
+  it("should give nothing for an output with no text", () => {
+    expect(outputTail("\u001b[0m\n  \n")).toBeUndefined();
+  });
+});
+
+describe("outputSection", () => {
+  it("should fence the tail with more backticks than it holds, so a fence in the output cannot close it", () => {
+    const section = outputSection("check lint", "before\n````\nafter");
+
+    expect(section).toContain("The last lines of the output of check lint:");
+    expect(section).toContain("`````text\nbefore\n````\nafter\n`````");
+  });
+});
+
 describe("gateFailure", () => {
   const decision: GateDecision = {
     accepted: false,
@@ -70,5 +127,19 @@ describe("gateFailure", () => {
     expect(failure.signature).toBe("protected:package.json | check:lint");
     expect(failure.description).toContain("it touches protected paths: package.json");
     expect(failure.description).toContain("check lint failed with exit code 1");
+    expect(failure.output).toBeUndefined();
+  });
+
+  it("should carry the output of each rejection apart from its description, so the last failure of a block stays one line", () => {
+    const failure = gateFailure({
+      ...decision,
+      rejections: [
+        { kind: "check", message: "check lint failed with exit code 1", signature: "check:lint", output: "lint output" },
+        { kind: "criterion", message: "criterion A1 (request) failed with exit code 1", signature: "criterion:A1", output: "A1 output" },
+      ],
+    });
+
+    expect(failure.output).toBe("lint output\n\nA1 output");
+    expect(failure.description).not.toContain("lint output");
   });
 });

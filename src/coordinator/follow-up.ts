@@ -1,4 +1,5 @@
 import type { Subtask } from "../spec/spec.ts";
+import { outputSection } from "./failures.ts";
 import type { CheckRecord, CriterionRecord, SubtaskState } from "./run-log.ts";
 import { stopReason, type StopLimits, type StopReason } from "./stop-rules.ts";
 
@@ -49,18 +50,22 @@ export function followUpFailure(
   texts: Record<string, string>,
 ): string {
   const owned = new Set(task.criteria);
-  const lines = verification.criteria
-    .filter((criterion) => owned.has(criterion.id))
-    .map(
-      (criterion) =>
-        `- criterion ${criterion.id} (${criterion.evidence}) failed with exit code ${criterion.exitCode}. Criterion: ${texts[criterion.id] ?? criterion.id}. Command: \`${criterion.command}\``,
-    );
-  const checks = verification.checks
-    .filter((check) => !check.passed)
-    .map(
-      (check) =>
-        `- check ${check.name} failed with exit code ${check.exitCode}${check.firstError ? `: ${check.firstError}` : ""}. Command: \`${check.command}\``,
-    );
+  const criteria = verification.criteria.filter((criterion) => owned.has(criterion.id));
+  const lines = criteria.map(
+    (criterion) =>
+      `- criterion ${criterion.id} (${criterion.evidence}) failed with exit code ${criterion.exitCode}. Criterion: ${texts[criterion.id] ?? criterion.id}. Command: \`${criterion.command}\``,
+  );
+  const failedChecks = verification.checks.filter((check) => !check.passed);
+  const checks = failedChecks.map(
+    (check) =>
+      `- check ${check.name} failed with exit code ${check.exitCode}${check.firstError ? `: ${check.firstError}` : ""}. Command: \`${check.command}\``,
+  );
+  const outputs = [
+    ...criteria.flatMap((criterion) =>
+      criterion.outputTail !== undefined ? [outputSection(`criterion ${criterion.id}`, criterion.outputTail)] : [],
+    ),
+    ...failedChecks.flatMap((check) => (check.outputTail !== undefined ? [outputSection(`check ${check.name}`, check.outputTail)] : [])),
+  ];
   const failed = [...lines, ...(checks.length > 0 ? ["", "These checks of the repo failed in the same run:", ...checks] : [])];
-  return `The integrated verification on ${sha.slice(0, 12)} failed:\n\n${failed.join("\n")}`;
+  return [`The integrated verification on ${sha.slice(0, 12)} failed:`, failed.join("\n"), ...outputs].join("\n\n");
 }

@@ -2,6 +2,7 @@ import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { AppStart, EvidenceCommands } from "../config/config.ts";
 import type { Worker } from "../workers/types.ts";
+import { criterionLogPath, keepFailedOutput } from "./command-output.ts";
 import { evidenceCommand, type EvidencePlan } from "./evidence.ts";
 import type { CriterionRecord, HumanCriterionRecord } from "./run-log.ts";
 import { formatDuration } from "./stop-rules.ts";
@@ -18,6 +19,8 @@ export interface EvidenceContext {
   app: AppStart | undefined;
   commands: EvidenceCommands;
   attachmentsDir: string;
+  runDir: string;
+  label: string;
 }
 
 export async function collectEvidence(worker: Worker, plan: EvidencePlan, context: EvidenceContext): Promise<EvidenceResult> {
@@ -27,12 +30,15 @@ export async function collectEvidence(worker: Worker, plan: EvidencePlan, contex
   const criteria: CriterionRecord[] = [];
   for (const item of plan.criteria) {
     const result = await worker.exec(item.command);
+    const passed = result.exitCode === 0;
+    const output = passed ? {} : await keepFailedOutput(result, context.runDir, criterionLogPath(context.label, item.id));
     criteria.push({
       id: item.id,
       evidence: item.evidence,
       command: item.command,
       exitCode: result.exitCode,
-      passed: result.exitCode === 0,
+      passed,
+      ...output,
     });
   }
   const human: HumanCriterionRecord[] = [];

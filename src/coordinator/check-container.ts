@@ -3,6 +3,7 @@ import type { WorkerEnvironmentContext } from "../config/config.ts";
 import { createBranchAt, deleteBranch } from "../git/repo.ts";
 import { inStage } from "../workers/failures.ts";
 import type { Worker } from "../workers/types.ts";
+import { checkLogPath, keepFailedOutput } from "./command-output.ts";
 import { collectEvidence, type EvidenceResult } from "./evidence-collection.ts";
 import type { EvidencePlan } from "./evidence.ts";
 import { firstErrorLine } from "./failures.ts";
@@ -51,7 +52,7 @@ export async function checksOn(context: RunContext, request: CheckRequest): Prom
   let outcome: CheckOutcome | null = null;
   let preserved = false;
   try {
-    outcome = await checksIn(context, worker, request.plan);
+    outcome = await checksIn(context, worker, request);
   } catch (error) {
     await context.noteFailure(error, request.subtaskId);
   } finally {
@@ -65,25 +66,29 @@ export async function checksOn(context: RunContext, request: CheckRequest): Prom
   return outcome;
 }
 
-async function checksIn(context: RunContext, worker: Worker, plan: EvidencePlan): Promise<CheckOutcome> {
+async function checksIn(context: RunContext, worker: Worker, request: CheckRequest): Promise<CheckOutcome> {
   const { config } = context.prepared;
   const checks: CheckRecord[] = [];
-  for (const check of config.checks) {
+  for (const [index, check] of config.checks.entries()) {
     const result = await inStage("exec", () => worker.exec(check.command));
     const passed = result.exitCode === 0;
     const firstError = passed ? undefined : firstErrorLine(`${result.stderr}\n${result.stdout}`);
+    const output = passed ? {} : await keepFailedOutput(result, context.runDir, checkLogPath(request.label, index, check.name));
     checks.push({
       name: check.name,
       command: check.command,
       exitCode: result.exitCode,
       passed,
       ...(firstError !== undefined ? { firstError } : {}),
+      ...output,
     });
   }
-  const evidence = await collectEvidence(worker, plan, {
+  const evidence = await collectEvidence(worker, request.plan, {
     app: config.app,
     commands: config.evidence,
     attachmentsDir: join(context.runDir, "attachments"),
+    runDir: context.runDir,
+    label: request.label,
   });
   return { checks, ...evidence };
 }

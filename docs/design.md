@@ -132,6 +132,7 @@ Its checks and criteria pass and the gate accepts it.
 - A follow-up task is more work on the same subtask: it keeps counting the patience, the tokens and the wall clock of its subtask.
 - The limits per run also stop the follow-up tasks. The time in pause does not count.
 - A stopped subtask is `blocked`, with the reason and the last failure. The subtasks that do not depend on it go on.
+- The reason of a failure goes back to the worker in both loops: the next attempt after a gate rejection, and the follow-up task after the integrated verification. For each check and criterion that failed, the prompt carries the end of its output: its last 40 lines, without colors, at most 4 KB. These initial values are calibrated in the pilot.
 
 ### Plan limit
 
@@ -292,7 +293,7 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
   - a process hangs;
   - commits or cleanup fail;
   - the token usage cannot be read.
-- **Logs:** the path to the raw log of each attempt.
+- **Logs:** the path to the raw log of each attempt. For each check and criterion that failed, the end of its output, and the path to its whole output in `output/` of the run log.
 - **Quality, after the merge:** changes I made at review, and escapes (bugs that the verification did not find). An escape is an issue with the label `escaped-defect` in the target repo, linked to the PR of the factory that brought it; it is counted with `gh issue list --label escaped-defect`, not by `factory stats`.
 
 `factory stats` summarizes these files for a repo, per agent as well, to compare the subscriptions.

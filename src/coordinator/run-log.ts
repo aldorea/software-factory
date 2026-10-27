@@ -20,7 +20,7 @@ export interface AttemptRecord {
   agent: RoleChoice;
   outcome: AttemptOutcome["kind"];
   detail?: string;
-  failure?: { signature: string; description: string };
+  failure?: { signature: string; description: string; output?: string };
   usage: TokenUsage;
   logPath: string;
   startedAt: string;
@@ -33,6 +33,8 @@ export interface CheckRecord {
   exitCode: number;
   passed: boolean;
   firstError?: string;
+  outputTail?: string;
+  outputLog?: string;
 }
 
 export interface CriterionRecord {
@@ -41,6 +43,8 @@ export interface CriterionRecord {
   command: string;
   exitCode: number;
   passed: boolean;
+  outputTail?: string;
+  outputLog?: string;
 }
 
 export interface HumanCriterionRecord {
