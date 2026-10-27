@@ -31,7 +31,7 @@ export async function ghProblem(command = "gh"): Promise<string | null> {
   }
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim();
-    return `gh is not signed in: ${command} auth status failed with exit code ${result.exitCode}${detail === "" ? "" : `: ${detail}`}; run gh auth login`;
+    return `gh is not signed in, run gh auth login: ${command} auth status failed with exit code ${result.exitCode}${detail === "" ? "" : `: ${detail}`}`;
   }
   return null;
 }

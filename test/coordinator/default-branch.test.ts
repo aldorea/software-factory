@@ -32,7 +32,7 @@ describe("factory run: the default branch moves during the run", () => {
     expect(report.result).toBe("ready");
     expect(await git(target.repoDir, "merge-base", "--is-ancestor", "main", BRANCH).then(() => true)).toBe(true);
     expect(report.log.verification?.sha).toBe(head);
-    expect(verifications(runner)).toHaveLength(2);
+    expect(verifications(runner).map((worker) => /verification(-\d+)?$/.exec(worker.spec.id)?.[0])).toEqual(["verification", "verification-2"]);
     expect(target.github.pullRequests[0]?.draft).toBe(false);
   });
 
@@ -59,6 +59,7 @@ describe("factory run: the default branch moves during the run", () => {
     expect(await git(target.repoDir, "status", "--porcelain")).toBe("");
     const body = target.github.pullRequests[0]?.body ?? "";
     expect(target.github.pullRequests[0]?.draft).toBe(true);
+    expect(body).toContain("Draft: the run is blocked by default-branch-conflict (see Blocks).");
     expect(body).toContain(`**default-branch-conflict** on \`${head.slice(0, 12)}\`: main moved during the run`);
   });
 });

@@ -19,8 +19,9 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
   delete log.block;
   for (let round = 1; ; round += 1) {
     const sha = await revParse(repoDir, branch);
+    context.verifications += 1;
     const verified = await checksOn(context, {
-      label: round === 1 ? "verification" : `verification-${round}`,
+      label: context.verifications === 1 ? "verification" : `verification-${context.verifications}`,
       sha,
       purpose: { purpose: "verification", subtask: null, slot: 0 },
       plan: integrationPlan(spec, config.evidence),

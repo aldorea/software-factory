@@ -68,6 +68,7 @@ function resultLine(log: RunLog): string {
       `the integrated verification failed${failing.length > 0 ? ` (criteria not passing: ${failing.join(", ")})` : ""}`,
     );
   }
+  if (log.block !== undefined) failed.push(`the run is blocked by ${log.block.type} (see Blocks)`);
   if (log.evidence?.failure !== undefined) failed.push(`the attachments of the human criteria were not published: ${log.evidence.failure}`);
   const layer = log.workerLayerFailures.length;
   if (layer > 0) failed.push(`${layer} failure${layer === 1 ? "" : "s"} of the worker layer, not of the design`);

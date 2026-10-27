@@ -77,15 +77,27 @@ describe("outputTail", () => {
     expect(outputTail("\n\n\u001b[31mError: boom\u001b[0m   \n\n  at a.ts:1\n\n\n")).toBe("Error: boom\n\n  at a.ts:1");
   });
 
-  it("should keep at most 4 KB, dropping whole lines from the start", () => {
+  it("should keep at most 4 KB of whole lines from the end, and the end of the first line that does not fit, marked as cut", () => {
     const output = Array.from({ length: 30 }, (_, index) => `${index + 1} ${"é".repeat(200)}`).join("\n");
 
-    const tail = outputTail(output) ?? "";
+    const lines = (outputTail(output) ?? "").split("\n");
 
     expect(TAIL_BYTES).toBe(4096);
-    expect(Buffer.byteLength(tail)).toBeLessThanOrEqual(4096);
-    expect(tail.split("\n").every((line) => /^\d+ é{200}$/.test(line))).toBe(true);
-    expect(tail.endsWith(`30 ${"é".repeat(200)}`)).toBe(true);
+    expect(Buffer.byteLength(lines.join("\n"))).toBeLessThanOrEqual(4096);
+    expect(lines[0]).toMatch(/^…é+$/);
+    expect(lines.slice(1).every((line) => /^\d+ é{200}$/.test(line))).toBe(true);
+    expect(lines.at(-1)).toBe(`30 ${"é".repeat(200)}`);
+  });
+
+  it("should keep the lines after a very long line, because one long line must not push the error out of the tail", () => {
+    const output = ["✓ test 1", "✓ test 2", "é".repeat(3000), "FAIL src/a.test.ts > adds", "AssertionError: expected 1 to be 2"].join("\n");
+
+    const lines = (outputTail(output) ?? "").split("\n");
+
+    expect(Buffer.byteLength(lines.join("\n"))).toBeLessThanOrEqual(4096);
+    expect(lines.slice(-2)).toEqual(["FAIL src/a.test.ts > adds", "AssertionError: expected 1 to be 2"]);
+    expect(lines[0]).toMatch(/^…é+$/);
+    expect(lines[0]).not.toContain("\uFFFD");
   });
 
   it("should keep the end of a single line longer than 4 KB without a broken character", () => {

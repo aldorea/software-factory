@@ -308,7 +308,9 @@ describe("factory run for a one-subtask spec", () => {
     expect(report.log.verification?.passed).toBe(false);
     expect(report.result).toBe("draft");
     expect(target.github.pullRequests[0]?.draft).toBe(true);
-    expect(target.github.pullRequests[0]?.body).toContain("Draft: the integrated verification failed.");
+    expect(target.github.pullRequests[0]?.body).toContain(
+      "Draft: the integrated verification failed; the run is blocked by integration-check (see Blocks).",
+    );
   });
 
   it("should update the same pull request when the run starts again instead of opening a second one", async () => {

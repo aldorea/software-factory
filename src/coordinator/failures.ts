@@ -58,12 +58,30 @@ export function outputSection(subject: string, tail: string): string {
   return `The last lines of the output of ${subject}:\n\n${fence}text\n${tail}\n${fence}`;
 }
 
+const CUT_MARK = "…";
+
 function lastBytes(text: string, max: number): string {
-  const bytes = Buffer.from(text);
-  if (bytes.length <= max) return text;
-  const cut = bytes.subarray(bytes.length - max).toString().replace(/^\uFFFD+/, "");
-  const newline = cut.indexOf("\n");
-  return newline === -1 ? cut : cut.slice(newline + 1);
+  if (Buffer.byteLength(text) <= max) return text;
+  const kept: string[] = [];
+  let size = 0;
+  for (const line of text.split("\n").reverse()) {
+    const separator = kept.length > 0 ? 1 : 0;
+    const cost = Buffer.byteLength(line) + separator;
+    if (size + cost <= max) {
+      kept.unshift(line);
+      size += cost;
+      continue;
+    }
+    const room = max - size - separator - Buffer.byteLength(CUT_MARK);
+    if (room > 0) kept.unshift(`${CUT_MARK}${endOf(line, room)}`);
+    break;
+  }
+  return kept.join("\n");
+}
+
+function endOf(line: string, bytes: number): string {
+  const encoded = Buffer.from(line);
+  return encoded.subarray(encoded.length - bytes).toString().replace(/^\uFFFD+/, "");
 }
 
 export function firstErrorLine(output: string): string | undefined {

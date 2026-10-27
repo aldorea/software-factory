@@ -254,6 +254,7 @@ describe("factory run: follow-up tasks", () => {
     const body = repo.github.pullRequests[0]?.body ?? "";
     expect(body).toContain(`## Blocks\n\n**integration-check** on \`${sha.slice(0, 12)}\`: The check integrated failed on the integration branch`);
     expect(body).toContain("fails only once integrated");
+    expect(body).toContain("the run is blocked by integration-check (see Blocks)");
   });
 
   it("should record no integration-check block when a criterion fails too, because its follow-up carries the failed checks", async () => {
