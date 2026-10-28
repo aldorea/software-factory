@@ -9,6 +9,19 @@ function viewOf(...logs: RunLog[]): string {
   return visibleText(statsView(summarizeRuns(logs)));
 }
 
+describe("the criteria of the runs", () => {
+  it("should add up the passing, blocked, human and pending criteria of all the runs, as factory stats does", () => {
+    const first = cleanRun(0);
+    const second = cleanRun(1);
+    const text = viewOf(
+      { ...first, criteria: { passing: ["AC1", "AC2"], blocked: ["AC3"], human: [], pending: ["AC4"] } },
+      { ...second, criteria: { passing: ["AC1"], blocked: [], human: ["AC5", "AC6"], pending: [] } },
+    );
+
+    expect(text).toContain("Criterios Pasan 3 Bloqueados 1 Human 2 Pendientes 1");
+  });
+});
+
 describe("the statistics of each agent", () => {
   it("should show the runs, attempts, tokens and pauses of each agent so the subscriptions can be compared", () => {
     const text = viewOf(cleanRun(0, "claude-code"), cleanRun(1, "opencode"), cleanRun(2, "opencode"), pausedRun(3, "opencode", "opencode"));

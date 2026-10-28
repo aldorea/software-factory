@@ -27,6 +27,18 @@ function resultsSection(stats: RunStats): string {
   ].join("\n");
 }
 
+function criteriaSection({ criteria }: RunStats): string {
+  return [
+    "<h2>Criterios</h2>",
+    definitions([
+      ["Pasan", criteria.passing],
+      ["Bloqueados", criteria.blocked],
+      ["Human", criteria.human],
+      ["Pendientes", criteria.pending],
+    ]),
+  ].join("\n");
+}
+
 function costSection({ cost }: RunStats): string {
   const { perRun, perSubtask } = cost;
   return [
@@ -90,6 +102,7 @@ export function statsView(stats: RunStats): string {
     "<section>",
     "<h1>Estadísticas</h1>",
     resultsSection(stats),
+    criteriaSection(stats),
     costSection(stats),
     agentsSection(stats),
     frictionSection(stats),
