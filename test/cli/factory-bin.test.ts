@@ -21,22 +21,23 @@ describe("factory bin", () => {
     const dir = await temp.make("bin-web-");
     const child = spawn(process.execPath, [BIN, "web", dir, "--port", "0"], { stdio: ["ignore", "pipe", "pipe"] });
     const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
-    const url = await new Promise<string>((resolve, reject) => {
-      let text = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        text += chunk.toString();
-        const found = /http:\/\/\S+/.exec(text)?.[0];
-        if (found !== undefined) resolve(found);
+    try {
+      const url = await new Promise<string>((resolve, reject) => {
+        let text = "";
+        child.stdout.on("data", (chunk: Buffer) => {
+          text += chunk.toString();
+          const found = /http:\/\/\S+/.exec(text)?.[0];
+          if (found !== undefined) resolve(found);
+        });
+        child.once("exit", () => reject(new Error(`factory web exited before it printed a URL: ${text}`)));
       });
-      child.once("exit", () => reject(new Error(`factory web exited before it printed a URL: ${text}`)));
-    }).catch((error: Error) => {
+
+      expect((await fetch(url)).status).toBe(200);
+      child.kill("SIGINT");
+
+      expect(await exited).toBe(0);
+    } finally {
       child.kill("SIGKILL");
-      throw error;
-    });
-
-    expect((await fetch(url)).status).toBe(200);
-    child.kill("SIGINT");
-
-    expect(await exited).toBe(0);
+    }
   });
 });
