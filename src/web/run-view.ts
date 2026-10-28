@@ -2,6 +2,7 @@ import type { RunEntry } from "../coordinator/run-history.ts";
 import type { AgentChangeRecord, EvidenceBranchRecord, RunBlockRecord, RunLog } from "../coordinator/run-log.ts";
 import type { RoleChoice } from "../config/config.ts";
 import { anchor, escapeHtml, page } from "./html.ts";
+import { shouldReload } from "./reload.ts";
 import { relativeTime } from "./relative-time.ts";
 import { subtasksSection } from "./subtasks-view.ts";
 import { verificationSection } from "./verification-view.ts";
@@ -107,5 +108,5 @@ export function runView({ entry, now }: RunData): string {
     subtasksSection(log.subtasks),
     verificationSection(log.verification),
   ].filter(Boolean);
-  return page(`run ${log.runId}`, body.join("\n"));
+  return page(`run ${log.runId}`, body.join("\n"), { reload: shouldReload([log]) });
 }
