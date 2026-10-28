@@ -30,6 +30,7 @@ function cli(cwd: string) {
     docker: async () => null,
     gh: async () => null,
     launch: async () => 0,
+    signal: new AbortController().signal,
     out: (text) => out.push(text),
     err: (text) => err.push(text),
   };
