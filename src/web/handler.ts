@@ -35,6 +35,19 @@ function refusal(status: number, title: string): WebResponse {
   return html(status, page(title, `<h1>${title}</h1>`));
 }
 
+async function runPage(logsDir: string, runId: string, now: Date): Promise<WebResponse | null> {
+  const read = await readRunEntry(logsDir, runId);
+  if (read.kind !== "found") return null;
+  const logUrl = await logLinks(runId, join(logsDir, runId), read.entry.log);
+  return html(200, runView({ entry: read.entry, now, logUrl }));
+}
+
+async function runLog(logsDir: string, runId: string, segments: string[]): Promise<WebResponse | null> {
+  if ((await readRunEntry(logsDir, runId)).kind !== "found") return null;
+  const content = await readRunFile(join(logsDir, runId), segments);
+  return content === null ? null : { status: 200, contentType: TEXT, body: content };
+}
+
 export async function handleRequest(request: WebRequest): Promise<WebResponse> {
   if (!hostAllowed(request.host, request.port)) return refusal(403, "403 Forbidden");
   if (request.method !== "GET") return refusal(405, "405 Method Not Allowed");
@@ -45,16 +58,7 @@ export async function handleRequest(request: WebRequest): Promise<WebResponse> {
     const stats = summarizeRuns(runs.map((entry) => entry.log));
     return html(200, homeView({ runs, stats, unreadable, now: request.now }));
   }
-  if (route.kind === "run") {
-    const read = await readRunEntry(logsDir, route.runId);
-    if (read.kind === "found") {
-      const logUrl = await logLinks(route.runId, join(logsDir, route.runId), read.entry.log);
-      return html(200, runView({ entry: read.entry, now: request.now, logUrl }));
-    }
-  }
-  if (route.kind === "log") {
-    const content = await readRunFile(join(logsDir, route.runId), route.segments);
-    if (content !== null) return { status: 200, contentType: TEXT, body: content };
-  }
+  if (route.kind === "run") return (await runPage(logsDir, route.runId, request.now)) ?? refusal(404, "404 Not Found");
+  if (route.kind === "log") return (await runLog(logsDir, route.runId, route.segments)) ?? refusal(404, "404 Not Found");
   return refusal(404, "404 Not Found");
 }
