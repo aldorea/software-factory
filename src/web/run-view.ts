@@ -1,7 +1,8 @@
 import type { RunEntry } from "../coordinator/run-history.ts";
 import type { AgentChangeRecord, EvidenceBranchRecord, RunBlockRecord, RunLog } from "../coordinator/run-log.ts";
 import type { RoleChoice } from "../config/config.ts";
-import { anchor, escapeHtml, page } from "./html.ts";
+import { anchor, escapeHtml, FULL_OUTPUT, logAnchors, page } from "./html.ts";
+import type { LogUrl } from "./log-path.ts";
 import { shouldReload } from "./reload.ts";
 import { relativeTime } from "./relative-time.ts";
 import { subtasksSection } from "./subtasks-view.ts";
@@ -10,6 +11,7 @@ import { verificationSection } from "./verification-view.ts";
 export interface RunData {
   entry: RunEntry;
   now: Date;
+  logUrl: LogUrl;
 }
 
 function choiceText(choice: RoleChoice): string {
@@ -56,12 +58,15 @@ function pauseSection(log: RunLog): string {
   ].join("\n");
 }
 
-function blockDetails(block: RunBlockRecord): string[] {
+function blockDetails(block: RunBlockRecord, logUrl: LogUrl): string[] {
   if (block.type === "default-branch-conflict") return block.files.map((file) => `<li>${escapeHtml(file)}</li>`);
-  return block.checks.map((check) => `<li>${escapeHtml(check.name)}: ${check.passed ? "pasa" : "falla"}</li>`);
+  return block.checks.map((check) => {
+    const text = `${escapeHtml(check.name)}: ${check.passed ? "pasa" : "falla"}`;
+    return `<li>${[text, ...logAnchors(logUrl(check.outputLog), FULL_OUTPUT)].join(" ")}</li>`;
+  });
 }
 
-function blockSection({ block }: RunLog): string {
+function blockSection({ block }: RunLog, logUrl: LogUrl): string {
   if (block === undefined) return "";
   return [
     "<h2>Bloqueo del run</h2>",
@@ -69,7 +74,7 @@ function blockSection({ block }: RunLog): string {
     `<p>Motivo: ${escapeHtml(block.reason)}</p>`,
     `<p>Commit: ${escapeHtml(block.sha)}</p>`,
     "<ul>",
-    ...blockDetails(block),
+    ...blockDetails(block, logUrl),
     "</ul>",
   ].join("\n");
 }
@@ -93,7 +98,7 @@ function linksSection({ pullRequest, evidence }: RunLog): string {
   return lines.join("\n");
 }
 
-export function runView({ entry, now }: RunData): string {
+export function runView({ entry, now, logUrl }: RunData): string {
   const { log } = entry;
   const body = [
     `<p><a href="/">Runs</a></p>`,
@@ -102,11 +107,11 @@ export function runView({ entry, now }: RunData): string {
     `<p>Último cambio: ${escapeHtml(relativeTime(entry.modifiedAt, now))}</p>`,
     linksSection(log),
     pauseSection(log),
-    blockSection(log),
+    blockSection(log, logUrl),
     agentsSection(log),
     criteriaSection(log),
-    subtasksSection(log.subtasks),
-    verificationSection(log.verification),
+    subtasksSection(log.subtasks, logUrl),
+    verificationSection(log.verification, logUrl),
   ].filter(Boolean);
   return page(`run ${log.runId}`, body.join("\n"), { reload: shouldReload([log]) });
 }

@@ -43,7 +43,18 @@ describe("matchRoute", () => {
     "/runs",
     "/runs/",
     `/runs/${RUN_ID}/`,
-    `/runs/${RUN_ID}/extra`,
+    `/runs/${RUN_ID}//`,
+    `/runs/${RUN_ID}//etc/passwd`,
+    `/runs/${RUN_ID}/..`,
+    `/runs/${RUN_ID}/a/../b`,
+    `/runs/${RUN_ID}/%2e%2e/b`,
+    `/runs/${RUN_ID}/.`,
+    `/runs/${RUN_ID}/a/./b`,
+    `/runs/${RUN_ID}/%2Fetc%2Fpasswd`,
+    `/runs/${RUN_ID}/a%2Fb`,
+    `/runs/${RUN_ID}/a%5Cb`,
+    `/runs/${RUN_ID}/a%00b`,
+    `/runs/${RUN_ID}/%zz`,
     "/runs/..",
     "/runs/../etc",
     "/runs/%2e%2e",
@@ -57,6 +68,18 @@ describe("matchRoute", () => {
     "/nope",
   ])("should not match %s, so a malformed path fails closed", (path) => {
     expect(matchRoute(path)).toEqual({ kind: "not-found" });
+  });
+
+  it("should match a file of a run as the segments below the run ID", () => {
+    expect(matchRoute(`/runs/${RUN_ID}/output/final/check-1-test.log`)).toEqual({
+      kind: "log",
+      runId: RUN_ID,
+      segments: ["output", "final", "check-1-test.log"],
+    });
+  });
+
+  it("should decode the segments of a file before it validates them", () => {
+    expect(matchRoute(`/runs/${RUN_ID}/my%20file.log`)).toEqual({ kind: "log", runId: RUN_ID, segments: ["my file.log"] });
   });
 
   it("should decode the segment before it validates it", () => {

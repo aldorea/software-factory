@@ -15,6 +15,13 @@ export function anchor(url: string, text: string): string {
   return href === null ? escapeHtml(text) : `<a href="${escapeHtml(href)}">${escapeHtml(text)}</a>`;
 }
 
+export const RAW_LOG = "Log crudo";
+export const FULL_OUTPUT = "Salida completa";
+
+export function logAnchors(url: string | null, text: string): string[] {
+  return url === null ? [] : [`<a href="${escapeHtml(url)}">${escapeHtml(text)}</a>`];
+}
+
 export interface PageOptions {
   reload?: boolean;
 }
