@@ -1,7 +1,7 @@
 import type { AttemptRecord, FollowUpRecord, GateRecord, SubtaskRecord, VerifierRecord } from "../coordinator/run-log.ts";
 import { countedTokens } from "../coordinator/stop-rules.ts";
 import { checksGroup, criteriaGroup } from "./evidence-view.ts";
-import { bullets, escapeHtml, logAnchors, RAW_LOG, titledList } from "./html.ts";
+import { badge, bullets, escapeHtml, logAnchors, RAW_LOG, titledList } from "./html.ts";
 import type { LogUrl } from "./log-path.ts";
 
 function list(values: readonly string[]): string {
@@ -26,7 +26,7 @@ function attemptsList(attempts: readonly AttemptRecord[], logUrl: LogUrl): strin
 
 function verifierItem(record: VerifierRecord, logUrl: LogUrl): string {
   const reason = record.reason === undefined ? "" : ` (${record.reason})`;
-  const text = escapeHtml(`${record.id}: ${record.verdict}${reason}`);
+  const text = `${escapeHtml(record.id)}: ${badge(record.verdict)}${escapeHtml(reason)}`;
   return `<li class="verifier">${[text, ...logAnchors(logUrl(record.logPath), RAW_LOG)].join(" ")}</li>`;
 }
 
@@ -43,7 +43,7 @@ function reasonsList(reasons: readonly string[]): string {
 function gateBlock(gate: GateRecord | undefined, logUrl: LogUrl): string {
   if (gate === undefined) return "";
   return [
-    `<h4>Gate ${escapeHtml(gate.sha)}: ${gate.accepted ? "aceptado" : "rechazado"}</h4>`,
+    `<h4>Gate ${escapeHtml(gate.sha)}: ${badge(gate.accepted ? "aceptado" : "rechazado")}</h4>`,
     reasonsList(gate.reasons),
     checksGroup(gate.checks, logUrl),
     criteriaGroup(gate.criteria, logUrl),
@@ -83,7 +83,7 @@ function subtaskBlock(subtask: SubtaskRecord, logUrl: LogUrl): string {
   return [
     `<section class="subtask">`,
     `<h3>${escapeHtml(subtask.id)}</h3>`,
-    `<p>Estado: ${escapeHtml(subtask.state)}</p>`,
+    `<p>Estado: ${badge(subtask.state)}</p>`,
     `<p>Criterios: ${list(subtask.criteria)}</p>`,
     `<p>Branch: ${escapeHtml(subtask.branch)}</p>`,
     `<p>Scope extensions: ${list(subtask.scopeExtensions)}</p>`,

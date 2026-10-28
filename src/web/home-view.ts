@@ -1,5 +1,5 @@
 import type { RunEntry } from "../coordinator/run-history.ts";
-import { anchor, escapeHtml, link, page, titledList } from "./html.ts";
+import { anchor, badge, escapeHtml, link, page, titledList } from "./html.ts";
 import { relativeTime } from "./relative-time.ts";
 import { shouldReload } from "./reload.ts";
 import { parseRunId } from "./routes.ts";
@@ -30,7 +30,7 @@ function runRow(entry: RunEntry, now: Date): string {
     "<tr>",
     `<td>#${escapeHtml(String(log.issue))}</td>`,
     `<td>${runIdCell(entry)}</td>`,
-    `<td>${escapeHtml(log.result)}</td>`,
+    `<td>${badge(log.result)}</td>`,
     `<td>${escapeHtml(relativeTime(entry.modifiedAt, now))}</td>`,
     `<td>${pullRequestCell(entry)}</td>`,
     "</tr>",

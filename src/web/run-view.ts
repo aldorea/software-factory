@@ -2,7 +2,7 @@ import type { RunEntry } from "../coordinator/run-history.ts";
 import type { AgentChangeRecord, EvidenceBranchRecord, RunBlockRecord, RunLog } from "../coordinator/run-log.ts";
 import type { RoleChoice } from "../config/config.ts";
 import { checkItem } from "./evidence-view.ts";
-import { anchor, bullets, escapeHtml, page, titledList } from "./html.ts";
+import { anchor, badge, bullets, escapeHtml, page, titledList } from "./html.ts";
 import type { LogUrl } from "./log-path.ts";
 import { shouldReload } from "./reload.ts";
 import { relativeTime } from "./relative-time.ts";
@@ -98,7 +98,7 @@ export function runView({ entry, now, logUrl }: RunData): string {
   const body = [
     `<p><a href="/">Runs</a></p>`,
     `<h1>#${escapeHtml(String(log.issue))} ${escapeHtml(log.runId)}</h1>`,
-    `<p>Resultado: ${escapeHtml(log.result)}</p>`,
+    `<p>Resultado: ${badge(log.result)}</p>`,
     `<p>Último cambio: ${escapeHtml(relativeTime(entry.modifiedAt, now))}</p>`,
     linksSection(log),
     pauseSection(log),

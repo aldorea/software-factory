@@ -1,5 +1,5 @@
 import type { HumanCriterionRecord, TesterRecord, TesterVerdictRecord, VerificationRecord } from "../coordinator/run-log.ts";
-import { checksGroup, criteriaGroup, verdict } from "./evidence-view.ts";
+import { checksGroup, criteriaGroup, verdictBadge } from "./evidence-view.ts";
 import { bullets, escapeHtml, logAnchors, RAW_LOG, titledList } from "./html.ts";
 import type { LogUrl } from "./log-path.ts";
 
@@ -15,8 +15,8 @@ function humanGroup(criteria: readonly HumanCriterionRecord[]): string {
 
 function verdictItem(testerVerdict: TesterVerdictRecord): string {
   const evidence = testerVerdict.evidence.length === 0 ? "" : ` [${testerVerdict.evidence.join(", ")}]`;
-  const text = `${testerVerdict.id}: ${verdict(testerVerdict.passed)} (${testerVerdict.observation})${evidence}`;
-  return `<li class="tester-verdict">${escapeHtml(text)}</li>`;
+  const text = `${escapeHtml(testerVerdict.id)}: ${verdictBadge(testerVerdict.passed)} ${escapeHtml(`(${testerVerdict.observation})${evidence}`)}`;
+  return `<li class="tester-verdict">${text}</li>`;
 }
 
 function testerBlock(tester: TesterRecord | undefined, logUrl: LogUrl): string {
@@ -36,7 +36,7 @@ export function verificationSection(verification: VerificationRecord | undefined
   const lines = [
     "<h2>Integrated verification</h2>",
     `<p>SHA: ${escapeHtml(verification.sha)}</p>`,
-    `<p>Resultado: ${verdict(verification.passed)}</p>`,
+    `<p>Resultado: ${verdictBadge(verification.passed)}</p>`,
   ];
   if (verification.environment !== undefined) lines.push(`<p>Entorno: ${escapeHtml(verification.environment)}</p>`);
   lines.push(
