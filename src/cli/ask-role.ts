@@ -1,10 +1,11 @@
 import { emitKeypressEvents } from "node:readline";
 import { createInterface } from "node:readline/promises";
 import type { RoleChoice } from "../config/config.ts";
-import { SUGGESTED_MODELS } from "../workers/agents.ts";
+import { choiceProblems } from "../config/roles.ts";
+import type { Role } from "../workers/agent-adapter.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { RoleQuestion } from "./main.ts";
-import { moveSelection, roleMenu, type MenuOption } from "./role-menu.ts";
+import { moveSelection, roleMenu, SUGGESTED_MODELS, type MenuOption } from "./role-menu.ts";
 
 const ROLE_NAMES = { workers: "the workers", verifier: "the independent verifier", tester: "the acceptance tester" } as const;
 
@@ -13,7 +14,7 @@ export async function askRoleInTerminal(question: RoleQuestion): Promise<RoleCho
   process.stdout.write(`Agent and model of ${ROLE_NAMES[question.role]} (↑/↓, Enter):\n`);
   const picked = await pick(menu.options, menu.selected);
   if (picked.model !== undefined) return { agent: picked.agent, model: picked.model };
-  return { agent: picked.agent, model: await typeModel(picked.agent) };
+  return { agent: picked.agent, model: await typeModel(question.role, picked.agent) };
 }
 
 function pick(options: MenuOption[], initial: number): Promise<MenuOption> {
@@ -54,13 +55,17 @@ function pick(options: MenuOption[], initial: number): Promise<MenuOption> {
   });
 }
 
-async function typeModel(agent: AgentKind): Promise<string> {
+async function typeModel(role: Role, agent: AgentKind): Promise<string> {
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const hint = agent === "opencode" ? " (opencode-go/…)" : "";
-    let model = "";
-    while (model === "") model = (await terminal.question(`Model of ${agent}${hint}: `)).trim();
-    return model;
+    for (;;) {
+      const model = (await terminal.question(`Model of ${agent}${hint}: `)).trim();
+      if (model === "") continue;
+      const problems = choiceProblems(role, { agent, model });
+      if (problems.length === 0) return model;
+      for (const problem of problems) process.stdout.write(`${problem}\n`);
+    }
   } finally {
     terminal.close();
   }

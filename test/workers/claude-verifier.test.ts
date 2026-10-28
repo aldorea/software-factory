@@ -60,6 +60,12 @@ describe("Claude Code verifier outcome", () => {
     expect(claudeVerifierOutcome(feed([init, answer("ACCEPT")]), exited, "")).toMatchObject({ kind: "agent-error" });
   });
 
+  it("should report a deadline as a deadline, even when no init event came", () => {
+    expect(claudeVerifierOutcome(initialClaudeState(), { stopReason: "deadline", exitCode: null, stderrTail: "" }, "")).toEqual({
+      kind: "deadline",
+    });
+  });
+
   it("should reject the answer when the verifier left a file in its directory", () => {
     expect(claudeVerifierOutcome(feed([initWithNoTools, answer("ACCEPT")]), exited, "probe.txt\n")).toEqual({
       kind: "agent-error",

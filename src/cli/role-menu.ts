@@ -1,6 +1,17 @@
 import type { AgentKind } from "../workers/types.ts";
 import type { RoleQuestion } from "./main.ts";
 
+export const SUGGESTED_MODELS: Record<AgentKind, string[]> = {
+  "claude-code": ["opus", "sonnet", "haiku"],
+  opencode: [
+    "opencode-go/kimi-k3",
+    "opencode-go/glm-5.3",
+    "opencode-go/deepseek-v4-pro",
+    "opencode-go/qwen3.8-max",
+    "opencode-go/minimax-m3",
+  ],
+};
+
 export interface MenuOption {
   agent: AgentKind;
   model?: string;

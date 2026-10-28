@@ -47,7 +47,7 @@ export interface VerifierResult extends AttemptResult {
 }
 
 interface VerifierSession {
-  setup: string;
+  setup: string[];
   args: string[];
   onLine(line: string): void;
   outcome(supervised: SupervisedProcess, listing: string): AttemptOutcome;
@@ -58,7 +58,7 @@ function verifierSession(agent: AgentSpec): VerifierSession {
   if (agent.kind === "claude-code") {
     let state = initialClaudeState();
     return {
-      setup: `mkdir -p ${WORKDIR}`,
+      setup: ["mkdir", "-p", WORKDIR],
       args: claudeVerifierArgs(agent.model),
       onLine: (line) => {
         state = applyClaudeLine(state, line);
@@ -69,7 +69,7 @@ function verifierSession(agent: AgentSpec): VerifierSession {
   }
   let state = initialOpenCodeState();
   return {
-    setup: `mkdir -p ${WORKDIR} && printf '%s' "$1" > ${WORKDIR}/${CONFIG_FILE}`,
+    setup: ["sh", "-c", `mkdir -p ${WORKDIR} && printf '%s' "$1" > ${WORKDIR}/${CONFIG_FILE}`, "sh", DENY_ALL_TOOLS],
     args: openCodeArgs(agent.model, { autoApprove: false, agent: VERIFIER_AGENT }),
     onLine: (line) => {
       state = applyOpenCodeLine(state, line);
@@ -92,7 +92,7 @@ export async function askVerifier(request: VerifierRequest): Promise<VerifierRes
     } finally {
       await rm(envFile, { force: true });
     }
-    await execOk("docker", ["exec", container, "sh", "-c", session.setup, "sh", DENY_ALL_TOOLS]);
+    await execOk("docker", ["exec", container, ...session.setup]);
 
     const supervised = await supervise({
       command: "docker",
@@ -141,6 +141,8 @@ export function claudeVerifierOutcome(
   supervised: SupervisedProcess,
   directoryListing: string,
 ): AttemptOutcome {
+  const answered = claudeOutcome(state, supervised);
+  if (answered.kind === "deadline" || answered.kind === "idle-timeout") return answered;
   const { tools, mcpServers } = state.init ?? {};
   if (tools === undefined || mcpServers === undefined) {
     return {
@@ -157,7 +159,7 @@ export function claudeVerifierOutcome(
       exitCode: supervised.exitCode,
     };
   }
-  return checkedAnswer(claudeOutcome(state, supervised), supervised, directoryListing, []);
+  return checkedAnswer(answered, supervised, directoryListing, []);
 }
 
 function checkedAnswer(

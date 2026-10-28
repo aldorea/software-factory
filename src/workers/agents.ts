@@ -10,17 +10,6 @@ const ADAPTERS: Record<AgentKind, AgentAdapter> = {
 
 export const AGENT_KINDS: AgentKind[] = ["claude-code", "opencode"];
 
-export const SUGGESTED_MODELS: Record<AgentKind, string[]> = {
-  "claude-code": ["opus", "sonnet", "haiku"],
-  opencode: [
-    "opencode-go/kimi-k3",
-    "opencode-go/glm-5.3",
-    "opencode-go/deepseek-v4-pro",
-    "opencode-go/qwen3.8-max",
-    "opencode-go/minimax-m3",
-  ],
-};
-
 export const ROLE_REQUIREMENTS: Record<Role, (keyof AgentCapabilities)[]> = {
   workers: ["readsTokenUsage", "detectsPlanLimit"],
   verifier: ["deniesEveryTool"],
