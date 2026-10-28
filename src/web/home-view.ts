@@ -1,9 +1,12 @@
 import type { RunEntry } from "../coordinator/run-history.ts";
 import { escapeHtml, page, safeLink } from "./html.ts";
 import { relativeTime } from "./relative-time.ts";
+import { statsView } from "./stats-view.ts";
+import type { RunStats } from "../coordinator/stats.ts";
 
 export interface HomeData {
   runs: RunEntry[];
+  stats: RunStats;
   unreadable: string[];
   now: Date;
 }
@@ -46,7 +49,11 @@ function unreadableList(unreadable: string[]): string {
   return ["<h2>run.json ilegibles</h2>", "<ul>", ...unreadable.map((name) => `<li>${escapeHtml(name)}</li>`), "</ul>"].join("\n");
 }
 
-export function homeView({ runs, unreadable, now }: HomeData): string {
+export function homeView({ runs, stats, unreadable, now }: HomeData): string {
   const newestFirst = [...runs].reverse();
-  return page("factory web", ["<h1>Runs</h1>", runsTable(newestFirst, now), unreadableList(unreadable)].filter(Boolean).join("\n"));
+  const statistics = runs.length === 0 ? "" : statsView(stats);
+  return page(
+    "factory web",
+    [statistics, "<h1>Runs</h1>", runsTable(newestFirst, now), unreadableList(unreadable)].filter(Boolean).join("\n"),
+  );
 }
