@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Clock } from "../coordinator/ports.ts";
-import { handleRequest } from "./handler.ts";
+import { handleRequest, TEXT } from "./handler.ts";
+import { WEB_HOST } from "./host.ts";
 
-export const WEB_HOST = "127.0.0.1";
 export const DEFAULT_WEB_PORT = 7433;
 
 export interface WebServer {
@@ -16,6 +16,7 @@ export interface WebServerOptions {
   repoDir: string;
   port: number;
   clock: Clock;
+  err: (text: string) => void;
 }
 
 function pathOf(url: string | undefined): string {
@@ -38,8 +39,9 @@ async function respond(incoming: IncomingMessage, outgoing: ServerResponse, opti
       "x-content-type-options": "nosniff",
     });
     outgoing.end(response.body);
-  } catch {
-    outgoing.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+  } catch (error) {
+    options.err(`factory web: ${incoming.method ?? "GET"} ${pathOf(incoming.url)} failed: ${error instanceof Error ? error.message : String(error)}`);
+    outgoing.writeHead(500, { "content-type": TEXT });
     outgoing.end("internal error");
   }
 }

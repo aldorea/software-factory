@@ -1,5 +1,5 @@
 import type { RunEntry } from "../coordinator/run-history.ts";
-import { escapeHtml, page, safeLink } from "./html.ts";
+import { anchor, escapeHtml, link, page, titledList } from "./html.ts";
 import { relativeTime } from "./relative-time.ts";
 import { shouldReload } from "./reload.ts";
 import { parseRunId } from "./routes.ts";
@@ -16,14 +16,12 @@ export interface HomeData {
 function pullRequestCell(entry: RunEntry): string {
   const pullRequest = entry.log.pullRequest;
   if (pullRequest === undefined) return "";
-  const text = `#${pullRequest.number}`;
-  const url = safeLink(pullRequest.url);
-  return url === null ? escapeHtml(text) : `<a href="${escapeHtml(url)}">${escapeHtml(text)}</a>`;
+  return anchor(pullRequest.url, `#${pullRequest.number}`);
 }
 
 function runIdCell(entry: RunEntry): string {
   if (parseRunId(entry.dir) === null) return escapeHtml(entry.log.runId);
-  return `<a href="/runs/${entry.dir}">${escapeHtml(entry.log.runId)}</a>`;
+  return link(`/runs/${entry.dir}`, entry.log.runId);
 }
 
 function runRow(entry: RunEntry, now: Date): string {
@@ -53,7 +51,7 @@ function runsTable(runs: RunEntry[], now: Date): string {
 
 function unreadableList(unreadable: string[]): string {
   if (unreadable.length === 0) return "";
-  return ["<h2>run.json ilegibles</h2>", "<ul>", ...unreadable.map((name) => `<li>${escapeHtml(name)}</li>`), "</ul>"].join("\n");
+  return titledList("h2", "run.json ilegibles", unreadable.map((name) => `<li>${escapeHtml(name)}</li>`));
 }
 
 export function homeView({ runs, stats, unreadable, now }: HomeData): string {

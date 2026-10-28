@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { GateRecord } from "../../src/coordinator/run-log.ts";
 import { attemptRecord, subtaskRecord } from "../coordinator/run-log-fixtures.ts";
-import { aRun, runPage, temp, visibleText } from "./run-page-helpers.ts";
+import { aRun, runPage, temp, visibleText } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 

@@ -1,8 +1,8 @@
 import type { CheckRecord, CriterionRecord } from "../coordinator/run-log.ts";
-import { escapeHtml, FULL_OUTPUT, logAnchors } from "./html.ts";
+import { escapeHtml, FULL_OUTPUT, logAnchors, titledList } from "./html.ts";
 import type { LogUrl } from "./log-path.ts";
 
-function verdict(passed: boolean): string {
+export function verdict(passed: boolean): string {
   return passed ? "pasa" : "falla";
 }
 
@@ -10,7 +10,7 @@ function item(className: string, text: string, outputUrl: string | null): string
   return `<li class="${className}">${[escapeHtml(text), ...logAnchors(outputUrl, FULL_OUTPUT)].join(" ")}</li>`;
 }
 
-function checkItem(check: CheckRecord, logUrl: LogUrl): string {
+export function checkItem(check: CheckRecord, logUrl: LogUrl): string {
   const error = check.firstError === undefined ? "" : ` (${check.firstError})`;
   return item("check", `${check.name}: ${verdict(check.passed)}${error}`, logUrl(check.outputLog));
 }
@@ -20,7 +20,7 @@ function criterionItem(criterion: CriterionRecord, logUrl: LogUrl): string {
 }
 
 function group(heading: string, items: string[]): string {
-  return items.length === 0 ? "" : [`<h4>${heading}</h4>`, "<ul>", ...items, "</ul>"].join("\n");
+  return items.length === 0 ? "" : titledList("h4", heading, items);
 }
 
 export function checksGroup(checks: readonly CheckRecord[], logUrl: LogUrl): string {

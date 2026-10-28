@@ -20,7 +20,7 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 | `factory approve <n>` | Validates the spec and approves it with a hash |
 | `factory run <n>` | Implements, verifies and opens the PR |
 | `factory stats` | Summary of the `run.json` files of a repo |
-| `factory web [--port <port>]` | Local read-only web view of the run log of a repo |
+| `factory web [target-repo] [--port <port>]` | Local read-only web view of the run log of a repo |
 | `factory init` | Prepares `.factory/` in a target repo |
 
 The target repo is the current directory, or the last argument. The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker is not running, or when `gh` is missing or not signed in (`gh auth status`). It reports every such problem before it loads the config or asks for the agent of any role. To set a repo up, see the [onboarding guide](onboarding.md).

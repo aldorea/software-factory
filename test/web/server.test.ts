@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { connect } from "node:net";
 import { join } from "node:path";
@@ -11,8 +11,10 @@ import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
 const servers: WebServer[] = [];
+const errors: string[] = [];
 
 afterEach(async () => {
+  errors.splice(0);
   await Promise.all(servers.splice(0).map((server) => server.close()));
   await temp.removeAll();
 });
@@ -22,6 +24,7 @@ async function start(repoDir?: string): Promise<WebServer> {
     repoDir: repoDir ?? (await temp.make("web-server-")),
     port: 0,
     clock: new FakeClock("2026-10-24T08:00:00.000Z"),
+    err: (text) => errors.push(text),
   });
   servers.push(server);
   return server;
@@ -99,6 +102,27 @@ describe("the web server", () => {
     for (const response of responses) {
       expect(response).toMatch(/^HTTP\/1\.1 404 /);
       expect(response).not.toContain("the-secret");
+    }
+  });
+
+  it("should answer 500 and report the error to the terminal when a request fails for a reason that is not a missing file", async () => {
+    const { dir, runId } = await repoWithLog();
+    const locked = join(dir, ".factory", "logs", runId, "locked");
+    await mkdir(locked);
+    await writeFile(join(locked, "inside.log"), "x");
+    await chmod(locked, 0o000);
+    const server = await start(dir);
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.port}/runs/${runId}/locked/inside.log`);
+
+      expect(response.status).toBe(500);
+      expect(await response.text()).toBe("internal error");
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain(`/runs/${runId}/locked/inside.log`);
+      expect(errors[0]).toContain("EACCES");
+    } finally {
+      await chmod(locked, 0o755);
     }
   });
 

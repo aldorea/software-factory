@@ -10,16 +10,28 @@ export function safeLink(url: string): string | null {
   return /^https?:\/\//i.test(url) ? url : null;
 }
 
+export function link(href: string, text: string): string {
+  return `<a href="${escapeHtml(href)}">${escapeHtml(text)}</a>`;
+}
+
 export function anchor(url: string, text: string): string {
   const href = safeLink(url);
-  return href === null ? escapeHtml(text) : `<a href="${escapeHtml(href)}">${escapeHtml(text)}</a>`;
+  return href === null ? escapeHtml(text) : link(href, text);
 }
 
 export const RAW_LOG = "Log crudo";
 export const FULL_OUTPUT = "Salida completa";
 
 export function logAnchors(url: string | null, text: string): string[] {
-  return url === null ? [] : [`<a href="${escapeHtml(url)}">${escapeHtml(text)}</a>`];
+  return url === null ? [] : [link(url, text)];
+}
+
+export function bullets(items: readonly string[]): string {
+  return ["<ul>", ...items, "</ul>"].join("\n");
+}
+
+export function titledList(level: "h2" | "h3" | "h4", heading: string, items: readonly string[]): string {
+  return [`<${level}>${escapeHtml(heading)}</${level}>`, bullets(items)].join("\n");
 }
 
 export interface PageOptions {

@@ -3,14 +3,24 @@ import type { RunLog } from "../../src/coordinator/run-log.ts";
 import { summarizeRuns } from "../../src/coordinator/stats.ts";
 import { statsView } from "../../src/web/stats-view.ts";
 import { cleanRun, failedRun, pausedRun } from "../coordinator/run-log-fixtures.ts";
-
-function visibleText(html: string): string {
-  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
-}
+import { visibleText } from "./web-helpers.ts";
 
 function viewOf(...logs: RunLog[]): string {
   return visibleText(statsView(summarizeRuns(logs)));
 }
+
+describe("the criteria of the runs", () => {
+  it("should add up the passing, blocked, human and pending criteria of all the runs, as factory stats does", () => {
+    const first = cleanRun(0);
+    const second = cleanRun(1);
+    const text = viewOf(
+      { ...first, criteria: { passing: ["AC1", "AC2"], blocked: ["AC3"], human: [], pending: ["AC4"] } },
+      { ...second, criteria: { passing: ["AC1"], blocked: [], human: ["AC5", "AC6"], pending: [] } },
+    );
+
+    expect(text).toContain("Criterios Pasan 3 Bloqueados 1 Human 2 Pendientes 1");
+  });
+});
 
 describe("the statistics of each agent", () => {
   it("should show the runs, attempts, tokens and pauses of each agent so the subscriptions can be compared", () => {

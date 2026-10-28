@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { handleRequest } from "../../src/web/handler.ts";
-import { aRun, repoWithRuns, request, temp } from "./run-page-helpers.ts";
+import { aRun, repoWithRuns, request, temp } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 
@@ -119,6 +119,29 @@ describe("a path that leaves the run folder", () => {
 
     const response = await handleRequest(request(dir, "/runs/9-2026-01-01T00-00-00-000Z/S1-attempt-1.jsonl"));
 
+    expect(response.status).toBe(404);
+  });
+
+  it("should answer 404 for a file in a folder that has the format of a run ID and no run.json, because the run does not exist in the run log", async () => {
+    const { dir } = await repoWithSecrets();
+    const orphan = aRun(2);
+    await mkdir(join(dir, ".factory", "logs", orphan.runId), { recursive: true });
+    await writeFile(join(dir, ".factory", "logs", orphan.runId, "orphan.log"), SECRET);
+
+    const response = await handleRequest(request(dir, `/runs/${orphan.runId}/orphan.log`));
+
+    expect(response.status).toBe(404);
+    expect(response.body).not.toContain(SECRET);
+  });
+
+  it("should answer 404 for a file of a run whose run.json cannot be read, as the page of that run does", async () => {
+    const { dir, runDir, runId } = await repoWithLog({ "S1-attempt-1.jsonl": SECRET });
+    await writeFile(join(runDir, "run.json"), "not json");
+
+    const page = await handleRequest(request(dir, `/runs/${runId}`));
+    const response = await handleRequest(request(dir, `/runs/${runId}/S1-attempt-1.jsonl`));
+
+    expect(page.status).toBe(404);
     expect(response.status).toBe(404);
   });
 

@@ -1,6 +1,6 @@
 import type { HumanCriterionRecord, TesterRecord, TesterVerdictRecord, VerificationRecord } from "../coordinator/run-log.ts";
-import { checksGroup, criteriaGroup } from "./evidence-view.ts";
-import { escapeHtml, logAnchors, RAW_LOG } from "./html.ts";
+import { checksGroup, criteriaGroup, verdict } from "./evidence-view.ts";
+import { bullets, escapeHtml, logAnchors, RAW_LOG, titledList } from "./html.ts";
 import type { LogUrl } from "./log-path.ts";
 
 function humanItem(criterion: HumanCriterionRecord): string {
@@ -10,12 +10,12 @@ function humanItem(criterion: HumanCriterionRecord): string {
 
 function humanGroup(criteria: readonly HumanCriterionRecord[]): string {
   if (criteria.length === 0) return "";
-  return ["<h4>Criterios human</h4>", "<ul>", ...criteria.map(humanItem), "</ul>"].join("\n");
+  return titledList("h4", "Criterios human", criteria.map(humanItem));
 }
 
-function verdictItem(verdict: TesterVerdictRecord): string {
-  const evidence = verdict.evidence.length === 0 ? "" : ` [${verdict.evidence.join(", ")}]`;
-  const text = `${verdict.id}: ${verdict.passed ? "pasa" : "falla"} (${verdict.observation})${evidence}`;
+function verdictItem(testerVerdict: TesterVerdictRecord): string {
+  const evidence = testerVerdict.evidence.length === 0 ? "" : ` [${testerVerdict.evidence.join(", ")}]`;
+  const text = `${testerVerdict.id}: ${verdict(testerVerdict.passed)} (${testerVerdict.observation})${evidence}`;
   return `<li class="tester-verdict">${escapeHtml(text)}</li>`;
 }
 
@@ -27,7 +27,7 @@ function testerBlock(tester: TesterRecord | undefined, logUrl: LogUrl): string {
   ];
   lines.push(...logAnchors(logUrl(tester.logPath), RAW_LOG).map((link) => `<p>${link}</p>`));
   if (tester.error !== undefined) lines.push(`<p>Error: ${escapeHtml(tester.error)}</p>`);
-  if (tester.verdicts.length > 0) lines.push("<ul>", ...tester.verdicts.map(verdictItem), "</ul>");
+  if (tester.verdicts.length > 0) lines.push(bullets(tester.verdicts.map(verdictItem)));
   return lines.join("\n");
 }
 
@@ -36,7 +36,7 @@ export function verificationSection(verification: VerificationRecord | undefined
   const lines = [
     "<h2>Integrated verification</h2>",
     `<p>SHA: ${escapeHtml(verification.sha)}</p>`,
-    `<p>Resultado: ${verification.passed ? "pasa" : "falla"}</p>`,
+    `<p>Resultado: ${verdict(verification.passed)}</p>`,
   ];
   if (verification.environment !== undefined) lines.push(`<p>Entorno: ${escapeHtml(verification.environment)}</p>`);
   lines.push(
