@@ -50,11 +50,10 @@ function criteriaSection({ criteria }: RunLog): string {
 
 function pauseSection(log: RunLog): string {
   if (log.result !== "paused") return "";
-  const resets = log.resetsAt === undefined ? "desconocido" : log.resetsAt;
   return [
     "<h2>Pausado</h2>",
     `<p>Motivo: ${escapeHtml(log.pauseReason ?? "desconocido")}</p>`,
-    `<p>Reset del plan limit: ${escapeHtml(resets)}</p>`,
+    `<p>Reset del plan limit: ${escapeHtml(log.resetsAt ?? "desconocido")}</p>`,
   ].join("\n");
 }
 

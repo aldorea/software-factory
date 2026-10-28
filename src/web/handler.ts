@@ -25,7 +25,7 @@ export interface WebResponse {
 }
 
 const HTML = "text/html; charset=utf-8";
-const TEXT = "text/plain; charset=utf-8";
+export const TEXT = "text/plain; charset=utf-8";
 
 function html(status: number, body: string): WebResponse {
   return { status, contentType: HTML, body };
