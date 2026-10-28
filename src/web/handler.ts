@@ -46,10 +46,10 @@ export async function handleRequest(request: WebRequest): Promise<WebResponse> {
     return html(200, homeView({ runs, stats, unreadable, now: request.now }));
   }
   if (route.kind === "run") {
-    const entry = await readRunEntry(logsDir, route.runId);
-    if (entry !== null && entry !== "unreadable") {
-      const logUrl = await logLinks(route.runId, join(logsDir, route.runId), entry.log);
-      return html(200, runView({ entry, now: request.now, logUrl }));
+    const read = await readRunEntry(logsDir, route.runId);
+    if (read.kind === "found") {
+      const logUrl = await logLinks(route.runId, join(logsDir, route.runId), read.entry.log);
+      return html(200, runView({ entry: read.entry, now: request.now, logUrl }));
     }
   }
   if (route.kind === "log") {

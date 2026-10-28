@@ -55,13 +55,15 @@ export interface RunEntries {
   unreadable: string[];
 }
 
-export async function readRunEntry(logsDir: string, dir: string): Promise<RunEntry | "unreadable" | null> {
+export type RunEntryRead = { kind: "found"; entry: RunEntry } | { kind: "unreadable" } | { kind: "missing" };
+
+export async function readRunEntry(logsDir: string, dir: string): Promise<RunEntryRead> {
   const path = join(logsDir, dir, "run.json");
   const text = await readFile(path, "utf8").catch(() => null);
-  if (text === null) return null;
+  if (text === null) return { kind: "missing" };
   const parsed = parseRunLog(text);
-  if (!parsed.ok) return "unreadable";
-  return { dir, log: parsed.log, modifiedAt: (await stat(path)).mtime };
+  if (!parsed.ok) return { kind: "unreadable" };
+  return { kind: "found", entry: { dir, log: parsed.log, modifiedAt: (await stat(path)).mtime } };
 }
 
 export async function readRunEntries(logsDir: string): Promise<RunEntries> {
@@ -70,9 +72,8 @@ export async function readRunEntries(logsDir: string): Promise<RunEntries> {
   const unreadable: string[] = [];
   for (const entry of entries) {
     const read = await readRunEntry(logsDir, entry);
-    if (read === null) continue;
-    if (read === "unreadable") unreadable.push(`${entry}/run.json`);
-    else runs.push(read);
+    if (read.kind === "unreadable") unreadable.push(`${entry}/run.json`);
+    else if (read.kind === "found") runs.push(read.entry);
   }
   runs.sort((a, b) => Date.parse(a.log.startedAt) - Date.parse(b.log.startedAt));
   return { runs, unreadable };
