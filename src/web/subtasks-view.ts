@@ -1,7 +1,7 @@
 import type { AttemptRecord, FollowUpRecord, GateRecord, SubtaskRecord, VerifierRecord } from "../coordinator/run-log.ts";
 import { countedTokens } from "../coordinator/stop-rules.ts";
 import { checksGroup, criteriaGroup } from "./evidence-view.ts";
-import { escapeHtml, logAnchors, RAW_LOG } from "./html.ts";
+import { bullets, escapeHtml, logAnchors, RAW_LOG, titledList } from "./html.ts";
 import type { LogUrl } from "./log-path.ts";
 
 function list(values: readonly string[]): string {
@@ -21,7 +21,7 @@ function attemptItem(attempt: AttemptRecord, logUrl: LogUrl): string {
 
 function attemptsList(attempts: readonly AttemptRecord[], logUrl: LogUrl): string {
   if (attempts.length === 0) return "";
-  return ["<h4>Intentos</h4>", "<ul>", ...attempts.map((attempt) => attemptItem(attempt, logUrl)), "</ul>"].join("\n");
+  return titledList("h4", "Intentos", attempts.map((attempt) => attemptItem(attempt, logUrl)));
 }
 
 function verifierItem(record: VerifierRecord, logUrl: LogUrl): string {
@@ -32,12 +32,12 @@ function verifierItem(record: VerifierRecord, logUrl: LogUrl): string {
 
 function verifierGroup(records: readonly VerifierRecord[], logUrl: LogUrl): string {
   if (records.length === 0) return "";
-  return ["<h4>Independent verifier</h4>", "<ul>", ...records.map((record) => verifierItem(record, logUrl)), "</ul>"].join("\n");
+  return titledList("h4", "Independent verifier", records.map((record) => verifierItem(record, logUrl)));
 }
 
 function reasonsList(reasons: readonly string[]): string {
   if (reasons.length === 0) return "";
-  return ["<ul>", ...reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`), "</ul>"].join("\n");
+  return bullets(reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`));
 }
 
 function gateBlock(gate: GateRecord | undefined, logUrl: LogUrl): string {
@@ -76,7 +76,7 @@ function followUpItem(followUp: FollowUpRecord): string {
 
 function followUpsList(followUps: readonly FollowUpRecord[] | undefined): string {
   if (followUps === undefined || followUps.length === 0) return "";
-  return ["<h4>Follow-up tasks</h4>", "<ul>", ...followUps.map(followUpItem), "</ul>"].join("\n");
+  return titledList("h4", "Follow-up tasks", followUps.map(followUpItem));
 }
 
 function subtaskBlock(subtask: SubtaskRecord, logUrl: LogUrl): string {

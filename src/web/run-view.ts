@@ -1,7 +1,8 @@
 import type { RunEntry } from "../coordinator/run-history.ts";
 import type { AgentChangeRecord, EvidenceBranchRecord, RunBlockRecord, RunLog } from "../coordinator/run-log.ts";
 import type { RoleChoice } from "../config/config.ts";
-import { anchor, escapeHtml, FULL_OUTPUT, logAnchors, page } from "./html.ts";
+import { checkItem } from "./evidence-view.ts";
+import { anchor, bullets, escapeHtml, page, titledList } from "./html.ts";
 import type { LogUrl } from "./log-path.ts";
 import { shouldReload } from "./reload.ts";
 import { relativeTime } from "./relative-time.ts";
@@ -28,23 +29,23 @@ function agentsSection({ agents }: RunLog): string {
   const items = Object.entries(roles).map(
     ([role, choice]) => `<li>${escapeHtml(role)}: ${escapeHtml(choiceText(choice as RoleChoice))}</li>`,
   );
-  const lines = ["<h2>Agentes</h2>", "<ul>", ...items, "</ul>"];
-  if (changes.length > 0) lines.push("<h3>Cambios de agente</h3>", "<ul>", ...changes.map(agentChange), "</ul>");
+  const lines = [titledList("h2", "Agentes", items)];
+  if (changes.length > 0) lines.push(titledList("h3", "Cambios de agente", changes.map(agentChange)));
   return lines.join("\n");
 }
 
-function criteriaGroup(heading: string, ids: string[]): string {
+function criteriaOfState(heading: string, ids: string[]): string {
   const items = ids.length === 0 ? ["<li>Ninguno</li>"] : ids.map((id) => `<li>${escapeHtml(id)}</li>`);
-  return [`<h3>${heading}</h3>`, "<ul>", ...items, "</ul>"].join("\n");
+  return titledList("h3", heading, items);
 }
 
 function criteriaSection({ criteria }: RunLog): string {
   return [
     "<h2>Criterios</h2>",
-    criteriaGroup("Pasan", criteria.passing),
-    criteriaGroup("Bloqueados", criteria.blocked),
-    criteriaGroup("Human", criteria.human),
-    criteriaGroup("Pendientes", criteria.pending),
+    criteriaOfState("Pasan", criteria.passing),
+    criteriaOfState("Bloqueados", criteria.blocked),
+    criteriaOfState("Human", criteria.human),
+    criteriaOfState("Pendientes", criteria.pending),
   ].join("\n");
 }
 
@@ -59,10 +60,7 @@ function pauseSection(log: RunLog): string {
 
 function blockDetails(block: RunBlockRecord, logUrl: LogUrl): string[] {
   if (block.type === "default-branch-conflict") return block.files.map((file) => `<li>${escapeHtml(file)}</li>`);
-  return block.checks.map((check) => {
-    const text = `${escapeHtml(check.name)}: ${check.passed ? "pasa" : "falla"}`;
-    return `<li>${[text, ...logAnchors(logUrl(check.outputLog), FULL_OUTPUT)].join(" ")}</li>`;
-  });
+  return block.checks.map((check) => checkItem(check, logUrl));
 }
 
 function blockSection({ block }: RunLog, logUrl: LogUrl): string {
@@ -72,9 +70,7 @@ function blockSection({ block }: RunLog, logUrl: LogUrl): string {
     `<p>Tipo: ${escapeHtml(block.type)}</p>`,
     `<p>Motivo: ${escapeHtml(block.reason)}</p>`,
     `<p>Commit: ${escapeHtml(block.sha)}</p>`,
-    "<ul>",
-    ...blockDetails(block, logUrl),
-    "</ul>",
+    bullets(blockDetails(block, logUrl)),
   ].join("\n");
 }
 
