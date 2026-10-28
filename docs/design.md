@@ -20,6 +20,7 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 | `factory approve <n>` | Validates the spec and approves it with a hash |
 | `factory run <n>` | Implements, verifies and opens the PR |
 | `factory stats` | Summary of the `run.json` files of a repo |
+| `factory web [target-repo] [--port <port>]` | Local read-only web view of the run log of a repo |
 | `factory init` | Prepares `.factory/` in a target repo |
 
 The target repo is the current directory, or the last argument. The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker is not running, or when `gh` is missing or not signed in (`gh auth status`). It reports every such problem before it loads the config or asks for the agent of any role. To set a repo up, see the [onboarding guide](onboarding.md).
@@ -303,3 +304,17 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 - **Quality, after the merge:** changes I made at review, and escapes (bugs that the verification did not find). An escape is an issue with the label `escaped-defect` in the target repo, linked to the PR of the factory that brought it; it is counted with `gh issue list --label escaped-defect`, not by `factory stats`.
 
 `factory stats` summarizes these files for a repo, per agent as well, to compare the subscriptions.
+
+## Web view
+
+`factory web [target-repo] [--port <port>]` serves the run log of a target repo as web pages, in the foreground, until Ctrl-C. The home page lists the runs from the most recent to the oldest, with issue, run ID, result, the age of the last change of its `run.json` and a link to the pull request. It lists apart the `run.json` files that cannot be read. A repo with no run log gets an empty page, not an error. The port has a fixed default, so the URL is always the same, and a busy port ends the command with exit code 1.
+
+It is a view over files that already exist, and it keeps to these limits:
+
+- **Read-only.** It starts, approves and changes nothing. `factory run` and `factory approve` stay in the terminal, where they are one line, and a server that could start them would hold push permissions on the host.
+- **Only the run log.** It reads `.factory/logs/` of the target repo. It does not read the spec, and it uses neither git nor `gh`, so opening it touches nothing outside the run log and needs no credential.
+- **No state of its own.** `run.json` stays the only source. The last change is the modification time of `run.json`; the web does not guess whether the process of a run is alive.
+- **Only the folder of the run.** The page of a run links to the raw log of each attempt, of each independent verifier verdict and of the acceptance tester, and to the full output of each check or criterion that failed, as `text/plain`. The paths in `run.json` are not uniform: attempt and verifier paths are absolute inside the run folder, and check, criterion and tester paths are relative to it. A file is linked and served only when its real path, after the symlinks, lies inside the real path of `.factory/logs/<run-id>/` and it is a regular file. Anything else gets 404: `..`, an encoded traversal, an absolute path, a NUL byte, a directory, a symlink that points outside, a run ID that is not the format of a run ID or has no folder. A log can hold HTML, so the web sends it with `x-content-type-options: nosniff`.
+- **Only `127.0.0.1`.** The run log can hold the output of the checks of a private repo. A `Host` header other than `127.0.0.1:<port>` or `localhost:<port>` gets 403, so that a web page in the browser cannot read the logs through DNS rebinding.
+
+The server is `node:http`: no runtime dependency. The HTML is built on the server from the run log, with no JavaScript, and every text that comes from `run.json` is escaped. The request handler is a function of the method, the path, the `Host` header, the target repo, the port and `now`; it reads the real files but opens no socket.

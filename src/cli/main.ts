@@ -16,6 +16,7 @@ import { initRepo } from "../init/init.ts";
 import { agentsForRole } from "../workers/agents.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import type { InteractiveLaunch } from "./launch.ts";
+import { web, WEB_USAGE } from "./web.ts";
 
 export interface RoleQuestion {
   role: Role;
@@ -36,6 +37,7 @@ export interface CliEnv {
   gh(): Promise<string | null>;
   ask?: (question: RoleQuestion) => Promise<RoleChoice>;
   launch(launch: InteractiveLaunch): Promise<number>;
+  signal: AbortSignal;
   out(text: string): void;
   err(text: string): void;
 }
@@ -45,6 +47,7 @@ const USAGE = [
   `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`,
   "       factory run <issue> [target-repo] [--worker-agent <agent>:<model>] [--verifier-agent <agent>:<model>] [--tester-agent <agent>:<model>]",
   "       factory stats [target-repo]",
+  `       ${WEB_USAGE}`,
   "       factory init [target-repo]",
 ].join("\n");
 
@@ -60,6 +63,7 @@ interface Command {
 export async function main(args: string[], env: CliEnv): Promise<number> {
   if (args[0] === "stats") return stats(args.slice(1), env);
   if (args[0] === "init") return init(args.slice(1), env);
+  if (args[0] === "web") return web(args.slice(1), env, USAGE);
   const parsed = parseCommand(args);
   if (parsed === null) {
     env.err(USAGE);

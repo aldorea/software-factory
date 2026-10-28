@@ -1,7 +1,7 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readRunLogs } from "../../src/coordinator/run-history.ts";
+import { readRunEntries, readRunLogs } from "../../src/coordinator/run-history.ts";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
 import { formatStats, summarizeRuns } from "../../src/coordinator/stats.ts";
 import { temp } from "./harness.ts";
@@ -193,5 +193,17 @@ describe("reading the run logs of a repo", () => {
     const dir = await logsDir({});
     await mkdir(join(dir, "1-empty"));
     expect(await readRunLogs(dir)).toEqual({ logs: [], unreadable: [] });
+  });
+
+  it("should expose the folder and the modification time of each run.json beside its log", async () => {
+    const [first, second] = [cleanRun(0), cleanRun(1)] as [RunLog, RunLog];
+    const dir = await logsDir({ "folder-b": JSON.stringify(second), "folder-a": JSON.stringify(first), "folder-c": "{not json" });
+    const { runs, unreadable } = await readRunEntries(dir);
+    expect(runs.map((run) => [run.dir, run.log.runId])).toEqual([
+      ["folder-a", first.runId],
+      ["folder-b", second.runId],
+    ]);
+    expect(runs[0]?.modifiedAt).toEqual((await stat(join(dir, "folder-a", "run.json"))).mtime);
+    expect(unreadable).toEqual(["folder-c/run.json"]);
   });
 });

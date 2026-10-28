@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { execOk } from "../workers/sh.ts";
 import { parseRunLog, type RunLog } from "./run-log.ts";
@@ -44,19 +44,44 @@ export interface RunLogs {
   unreadable: string[];
 }
 
-export async function readRunLogs(logsDir: string): Promise<RunLogs> {
+export interface RunEntry {
+  dir: string;
+  log: RunLog;
+  modifiedAt: Date;
+}
+
+export interface RunEntries {
+  runs: RunEntry[];
+  unreadable: string[];
+}
+
+export type RunEntryRead = { kind: "found"; entry: RunEntry } | { kind: "unreadable" } | { kind: "missing" };
+
+export async function readRunEntry(logsDir: string, dir: string): Promise<RunEntryRead> {
+  const path = join(logsDir, dir, "run.json");
+  const text = await readFile(path, "utf8").catch(() => null);
+  if (text === null) return { kind: "missing" };
+  const parsed = parseRunLog(text);
+  if (!parsed.ok) return { kind: "unreadable" };
+  return { kind: "found", entry: { dir, log: parsed.log, modifiedAt: (await stat(path)).mtime } };
+}
+
+export async function readRunEntries(logsDir: string): Promise<RunEntries> {
   const entries = (await readdir(logsDir).catch(() => [] as string[])).sort();
-  const logs: RunLog[] = [];
+  const runs: RunEntry[] = [];
   const unreadable: string[] = [];
   for (const entry of entries) {
-    const text = await readFile(join(logsDir, entry, "run.json"), "utf8").catch(() => null);
-    if (text === null) continue;
-    const parsed = parseRunLog(text);
-    if (parsed.ok) logs.push(parsed.log);
-    else unreadable.push(`${entry}/run.json`);
+    const read = await readRunEntry(logsDir, entry);
+    if (read.kind === "unreadable") unreadable.push(`${entry}/run.json`);
+    else if (read.kind === "found") runs.push(read.entry);
   }
-  logs.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-  return { logs, unreadable };
+  runs.sort((a, b) => Date.parse(a.log.startedAt) - Date.parse(b.log.startedAt));
+  return { runs, unreadable };
+}
+
+export async function readRunLogs(logsDir: string): Promise<RunLogs> {
+  const { runs, unreadable } = await readRunEntries(logsDir);
+  return { logs: runs.map((run) => run.log), unreadable };
 }
 
 export async function latestRunLog(logsDir: string, issue: number): Promise<RunLog | null> {

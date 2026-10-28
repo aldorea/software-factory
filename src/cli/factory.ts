@@ -13,6 +13,12 @@ import { main } from "./main.ts";
 
 const clock = { now: () => new Date() };
 
+const stop = new AbortController();
+if (process.argv[2] === "web") {
+  process.once("SIGINT", () => stop.abort());
+  process.once("SIGTERM", () => stop.abort());
+}
+
 const credentials = Object.fromEntries(
   AGENT_KINDS.flatMap((kind) => {
     const value = process.env[CREDENTIAL_VARIABLES[kind]];
@@ -33,6 +39,7 @@ process.exitCode = await main(process.argv.slice(2), {
   gh: () => ghProblem(),
   ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: askRoleInTerminal } : {}),
   launch: launchInteractive,
+  signal: stop.signal,
   out: (text) => process.stdout.write(`${text}\n`),
   err: (text) => process.stderr.write(`${text}\n`),
 });

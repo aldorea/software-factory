@@ -56,4 +56,14 @@ A mistake in the config is reported field by field when it loads. `factory valid
 - **Update the default branch before `factory refine`.** The integration branch starts from your local copy of the default branch (the branch that `origin/HEAD` points to), and the factory never fetches. Check it out and pull it first, or the spec starts from old code, and local commits on it are included. The command stops with the fix when it cannot resolve the branch: `git remote set-head origin --auto` when `origin/HEAD` is not set, and `git switch <branch>` when the default branch has no local copy.
 - **`pnpm factory` runs in the factory's clone**, so its current directory is the factory itself. Use it only with the target repo as an argument (`pnpm factory refine 12 ../target`); with no argument it works on the factory. The linked `factory` has no such trap, and is the way to run it.
 
+## 5. Optional: watch the runs
+
+Beside `factory run` and `factory stats`, `factory web` shows the run log of the target repo in the browser. It is read-only, runs in the foreground and stops with Ctrl-C:
+
+```sh
+factory web [target-repo] [--port <port>]
+```
+
+It prints its URL, `http://127.0.0.1:<port>/`, and the home page lists the runs from the most recent to the oldest. Open it before the first run if you like: with no run log it shows an empty page. The page of a run links to the raw log of each attempt and to the full output of each check or criterion that failed, as plain text. It listens only on `127.0.0.1`, reads only `.factory/logs/`, and uses no git, no `gh` and no credential. Its limits and their reasons are in [`design.md`](design.md#web-view).
+
 The commands and their order are in [`design.md`](design.md#commands).
