@@ -1,6 +1,7 @@
 import type { RunEntry } from "../coordinator/run-history.ts";
 import { escapeHtml, page, safeLink } from "./html.ts";
 import { relativeTime } from "./relative-time.ts";
+import { shouldReload } from "./reload.ts";
 import { parseRunId } from "./routes.ts";
 import { statsView } from "./stats-view.ts";
 import type { RunStats } from "../coordinator/stats.ts";
@@ -61,5 +62,6 @@ export function homeView({ runs, stats, unreadable, now }: HomeData): string {
   return page(
     "factory web",
     [statistics, "<h1>Runs</h1>", runsTable(newestFirst, now), unreadableList(unreadable)].filter(Boolean).join("\n"),
+    { reload: shouldReload(runs.map((entry) => entry.log)) },
   );
 }
