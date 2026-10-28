@@ -32,7 +32,11 @@ async function respond(incoming: IncomingMessage, outgoing: ServerResponse, opti
       port,
       now: options.clock.now(),
     });
-    outgoing.writeHead(response.status, { "content-type": response.contentType, "cache-control": "no-store" });
+    outgoing.writeHead(response.status, {
+      "content-type": response.contentType,
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
     outgoing.end(response.body);
   } catch {
     outgoing.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
