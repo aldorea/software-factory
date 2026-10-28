@@ -39,9 +39,6 @@ export function configuredVerifier(
 }
 
 export function dockerVerifier(setup: VerifierSetup): Verifier {
-  if (setup.role.agent !== "opencode") {
-    throw new Error(`${setup.role.agent} cannot serve the verifier: only opencode denies every tool with a fail-closed check`);
-  }
   return {
     async judge(question) {
       const prompt = renderTemplate(await readPromptTemplate("verifier"), {
@@ -51,7 +48,7 @@ export function dockerVerifier(setup: VerifierSetup): Verifier {
       const result = await askVerifier({
         image: setup.image,
         env: setup.env,
-        model: setup.role.model,
+        agent: { kind: setup.role.agent, model: setup.role.model },
         prompt,
         logPath: question.logPath,
         limits: { deadline: new Date(setup.clock.now().getTime() + QUESTION_TIMEOUT_MS), idleTimeoutMs: setup.idleTimeoutMs },

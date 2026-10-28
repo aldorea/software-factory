@@ -84,14 +84,20 @@ describe("loadConfig", () => {
     expect(error).not.toContain("roles.verifier");
   });
 
-  it("should refuse a default agent that cannot serve its role, because the hard limits and the pause would not apply to it", async () => {
+  it("should refuse a default OpenCode model outside opencode-go/, because the other providers are pay per use", async () => {
+    const dir = await repoWithConfig(
+      VALID.replace('workers: { agent: "claude-code", model: "sonnet" }', 'workers: { agent: "opencode", model: "opencode/kimi-k2" }'),
+    );
+
+    await expect(loadConfig(dir)).rejects.toThrow("roles.workers: the workers model must be an opencode-go/ model");
+  });
+
+  it("should accept OpenCode Go as the default workers, because it reads its token usage and detects the Go usage limit", async () => {
     const dir = await repoWithConfig(
       VALID.replace('workers: { agent: "claude-code", model: "sonnet" }', 'workers: { agent: "opencode", model: "opencode-go/kimi-k2" }'),
     );
 
-    await expect(loadConfig(dir)).rejects.toThrow(
-      "roles.workers: opencode cannot serve the workers: it misses detectsPlanLimit",
-    );
+    await expect(loadConfig(dir)).resolves.toBeDefined();
   });
 
   it("should accept OpenCode Go as the default acceptance tester, because the tester needs only its token usage read", async () => {

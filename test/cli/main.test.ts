@@ -168,7 +168,7 @@ describe("factory run: the choice of the agent of each role", () => {
     expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, tester: KIMI, changes: [] });
   });
 
-  it("should ask in a terminal for each role with no flag, offering only the agents that meet the role and preselecting the config default", async () => {
+  it("should ask in a terminal for each role with no flag, offering every agent and preselecting the config default", async () => {
     const repoDir = await runnableRepo();
     const { env } = cli(repoDir);
     expect(await main(["approve", "42"], env)).toBe(0);
@@ -181,7 +181,7 @@ describe("factory run: the choice of the agent of each role", () => {
     expect(await main(["run", "42", "--worker-agent", "claude-code:opus"], env)).toBe(0);
 
     expect(questions).toEqual([
-      { role: "verifier", offered: ["opencode"], preselected: KIMI },
+      { role: "verifier", offered: ["claude-code", "opencode"], preselected: KIMI },
       { role: "tester", offered: ["claude-code", "opencode"], preselected: SONNET },
     ]);
     expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, tester: GLM, changes: [] });
@@ -219,14 +219,14 @@ describe("factory run: the choice of the agent of each role", () => {
     expect(runner.workers).toEqual([]);
   });
 
-  it("should refuse before the run starts an agent asked by flag that misses a requirement of the role", async () => {
+  it("should refuse before the run starts a pay-per-use model asked by flag", async () => {
     const repoDir = await runnableRepo();
     const { env, err, runner } = cli(repoDir);
     expect(await main(["approve", "42"], env)).toBe(0);
 
-    expect(await main(["run", "42", "--worker-agent", "opencode:opencode-go/kimi-k2"], env)).toBe(1);
+    expect(await main(["run", "42", "--worker-agent", "opencode:opencode/kimi-k2"], env)).toBe(1);
 
-    expect(err.join("\n")).toContain("opencode cannot serve the workers: it misses detectsPlanLimit");
+    expect(err.join("\n")).toContain("the workers model must be an opencode-go/ model");
     expect(runner.workers).toEqual([]);
   });
 

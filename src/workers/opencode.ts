@@ -31,6 +31,7 @@ export interface OpenCodeStreamState {
   lastText: string;
   sessionId?: string;
   error?: string;
+  planLimit?: { resetsAt?: Date };
 }
 
 export function initialOpenCodeState(): OpenCodeStreamState {
@@ -60,7 +61,8 @@ export function applyOpenCodeLine(state: OpenCodeStreamState, line: string): Ope
   }
 
   if (event.type === "error" && "error" in event) {
-    return { ...state, error: errorMessage(event.error) };
+    const planLimit = isPlanLimit(event.error) ? { planLimit: planLimitOf(event, event.error) } : {};
+    return { ...state, error: errorMessage(event.error), ...planLimit };
   }
 
   return state;
@@ -113,6 +115,19 @@ function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
+function isPlanLimit(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  const body = isRecord(error.response) && typeof error.response.body === "string" ? error.response.body : "";
+  return error.type === "provider.quota" || body.includes("GoUsageLimitError");
+}
+
+function planLimitOf(event: object, error: unknown): { resetsAt?: Date } {
+  const timestamp = "timestamp" in event ? event.timestamp : undefined;
+  const retryAfterMs = isRecord(error) ? error.retryAfterMs : undefined;
+  if (!isCount(timestamp) || !isCount(retryAfterMs)) return {};
+  return { resetsAt: new Date(timestamp + retryAfterMs) };
+}
+
 function errorMessage(error: unknown): string {
   if (typeof error === "string") return error;
   if (typeof error === "object" && error !== null) {
@@ -127,6 +142,7 @@ function errorMessage(error: unknown): string {
 export function openCodeOutcome(state: OpenCodeStreamState, supervised: SupervisedProcess): AttemptOutcome {
   if (supervised.stopReason === "deadline") return { kind: "deadline" };
   if (supervised.stopReason === "idle-timeout") return { kind: "idle-timeout" };
+  if (state.planLimit !== undefined) return { kind: "plan-limit", message: state.error ?? "plan limit reached", ...state.planLimit };
   if (state.error === undefined && (supervised.exitCode === 0 || supervised.stopReason === "completion-grace")) {
     return { kind: "completed", summary: state.lastText };
   }
@@ -150,7 +166,7 @@ export function openCodeUsageProbe(sessionId: () => string | undefined): UsagePr
 export const openCodeAdapter: AgentAdapter = {
   kind: "opencode",
   processName: "opencode",
-  capabilities: { readsTokenUsage: true, detectsPlanLimit: false, deniesEveryTool: true },
+  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: true },
   command: (model) => openCodeArgs(model),
   createStream() {
     let state = initialOpenCodeState();

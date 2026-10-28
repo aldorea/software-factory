@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig, type ResolvedConfig } from "../../src/config/config.ts";
-import { answerFrom, configuredVerifier, dockerVerifier } from "../../src/coordinator/docker-verifier.ts";
+import { answerFrom, configuredVerifier } from "../../src/coordinator/docker-verifier.ts";
 import { FakeClock } from "../fakes/clock.ts";
 
 describe("answerFrom the outcome of the verifier agent", () => {
@@ -46,14 +46,6 @@ describe("answerFrom the outcome of the verifier agent", () => {
   it("should report a plan limit with its reset time, because a plan limit of any agent pauses the run", () => {
     const resetsAt = new Date("2026-10-24T13:00:00.000Z");
     expect(answerFrom({ kind: "plan-limit", message: "limit", resetsAt })).toEqual({ kind: "plan-limit", message: "limit", resetsAt });
-  });
-});
-
-describe("dockerVerifier", () => {
-  it("should refuse an agent that cannot deny every tool, before any container starts", () => {
-    expect(() =>
-      dockerVerifier({ image: "x", role: { agent: "claude-code", model: "sonnet" }, env: {}, idleTimeoutMs: 1000, clock }),
-    ).toThrow("claude-code cannot serve the verifier");
   });
 });
 

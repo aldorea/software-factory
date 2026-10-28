@@ -81,6 +81,30 @@ describe("OpenCode", () => {
     });
   });
 
+  it("should report the Go usage limit as a plan limit that resets after its retry-after, with the event shape of the OpenCode repo's own tests until a run captures a real one", () => {
+    const state = applyOpenCodeLine(initialOpenCodeState(), fixture("opencode-go-limit.jsonl").trim());
+
+    expect(openCodeOutcome(state, { stopReason: "exited", exitCode: 1, stderrTail: "" })).toEqual({
+      kind: "plan-limit",
+      message: "provider.quota: Subscription quota exceeded.",
+      resetsAt: new Date(1792918729286 + 120000),
+    });
+  });
+
+  it("should report the Go usage limit as a plan limit with no reset time when no retry-after comes", () => {
+    const line = JSON.stringify({
+      type: "error",
+      timestamp: 1792918729286,
+      error: { type: "provider.unknown", message: "Go usage limit exceeded", status: 429, response: { body: '{"error":{"type":"GoUsageLimitError"}}' } },
+    });
+    const state = applyOpenCodeLine(initialOpenCodeState(), line);
+
+    expect(openCodeOutcome(state, { stopReason: "exited", exitCode: 1, stderrTail: "" })).toEqual({
+      kind: "plan-limit",
+      message: "provider.unknown: Go usage limit exceeded",
+    });
+  });
+
   it("should report a non-zero exit as an agent error", () => {
     const outcome = openCodeOutcome(initialOpenCodeState(), { stopReason: "exited", exitCode: 2, stderrTail: "bad" });
     expect(outcome).toEqual({ kind: "agent-error", message: "bad", exitCode: 2 });

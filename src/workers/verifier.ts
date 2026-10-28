@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { emptyUsage } from "./agent-adapter.ts";
+import { emptyUsage, type UsageReading } from "./agent-adapter.ts";
+import { adapterFor } from "./agents.ts";
+import { applyClaudeLine, claudeOutcome, claudeVerifierArgs, initialClaudeState, type ClaudeStreamState } from "./claude-code.ts";
 import { toEnvFile } from "./docker-runner.ts";
 import {
   applyOpenCodeLine,
@@ -15,7 +17,7 @@ import {
 import { exec, execOk } from "./sh.ts";
 import { supervise, type SupervisedProcess } from "./supervise.ts";
 import { readUsage } from "./usage.ts";
-import type { AttemptLimits, AttemptOutcome, AttemptResult } from "./types.ts";
+import type { AgentSpec, AttemptLimits, AttemptOutcome, AttemptResult, ExecResult } from "./types.ts";
 
 const WORKDIR = "/home/agent/verifier";
 const CONFIG_FILE = "opencode.jsonc";
@@ -34,7 +36,7 @@ export const DENY_ALL_TOOLS = JSON.stringify({
 export interface VerifierRequest {
   image: string;
   env: Record<string, string>;
-  model: string;
+  agent: AgentSpec;
   prompt: string;
   logPath: string;
   limits: AttemptLimits;
@@ -44,10 +46,44 @@ export interface VerifierResult extends AttemptResult {
   usageProblem?: string;
 }
 
+interface VerifierSession {
+  setup: string[];
+  args: string[];
+  onLine(line: string): void;
+  outcome(supervised: SupervisedProcess, listing: string): AttemptOutcome;
+  usage(outcome: AttemptOutcome, exec: (command: string[]) => Promise<ExecResult>): Promise<UsageReading>;
+}
+
+function verifierSession(agent: AgentSpec): VerifierSession {
+  if (agent.kind === "claude-code") {
+    let state = initialClaudeState();
+    return {
+      setup: ["mkdir", "-p", WORKDIR],
+      args: claudeVerifierArgs(agent.model),
+      onLine: (line) => {
+        state = applyClaudeLine(state, line);
+      },
+      outcome: (supervised, listing) => claudeVerifierOutcome(state, supervised, listing),
+      usage: async () => ({ ok: true, usage: state.usage }),
+    };
+  }
+  let state = initialOpenCodeState();
+  return {
+    setup: ["sh", "-c", `mkdir -p ${WORKDIR} && printf '%s' "$1" > ${WORKDIR}/${CONFIG_FILE}`, "sh", DENY_ALL_TOOLS],
+    args: openCodeArgs(agent.model, { autoApprove: false, agent: VERIFIER_AGENT }),
+    onLine: (line) => {
+      state = applyOpenCodeLine(state, line);
+    },
+    outcome: (supervised, listing) => verifierOutcome(state, supervised, listing),
+    usage: (outcome, exec) => readUsage(openCodeUsageProbe(() => state.sessionId), emptyUsage(), outcome, exec),
+  };
+}
+
 export async function askVerifier(request: VerifierRequest): Promise<VerifierResult> {
   const container = `factory-verifier-${randomUUID()}`;
   const secretsDir = await mkdtemp(join(tmpdir(), "factory-"));
   const startedAt = new Date();
+  const session = verifierSession(request.agent);
   try {
     const envFile = join(secretsDir, "env");
     await writeFile(envFile, toEnvFile(request.env), { mode: 0o600 });
@@ -56,45 +92,25 @@ export async function askVerifier(request: VerifierRequest): Promise<VerifierRes
     } finally {
       await rm(envFile, { force: true });
     }
-    await execOk("docker", [
-      "exec",
-      container,
-      "sh",
-      "-c",
-      `mkdir -p ${WORKDIR} && printf '%s' "$1" > ${WORKDIR}/${CONFIG_FILE}`,
-      "sh",
-      DENY_ALL_TOOLS,
-    ]);
+    await execOk("docker", ["exec", container, ...session.setup]);
 
-    let state = initialOpenCodeState();
     const supervised = await supervise({
       command: "docker",
-      args: [
-        "exec",
-        "-i",
-        "-w",
-        WORKDIR,
-        "-e",
-        `PWD=${WORKDIR}`,
-        container,
-        ...openCodeArgs(request.model, { autoApprove: false, agent: VERIFIER_AGENT }),
-      ],
+      args: ["exec", "-i", "-w", WORKDIR, "-e", `PWD=${WORKDIR}`, container, ...session.args],
       stdin: request.prompt,
       logPath: request.logPath,
       deadline: request.limits.deadline,
       idleTimeoutMs: request.limits.idleTimeoutMs,
-      onLine: (line) => {
-        state = applyOpenCodeLine(state, line);
-      },
+      onLine: session.onLine,
       terminate: async () => {
-        await exec("docker", ["exec", container, "pkill", "-KILL", "-f", "opencode"]);
+        await exec("docker", ["exec", container, "pkill", "-KILL", "-f", adapterFor(request.agent.kind).processName]);
       },
     });
 
     const listing = await execOk("docker", ["exec", container, "ls", "-A", WORKDIR]);
 
-    const outcome = verifierOutcome(state, supervised, listing);
-    const reading = await readUsage(openCodeUsageProbe(() => state.sessionId), emptyUsage(), outcome, (command) =>
+    const outcome = session.outcome(supervised, listing);
+    const reading = await session.usage(outcome, (command) =>
       exec("docker", ["exec", "-w", WORKDIR, "-e", `PWD=${WORKDIR}`, container, ...command]),
     );
 
@@ -117,7 +133,42 @@ export function verifierOutcome(
   supervised: SupervisedProcess,
   directoryListing: string,
 ): AttemptOutcome {
-  const leftovers = directoryListing.split("\n").filter((name) => name !== "" && name !== CONFIG_FILE);
+  return checkedAnswer(openCodeOutcome(state, supervised), supervised, directoryListing, [CONFIG_FILE]);
+}
+
+export function claudeVerifierOutcome(
+  state: ClaudeStreamState,
+  supervised: SupervisedProcess,
+  directoryListing: string,
+): AttemptOutcome {
+  const answered = claudeOutcome(state, supervised);
+  if (answered.kind === "deadline" || answered.kind === "idle-timeout") return answered;
+  const { tools, mcpServers } = state.init ?? {};
+  if (tools === undefined || mcpServers === undefined) {
+    return {
+      kind: "agent-error",
+      message: "The verifier did not report its tools, so the deny-all flags cannot be checked",
+      exitCode: supervised.exitCode,
+    };
+  }
+  const loaded = [...tools, ...mcpServers];
+  if (loaded.length > 0) {
+    return {
+      kind: "agent-error",
+      message: `The verifier loaded tools despite the deny-all flags: ${loaded.join(", ")}`,
+      exitCode: supervised.exitCode,
+    };
+  }
+  return checkedAnswer(answered, supervised, directoryListing, []);
+}
+
+function checkedAnswer(
+  answered: AttemptOutcome,
+  supervised: SupervisedProcess,
+  directoryListing: string,
+  kept: string[],
+): AttemptOutcome {
+  const leftovers = directoryListing.split("\n").filter((name) => name !== "" && !kept.includes(name));
   if (leftovers.length > 0) {
     return {
       kind: "agent-error",
@@ -125,7 +176,6 @@ export function verifierOutcome(
       exitCode: supervised.exitCode,
     };
   }
-  const answered = openCodeOutcome(state, supervised);
   if (answered.kind === "completed" && answered.summary.trim() === "") {
     return { kind: "agent-error", message: "The verifier gave no answer", exitCode: supervised.exitCode };
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adapterFor, AGENT_KINDS, agentsForRole, meetsRole, missingRequirements } from "../../src/workers/agents.ts";
+import { adapterFor, AGENT_KINDS, agentsForRole, missingRequirements, unmetRequirements } from "../../src/workers/agents.ts";
 import type { AgentAdapter } from "../../src/workers/agent-adapter.ts";
 import type { SupervisedProcess } from "../../src/workers/supervise.ts";
 
@@ -85,21 +85,18 @@ describe("agent adapters", () => {
 });
 
 describe("role requirements", () => {
-  it("should offer as workers only the agents that read usage and detect the plan limit", () => {
-    expect(agentsForRole("workers")).toEqual(["claude-code"]);
+  it("should offer every agent in every role", () => {
+    expect(agentsForRole("workers")).toEqual(["claude-code", "opencode"]);
+    expect(agentsForRole("verifier")).toEqual(["claude-code", "opencode"]);
+    expect(agentsForRole("tester")).toEqual(["claude-code", "opencode"]);
   });
 
-  it("should offer as verifier only the agents with every tool denied by a fail-closed check", () => {
-    expect(agentsForRole("verifier")).toEqual(["opencode"]);
-  });
+  it("should name the requirements of the role that some capabilities miss, so a future agent without them is refused", () => {
+    const capabilities = { readsTokenUsage: true, detectsPlanLimit: false, deniesEveryTool: false };
 
-  it("should not offer OpenCode Go as workers until a pilot observes its plan-limit error, because its usage comes from the session export but its limit error is not documented", () => {
-    expect(meetsRole("opencode", "workers")).toBe(false);
-    expect(missingRequirements("opencode", "workers")).toEqual(["detectsPlanLimit"]);
-  });
-
-  it("should not offer Claude Code as verifier, since its tools cannot be denied with a fail-closed check", () => {
-    expect(missingRequirements("claude-code", "verifier")).toEqual(["deniesEveryTool"]);
+    expect(unmetRequirements(capabilities, "workers")).toEqual(["detectsPlanLimit"]);
+    expect(unmetRequirements(capabilities, "verifier")).toEqual(["deniesEveryTool"]);
+    expect(unmetRequirements(capabilities, "tester")).toEqual([]);
   });
 
   it("should report no missing requirement for an agent that meets the role", () => {
