@@ -1,6 +1,7 @@
 import type { RunEntry } from "../coordinator/run-history.ts";
 import { escapeHtml, page, safeLink } from "./html.ts";
 import { relativeTime } from "./relative-time.ts";
+import { parseRunId } from "./routes.ts";
 
 export interface HomeData {
   runs: RunEntry[];
@@ -16,12 +17,17 @@ function pullRequestCell(entry: RunEntry): string {
   return url === null ? escapeHtml(text) : `<a href="${escapeHtml(url)}">${escapeHtml(text)}</a>`;
 }
 
+function runIdCell(entry: RunEntry): string {
+  if (parseRunId(entry.dir) === null) return escapeHtml(entry.log.runId);
+  return `<a href="/runs/${entry.dir}">${escapeHtml(entry.log.runId)}</a>`;
+}
+
 function runRow(entry: RunEntry, now: Date): string {
   const { log } = entry;
   return [
     "<tr>",
     `<td>#${escapeHtml(String(log.issue))}</td>`,
-    `<td>${escapeHtml(log.runId)}</td>`,
+    `<td>${runIdCell(entry)}</td>`,
     `<td>${escapeHtml(log.result)}</td>`,
     `<td>${escapeHtml(relativeTime(entry.modifiedAt, now))}</td>`,
     `<td>${pullRequestCell(entry)}</td>`,
