@@ -22,4 +22,5 @@ export interface RunPorts {
   github: GitHub;
   notifier: Notifier;
   clock: Clock;
+  progress?(line: string): void;
 }

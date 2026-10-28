@@ -13,6 +13,8 @@ import { formatStats, summarizeRuns } from "../coordinator/stats.ts";
 import type { Verifier } from "../coordinator/verifier.ts";
 import type { GitHub } from "../github/github.ts";
 import { initRepo } from "../init/init.ts";
+import { WEB_HOST } from "../web/host.ts";
+import { DEFAULT_WEB_PORT } from "../web/server.ts";
 import { agentsForRole } from "../workers/agents.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import type { InteractiveLaunch } from "./launch.ts";
@@ -144,6 +146,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     }
     roles[role] = chosen.choice;
   }
+  env.out(`Preparing run #${issue}; factory web shows it at http://${WEB_HOST}:${DEFAULT_WEB_PORT}/`);
   const report = await runIssue(
     { repoDir, issue, credentials: env.credentials, roles },
     {
@@ -152,6 +155,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
       github: env.github(repoDir),
       notifier: env.notifier,
       clock: env.clock,
+      progress: env.out,
     },
   );
   env.out(`Run ${report.log.runId}: ${report.result}, ${report.pullRequest.url}`);

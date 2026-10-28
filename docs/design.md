@@ -168,7 +168,7 @@ The coordinator never asks me during a run. It records each block in the PR and 
 | Patience, a limit or the environment (for example, the app does not become ready) | `blocked`, with the reason. |
 | A check of the repo fails in the integrated verification while every criterion passes | No subtask owns it, so the coordinator sends no follow-up task and guesses no owner: such a failure is usually a gap in the refinement. The run ends with a draft PR and an `integration-check` block in `run.json` and in the PR, with the check, the SHA of the integration branch and the end of its output. When criteria fail too, their follow-up tasks carry the failed checks instead. |
 
-A macOS notification links to the PR when a run ends, pauses or blocks.
+A macOS notification links to the PR when a run ends, pauses or blocks. While the run works, `factory run` prints one line to the terminal for each change of `run.json` that a developer watches: a subtask that changes state, a finished attempt, the integrated verification, a pause, the result and the PR. Before the run starts, it prints the URL of `factory web`.
 
 ### Output of a run
 

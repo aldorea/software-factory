@@ -20,6 +20,22 @@ async function readRunLog(path: string): Promise<RunLog> {
 }
 
 describe("the run record written by factory run", () => {
+  it("should report its progress while the subtask works, so that the terminal does not look blank until the run ends", async () => {
+    const target = await targetRepo();
+    let reportedWhileWorking: string[] = [];
+    const { run, progress } = harness(target, (call) => {
+      reportedWhileWorking = [...progress];
+      return writesHello(call);
+    });
+
+    await run();
+
+    expect(reportedWhileWorking).toEqual([`run ${RUN_ID}: 1 subtask, workers on claude-code sonnet`, "S1: working"]);
+    expect(progress).toEqual(
+      expect.arrayContaining(["S1: attempt 1 completed", "S1: merged", `run ${RUN_ID}: ready`, expect.stringMatching(/^pull request: /)]),
+    );
+  });
+
   it("should rewrite run.json at each state change, so that a reader sees the run while its subtask works", async () => {
     const target = await targetRepo();
     const seen: RunLog[] = [];

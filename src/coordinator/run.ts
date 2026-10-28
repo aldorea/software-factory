@@ -12,6 +12,7 @@ import { verifyIntegration } from "./integrated-verification.ts";
 import { adjustMaxParallel } from "./parallelism.ts";
 import type { RunPorts } from "./ports.ts";
 import { prepare } from "./prepare.ts";
+import { progressLines } from "./progress.ts";
 import { renderPullRequest } from "./pull-request.ts";
 import { resumedLog } from "./resume.ts";
 import { paused, type RunContext, type RunRequest } from "./run-context.ts";
@@ -76,10 +77,13 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   const records = new Map<string, SubtaskRecord>(log.subtasks.map((record) => [record.id, record]));
   const runStartSha = await runBaseSha(request.repoDir, branch);
   const saveLock = new Lock();
+  let reported: RunLog | null = null;
   const save = () =>
     saveLock.exclusive(async () => {
       applyTotals(log, ports.clock.now());
       await writeRunLog(runLogPath, log);
+      for (const line of progressLines(reported, log)) ports.progress?.(line);
+      reported = structuredClone(log);
     });
   const context: RunContext = {
     request,
