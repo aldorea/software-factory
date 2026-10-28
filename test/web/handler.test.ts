@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { writeRunLog, type RunLog } from "../../src/coordinator/run-log.ts";
 import { handleRequest, type WebRequest } from "../../src/web/handler.ts";
-import { cleanRun, failedRun } from "../coordinator/run-log-fixtures.ts";
+import { cleanRun, failedRun, pausedRun } from "../coordinator/run-log-fixtures.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
@@ -107,6 +107,57 @@ describe("the home page", () => {
     const { body } = await handleRequest(request(dir));
 
     expect(body).not.toContain("<script");
+  });
+});
+
+function visibleText(html: string): string {
+  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+}
+
+describe("the statistics of the home page", () => {
+  it("should show the number of runs for each result above the list of runs", async () => {
+    const dir = await repoWithRuns([
+      { log: cleanRun(0) },
+      { log: cleanRun(1) },
+      { log: { ...failedRun(2), result: "draft" } },
+      { log: pausedRun(3) },
+    ]);
+
+    const { body } = await handleRequest(request(dir));
+    const text = visibleText(body);
+
+    expect(text).toContain("Runs 4");
+    expect(text).toContain("Ready 2");
+    expect(text).toContain("Draft 1");
+    expect(text).toContain("Paused 1");
+    expect(text).toContain("Running 0");
+    expect(body.indexOf("Ready")).toBeLessThan(body.indexOf("1-run-03"));
+  });
+
+  it("should show the cost, the agents, the friction and the worker layer failures of the run log", async () => {
+    const dir = await repoWithRuns([{ log: cleanRun(0) }, { log: failedRun(1, "opencode") }]);
+
+    const text = visibleText((await handleRequest(request(dir))).body);
+
+    expect(text).toContain("Tokens 300 (150 por run");
+    expect(text).toContain("opencode 1 1 150 0");
+    expect(text).toContain("Bloqueos ninguno");
+    expect(text).toContain("Fallos de la worker layer container-start 1");
+  });
+
+  it("should show no statistics for a target repo without a run log", async () => {
+    const dir = await temp.make("web-empty-stats-");
+
+    const { status, body } = await handleRequest(request(dir));
+
+    expect(status).toBe(200);
+    expect(body).not.toContain("Estadísticas");
+  });
+
+  it("should show the statistics of the readable runs when some run.json cannot be read", async () => {
+    const dir = await repoWithRuns([{ log: cleanRun(0) }, { log: { ...cleanRun(1), version: 0 as 1 } }]);
+
+    expect(visibleText((await handleRequest(request(dir))).body)).toContain("Runs 1");
   });
 });
 
