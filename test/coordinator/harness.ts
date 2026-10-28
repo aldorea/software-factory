@@ -120,8 +120,10 @@ export function harness(target: Target, script: AttemptScript, faults: WorkerFau
     credentials: { "claude-code": TOKEN },
   };
   const verifier = new FakeVerifier();
-  const run = () => runIssue(request, { runner, verifier, github: target.github, notifier, clock });
-  return { runner, verifier, notifier, clock, run };
+  const progress: string[] = [];
+  const run = () =>
+    runIssue(request, { runner, verifier, github: target.github, notifier, clock, progress: (line) => progress.push(line) });
+  return { runner, verifier, notifier, clock, progress, run };
 }
 
 export const writesHello: AttemptScript = () => ({ files: { "src/greeting.txt": "hello\n" }, commit: "Write the greeting" });

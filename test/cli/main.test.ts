@@ -198,6 +198,19 @@ describe("factory run: the choice of the agent of each role", () => {
     expect((await lastRunLog(repoDir)).agents).toEqual({ workers: SONNET, verifier: KIMI, tester: SONNET, changes: [] });
   });
 
+  it("should point to factory web and print the progress of the run before its result line", async () => {
+    const repoDir = await runnableRepo();
+    const { env, out } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+    out.length = 0;
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    expect(out[0]).toBe("Preparing run #42; factory web shows it at http://127.0.0.1:7433/");
+    expect(out).toContain("S1: working");
+    expect(out.at(-1)).toMatch(/^Run 42-.*: (ready|draft), /);
+  });
+
   it("should refuse to start, with no worker, when neither a flag, a prompt nor the config gives the agent of a role", async () => {
     const repoDir = await runnableRepo(NO_ROLES);
     const { env, err, runner } = cli(repoDir);
