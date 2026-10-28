@@ -1,5 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
+export type LogUrl = (logPath: string | undefined) => string | null;
+
 const UNSAFE_CHARACTER = /[\0/\\]/;
 
 export function safeSegments(segments: readonly string[]): string[] | null {

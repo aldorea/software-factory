@@ -1,13 +1,14 @@
 import type { AttemptRecord, FollowUpRecord, GateRecord, SubtaskRecord, VerifierRecord } from "../coordinator/run-log.ts";
 import { countedTokens } from "../coordinator/stop-rules.ts";
 import { checksGroup, criteriaGroup } from "./evidence-view.ts";
-import { escapeHtml } from "./html.ts";
+import { escapeHtml, logAnchors, RAW_LOG } from "./html.ts";
+import type { LogUrl } from "./log-path.ts";
 
 function list(values: readonly string[]): string {
   return values.length === 0 ? "ninguno" : values.map(escapeHtml).join(", ");
 }
 
-function attemptItem(attempt: AttemptRecord): string {
+function attemptItem(attempt: AttemptRecord, logUrl: LogUrl): string {
   const lines = [
     `Intento ${attempt.number}: ${attempt.agent.agent} / ${attempt.agent.model}`,
     `Resultado: ${attempt.outcome}`,
@@ -15,22 +16,23 @@ function attemptItem(attempt: AttemptRecord): string {
   if (attempt.detail !== undefined) lines.push(`Detalle: ${attempt.detail}`);
   if (attempt.failure !== undefined) lines.push(`Fallo: ${attempt.failure.description}`);
   lines.push(`Tokens: ${countedTokens(attempt.usage)}`, `Inicio: ${attempt.startedAt}`, `Fin: ${attempt.endedAt}`);
-  return `<li class="attempt">${lines.map(escapeHtml).join("<br>\n")}</li>`;
+  return `<li class="attempt">${[...lines.map(escapeHtml), ...logAnchors(logUrl(attempt.logPath), RAW_LOG)].join("<br>\n")}</li>`;
 }
 
-function attemptsList(attempts: readonly AttemptRecord[]): string {
+function attemptsList(attempts: readonly AttemptRecord[], logUrl: LogUrl): string {
   if (attempts.length === 0) return "";
-  return ["<h4>Intentos</h4>", "<ul>", ...attempts.map(attemptItem), "</ul>"].join("\n");
+  return ["<h4>Intentos</h4>", "<ul>", ...attempts.map((attempt) => attemptItem(attempt, logUrl)), "</ul>"].join("\n");
 }
 
-function verifierItem(record: VerifierRecord): string {
+function verifierItem(record: VerifierRecord, logUrl: LogUrl): string {
   const reason = record.reason === undefined ? "" : ` (${record.reason})`;
-  return `<li class="verifier">${escapeHtml(`${record.id}: ${record.verdict}${reason}`)}</li>`;
+  const text = escapeHtml(`${record.id}: ${record.verdict}${reason}`);
+  return `<li class="verifier">${[text, ...logAnchors(logUrl(record.logPath), RAW_LOG)].join(" ")}</li>`;
 }
 
-function verifierGroup(records: readonly VerifierRecord[]): string {
+function verifierGroup(records: readonly VerifierRecord[], logUrl: LogUrl): string {
   if (records.length === 0) return "";
-  return ["<h4>Independent verifier</h4>", "<ul>", ...records.map(verifierItem), "</ul>"].join("\n");
+  return ["<h4>Independent verifier</h4>", "<ul>", ...records.map((record) => verifierItem(record, logUrl)), "</ul>"].join("\n");
 }
 
 function reasonsList(reasons: readonly string[]): string {
@@ -38,14 +40,14 @@ function reasonsList(reasons: readonly string[]): string {
   return ["<ul>", ...reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`), "</ul>"].join("\n");
 }
 
-function gateBlock(gate: GateRecord | undefined): string {
+function gateBlock(gate: GateRecord | undefined, logUrl: LogUrl): string {
   if (gate === undefined) return "";
   return [
     `<h4>Gate ${escapeHtml(gate.sha)}: ${gate.accepted ? "aceptado" : "rechazado"}</h4>`,
     reasonsList(gate.reasons),
-    checksGroup(gate.checks),
-    criteriaGroup(gate.criteria),
-    verifierGroup(gate.verifier),
+    checksGroup(gate.checks, logUrl),
+    criteriaGroup(gate.criteria, logUrl),
+    verifierGroup(gate.verifier, logUrl),
   ]
     .filter(Boolean)
     .join("\n");
@@ -77,7 +79,7 @@ function followUpsList(followUps: readonly FollowUpRecord[] | undefined): string
   return ["<h4>Follow-up tasks</h4>", "<ul>", ...followUps.map(followUpItem), "</ul>"].join("\n");
 }
 
-function subtaskBlock(subtask: SubtaskRecord): string {
+function subtaskBlock(subtask: SubtaskRecord, logUrl: LogUrl): string {
   return [
     `<section class="subtask">`,
     `<h3>${escapeHtml(subtask.id)}</h3>`,
@@ -86,16 +88,16 @@ function subtaskBlock(subtask: SubtaskRecord): string {
     `<p>Branch: ${escapeHtml(subtask.branch)}</p>`,
     `<p>Scope extensions: ${list(subtask.scopeExtensions)}</p>`,
     blockedBlock(subtask),
-    attemptsList(subtask.attempts),
+    attemptsList(subtask.attempts, logUrl),
     `<p>${subtask.gateRejections} rechazos del gate</p>`,
     `<p>${subtask.verifierRejections} rechazos del independent verifier</p>`,
-    gateBlock(subtask.gate),
+    gateBlock(subtask.gate, logUrl),
     followUpsList(subtask.followUps),
     "</section>",
   ].filter(Boolean).join("\n");
 }
 
-export function subtasksSection(subtasks: readonly SubtaskRecord[]): string {
-  const body = subtasks.length === 0 ? ["<p>Sin subtareas</p>"] : subtasks.map(subtaskBlock);
+export function subtasksSection(subtasks: readonly SubtaskRecord[], logUrl: LogUrl): string {
+  const body = subtasks.length === 0 ? ["<p>Sin subtareas</p>"] : subtasks.map((subtask) => subtaskBlock(subtask, logUrl));
   return ["<h2>Subtareas</h2>", ...body].join("\n");
 }

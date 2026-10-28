@@ -4,6 +4,7 @@ import { summarizeRuns } from "../coordinator/stats.ts";
 import { page } from "./html.ts";
 import { homeView } from "./home-view.ts";
 import { hostAllowed } from "./host.ts";
+import { logLinks } from "./log-links.ts";
 import { matchRoute } from "./routes.ts";
 import { readRunFile } from "./run-file.ts";
 import { runView } from "./run-view.ts";
@@ -46,7 +47,10 @@ export async function handleRequest(request: WebRequest): Promise<WebResponse> {
   }
   if (route.kind === "run") {
     const entry = await readRunEntry(logsDir, route.runId);
-    if (entry !== null && entry !== "unreadable") return html(200, runView({ entry, now: request.now }));
+    if (entry !== null && entry !== "unreadable") {
+      const logUrl = await logLinks(route.runId, join(logsDir, route.runId), entry.log);
+      return html(200, runView({ entry, now: request.now, logUrl }));
+    }
   }
   if (route.kind === "log") {
     const content = await readRunFile(join(logsDir, route.runId), route.segments);

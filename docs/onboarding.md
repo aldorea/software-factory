@@ -64,6 +64,6 @@ Beside `factory run` and `factory stats`, `factory web` shows the run log of the
 factory web [target-repo] [--port <port>]
 ```
 
-It prints its URL, `http://127.0.0.1:<port>/`, and the home page lists the runs from the most recent to the oldest. Open it before the first run if you like: with no run log it shows an empty page. It listens only on `127.0.0.1`, reads only `.factory/logs/`, and uses no git, no `gh` and no credential. Its limits and their reasons are in [`design.md`](design.md#web-view).
+It prints its URL, `http://127.0.0.1:<port>/`, and the home page lists the runs from the most recent to the oldest. Open it before the first run if you like: with no run log it shows an empty page. The page of a run links to the raw log of each attempt and to the full output of each check or criterion that failed, as plain text. It listens only on `127.0.0.1`, reads only `.factory/logs/`, and uses no git, no `gh` and no credential. Its limits and their reasons are in [`design.md`](design.md#web-view).
 
 The commands and their order are in [`design.md`](design.md#commands).
