@@ -4,6 +4,7 @@ import type { RoleChoice } from "../config/config.ts";
 import { anchor, escapeHtml, page } from "./html.ts";
 import { relativeTime } from "./relative-time.ts";
 import { subtasksSection } from "./subtasks-view.ts";
+import { verificationSection } from "./verification-view.ts";
 
 export interface RunData {
   entry: RunEntry;
@@ -104,6 +105,7 @@ export function runView({ entry, now }: RunData): string {
     agentsSection(log),
     criteriaSection(log),
     subtasksSection(log.subtasks),
+    verificationSection(log.verification),
   ].filter(Boolean);
   return page(`run ${log.runId}`, body.join("\n"));
 }

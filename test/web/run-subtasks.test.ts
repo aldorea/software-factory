@@ -40,7 +40,7 @@ describe("the subtasks of a run", () => {
       ...attemptRecord("opencode", 1000, 250),
       number: 2,
       agent: { agent: "opencode" as const, model: "opencode-go/kimi-k2" },
-      outcome: "failed" as const,
+      outcome: "agent-error" as const,
       failure: { signature: "sig-1", description: "typecheck failed in src/a.ts" },
       startedAt: "2026-10-24T08:00:00.000Z",
       endedAt: "2026-10-24T08:12:00.000Z",
@@ -51,7 +51,7 @@ describe("the subtasks of a run", () => {
 
     expect(text).toContain("Intento 2");
     expect(text).toContain("opencode / opencode-go/kimi-k2");
-    expect(text).toContain("Resultado: failed");
+    expect(text).toContain("Resultado: agent-error");
     expect(text).toContain("Fallo: typecheck failed in src/a.ts");
     expect(text).toContain("Tokens: 1250");
     expect(text).toContain("2026-10-24T08:00:00.000Z");
@@ -95,8 +95,8 @@ describe("the subtasks of a run", () => {
     expect(text).toContain("C1: accept");
     expect(text).toContain("C2: refute");
     expect(text).toContain("the button is missing");
-    expect(text).toContain("Rechazos del gate: 2");
-    expect(text).toContain("Rechazos del independent verifier: 1");
+    expect(text).toContain("2 rechazos del gate");
+    expect(text).toContain("1 rechazos del independent verifier");
   });
 
   it("should show a gate that accepted", async () => {
@@ -113,7 +113,7 @@ describe("the subtasks of a run", () => {
 
     const text = visibleText(await runPage(log));
 
-    expect(text).toContain("Rechazos del gate: 3");
+    expect(text).toContain("3 rechazos del gate");
     expect(text).not.toContain("Gate ");
   });
 
