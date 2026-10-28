@@ -85,11 +85,11 @@ describe("factory run: the agent of each role is checked before the run starts",
     expect((await run()).result).toBe("ready");
   });
 
-  it("should stop before any worker starts when the chosen agent misses a requirement of its role", async () => {
+  it("should stop before any worker starts when the chosen model of a role is pay per use", async () => {
     const target = await targetRepo();
-    const { run, runner } = factory(target, writesHello, { roles: { workers: KIMI } });
+    const { run, runner } = factory(target, writesHello, { roles: { workers: { agent: "opencode", model: "opencode/kimi-k2" } } });
 
-    await expect(run()).rejects.toThrow("opencode cannot serve the workers: it misses detectsPlanLimit");
+    await expect(run()).rejects.toThrow("the workers model must be an opencode-go/ model");
     expect(runner.workers).toEqual([]);
   });
 

@@ -17,8 +17,37 @@ export function claudeCodeArgs(model: string): string[] {
   ];
 }
 
+export function claudeVerifierArgs(model: string): string[] {
+  return [
+    "claude",
+    "--print",
+    "--verbose",
+    "--output-format",
+    "stream-json",
+    "--model",
+    model,
+    "--safe-mode",
+    "--tools",
+    "",
+    "--disallowedTools",
+    "*",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+    "--permission-prompts",
+    "none",
+    "-p",
+    "-",
+  ];
+}
+
+export interface ClaudeInit {
+  tools?: string[];
+  mcpServers?: string[];
+}
+
 export interface ClaudeStreamState {
   usage: TokenUsage;
+  init?: ClaudeInit;
   plan?: PlanStatus;
   result?: {
     isError: boolean;
@@ -39,6 +68,10 @@ export function isClaudeFinalLine(line: string): boolean {
 export function applyClaudeLine(state: ClaudeStreamState, line: string): ClaudeStreamState {
   const event = parseJson(line);
   if (!event) return state;
+
+  if (event.type === "system" && event.subtype === "init") {
+    return { ...state, init: { ...namesOf("tools", event.tools), ...namesOf("mcpServers", event.mcp_servers) } };
+  }
 
   if (event.type === "rate_limit_event" && isRecord(event.rate_limit_info)) {
     return { ...state, plan: toPlanStatus(event.rate_limit_info) };
@@ -69,7 +102,7 @@ export function applyClaudeLine(state: ClaudeStreamState, line: string): ClaudeS
 export const claudeCodeAdapter: AgentAdapter = {
   kind: "claude-code",
   processName: "claude",
-  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: false },
+  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: true },
   command: claudeCodeArgs,
   isFinalLine: isClaudeFinalLine,
   createStream() {
@@ -142,6 +175,11 @@ function planResumeAt(plan: PlanStatus | undefined): Date | undefined {
     .map((w) => w.resetsAt)
     .sort((a, b) => b.getTime() - a.getTime());
   return exhausted[0] ?? plan.resetsAt;
+}
+
+function namesOf(key: keyof ClaudeInit, value: unknown): ClaudeInit {
+  if (!Array.isArray(value)) return {};
+  return { [key]: value.map((item) => (isRecord(item) && typeof item.name === "string" ? item.name : String(item))) };
 }
 
 function parseJson(line: string): Record<string, unknown> | undefined {

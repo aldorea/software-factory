@@ -32,7 +32,10 @@ export function adapterFor(kind: AgentKind): AgentAdapter {
 }
 
 export function missingRequirements(kind: AgentKind, role: Role): (keyof AgentCapabilities)[] {
-  const capabilities = ADAPTERS[kind].capabilities;
+  return unmetRequirements(ADAPTERS[kind].capabilities, role);
+}
+
+export function unmetRequirements(capabilities: AgentCapabilities, role: Role): (keyof AgentCapabilities)[] {
   return ROLE_REQUIREMENTS[role].filter((requirement) => !capabilities[requirement]);
 }
 

@@ -24,7 +24,7 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 
 The target repo is the current directory, or the last argument. The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker is not running, or when `gh` is missing or not signed in (`gh auth status`). It reports every such problem before it loads the config or asks for the agent of any role. To set a repo up, see the [onboarding guide](onboarding.md).
 
-Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from a prompt with the default of `.factory/config.ts` already selected; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
+Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from an arrow-key menu of agent and model pairs, with the default of `.factory/config.ts` already selected and an entry per agent to type another model; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
 
 ## Flow
 
@@ -154,7 +154,7 @@ The coordinator finds what to resume in two records, never in a conversation:
 
 Each agent's adapter reads its plan usage. Claude Code reports it in its `stream-json` output: a `rate_limit_event` gives the status and the utilization of each window (`five_hour`, `seven_day`) with its reset time. The worker layer records it in each attempt.
 
-OpenCode Go does not report its plan limit in a way that has been observed. Its error is undocumented, and only exhausting the quota would capture it. So its adapter does not detect the plan limit, and OpenCode Go is not offered as the workers until a pilot observes that error and the adapter detects it. The independent verifier is offered with only its tool check, as before: until the error is observed, a plan limit that reaches it is reported as an error of the verifier, and the pilot must check it. The acceptance tester is offered on OpenCode Go the same way: until then, a plan limit that reaches it is reported as an error of the tester.
+OpenCode Go reports its usage limit as an `error` event whose `error.type` is `provider.quota`, or whose response body names `GoUsageLimitError`, and `opencode run` exits without retrying. The adapter reads it as a plan limit that resets after the `retryAfterMs` of the event, when it comes. The event shape comes from the tests of the OpenCode repo, not from a captured run: the first run that hits the limit must capture it and replace the fixture.
 
 ### Blocks during a run
 
@@ -249,9 +249,9 @@ Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-onl
 | Role | Agents it can use |
 |---|---|
 | Refinement | Claude Code, interactive, on the host |
-| Base subtask and workers | Claude Code or OpenCode Go, in Docker. OpenCode Go once its adapter detects its plan limit: its token usage is already read (see below), its plan-limit error is not yet observed |
-| Independent verifier | OpenCode Go, in Docker: the only agent today whose tools can be denied with a fail-closed check |
-| Acceptance tester | Claude Code or OpenCode Go, in Docker. On OpenCode Go, a plan limit is reported as an error of the tester until its error is observed |
+| Base subtask and workers | Claude Code or OpenCode Go, in Docker |
+| Independent verifier | Claude Code or OpenCode Go, in Docker, with every tool denied by a fail-closed check |
+| Acceptance tester | Claude Code or OpenCode Go, in Docker |
 
 The workers, the independent verifier and the acceptance tester may use the same agent and the same model. Each still runs in its own container with its own clean context.
 

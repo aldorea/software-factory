@@ -50,9 +50,10 @@ describe("the flag of a role", () => {
 });
 
 describe("the requirements of a role", () => {
-  it("should refuse an agent that misses a requirement of the role", () => {
-    expect(choiceProblems("workers", KIMI)).toEqual(["opencode cannot serve the workers: it misses detectsPlanLimit"]);
-    expect(choiceProblems("verifier", SONNET)).toEqual(["claude-code cannot serve the verifier: it misses deniesEveryTool"]);
+  it("should accept any agent in any role, since every agent meets every requirement", () => {
+    expect(choiceProblems("workers", KIMI)).toEqual([]);
+    expect(choiceProblems("verifier", SONNET)).toEqual([]);
+    expect(choiceProblems("tester", KIMI)).toEqual([]);
   });
 
   it("should refuse an OpenCode model outside opencode-go/, because the other providers are pay per use", () => {

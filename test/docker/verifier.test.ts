@@ -19,7 +19,7 @@ async function ask(prompt: string) {
   return askVerifier({
     image: IMAGE,
     env: { OPENCODE_API_KEY: OPENCODE_KEY ?? "" },
-    model: FREE_GO_MODEL,
+    agent: { kind: "opencode", model: FREE_GO_MODEL },
     prompt,
     logPath: join(logDir, "verifier.jsonl"),
     limits: { deadline: new Date(Date.now() + 120_000), idleTimeoutMs: 90_000 },
@@ -44,5 +44,45 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS || !OPENCODE_KEY)("Verifier in
     const result = await ask("Use your shell tool to run: touch probe.txt . Then reply DONE.");
     expect(result.outcome.kind, result.logPath).not.toBe("completed");
     expect(result.outcome).not.toMatchObject({ message: expect.stringMatching(/changed its directory|Agent not found/) });
+  });
+});
+
+const CLAUDE_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+async function askClaude(prompt: string, token: string) {
+  const logDir = await temp.make("verifier-log-");
+  return askVerifier({
+    image: IMAGE,
+    env: { CLAUDE_CODE_OAUTH_TOKEN: token },
+    agent: { kind: "claude-code", model: "haiku" },
+    prompt,
+    logPath: join(logDir, "verifier.jsonl"),
+    limits: { deadline: new Date(Date.now() + 120_000), idleTimeoutMs: 90_000 },
+  });
+}
+
+describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("Claude Code verifier in Docker", { timeout: 180_000 }, () => {
+  it("should load no tool with the CLI of the image, so a new CLI version that ignores a deny flag fails here first", async () => {
+    const result = await askClaude("Reply with the single word OK.", "invalid-token");
+
+    expect(result.outcome.kind, result.logPath).toBe("agent-error");
+    expect(result.outcome, result.logPath).not.toMatchObject({ message: expect.stringMatching(/deny-all|did not report its tools/) });
+    expect(await verifierContainers()).toBe("");
+  });
+});
+
+describe.skipIf(!process.env.FACTORY_DOCKER_TESTS || !CLAUDE_TOKEN)("Claude Code verifier with a subscription", { timeout: 180_000 }, () => {
+  it("should answer with text and remove its container", async () => {
+    const result = await askClaude("Reply with the single word OK.", CLAUDE_TOKEN ?? "");
+
+    expect(result.outcome, result.logPath).toEqual({ kind: "completed", summary: "OK" });
+    expect(result.usage.outputTokens).toBeGreaterThan(0);
+    expect(await verifierContainers()).toBe("");
+  });
+
+  it("should not use a tool", async () => {
+    const result = await askClaude("Use your shell tool to run: touch probe.txt . Then reply DONE.", CLAUDE_TOKEN ?? "");
+
+    expect(result.outcome, result.logPath).not.toMatchObject({ message: expect.stringMatching(/changed its directory|loaded tools/) });
   });
 });

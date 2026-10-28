@@ -4,6 +4,8 @@ The factory runs on more than one subscription, so that no role depends on a sin
 
 An agent can serve as the workers only if its adapter reads its token usage and detects its plan limit, so that the hard limits and the pause apply to it. It can serve as the independent verifier only if it can be denied every tool and fails closed when that denial does not load.
 
+Both agents meet every role. OpenCode denies every tool through a deny-all config and detects the Go usage limit from its `provider.quota` error. Claude Code runs the verifier with `--safe-mode --tools "" --disallowedTools "*" --strict-mcp-config --disable-slash-commands` and without `--dangerously-skip-permissions`; its answer counts only when the `init` event of its stream lists no tools and no MCP servers.
+
 ## Considered Options
 
 - **One fixed agent per role.** Rejected: it ties each role to one provider and leaves a second subscription unused.
