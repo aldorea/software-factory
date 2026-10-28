@@ -8,6 +8,11 @@ export function safeLink(url: string): string | null {
   return /^https?:\/\//i.test(url) ? url : null;
 }
 
+export function anchor(url: string, text: string): string {
+  const href = safeLink(url);
+  return href === null ? escapeHtml(text) : `<a href="${escapeHtml(href)}">${escapeHtml(text)}</a>`;
+}
+
 export function page(title: string, body: string): string {
   return [
     "<!doctype html>",
