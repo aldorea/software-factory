@@ -1,0 +1,101 @@
+import type { AttemptRecord, FollowUpRecord, GateRecord, SubtaskRecord, VerifierRecord } from "../coordinator/run-log.ts";
+import { countedTokens } from "../coordinator/stop-rules.ts";
+import { checksGroup, criteriaGroup } from "./evidence-view.ts";
+import { escapeHtml } from "./html.ts";
+
+function list(values: readonly string[]): string {
+  return values.length === 0 ? "ninguno" : values.map(escapeHtml).join(", ");
+}
+
+function attemptItem(attempt: AttemptRecord): string {
+  const lines = [
+    `Intento ${attempt.number}: ${attempt.agent.agent} / ${attempt.agent.model}`,
+    `Resultado: ${attempt.outcome}`,
+  ];
+  if (attempt.detail !== undefined) lines.push(`Detalle: ${attempt.detail}`);
+  if (attempt.failure !== undefined) lines.push(`Fallo: ${attempt.failure.description}`);
+  lines.push(`Tokens: ${countedTokens(attempt.usage)}`, `Inicio: ${attempt.startedAt}`, `Fin: ${attempt.endedAt}`);
+  return `<li class="attempt">${lines.map(escapeHtml).join("<br>\n")}</li>`;
+}
+
+function attemptsList(attempts: readonly AttemptRecord[]): string {
+  if (attempts.length === 0) return "";
+  return ["<h4>Intentos</h4>", "<ul>", ...attempts.map(attemptItem), "</ul>"].join("\n");
+}
+
+function verifierItem(record: VerifierRecord): string {
+  const reason = record.reason === undefined ? "" : ` (${record.reason})`;
+  return `<li class="verifier">${escapeHtml(`${record.id}: ${record.verdict}${reason}`)}</li>`;
+}
+
+function verifierGroup(records: readonly VerifierRecord[]): string {
+  if (records.length === 0) return "";
+  return ["<h4>Independent verifier</h4>", "<ul>", ...records.map(verifierItem), "</ul>"].join("\n");
+}
+
+function reasonsList(reasons: readonly string[]): string {
+  if (reasons.length === 0) return "";
+  return ["<ul>", ...reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`), "</ul>"].join("\n");
+}
+
+function gateBlock(gate: GateRecord | undefined): string {
+  if (gate === undefined) return "";
+  return [
+    `<h4>Gate ${escapeHtml(gate.sha)}: ${gate.accepted ? "aceptado" : "rechazado"}</h4>`,
+    reasonsList(gate.reasons),
+    checksGroup(gate.checks),
+    criteriaGroup(gate.criteria),
+    verifierGroup(gate.verifier),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function blockedBlock(subtask: SubtaskRecord): string {
+  if (subtask.state !== "blocked") return "";
+  const type = subtask.blockType ?? subtask.block?.type;
+  const reason = subtask.reason ?? subtask.block?.reason;
+  const lines = [];
+  if (type !== undefined) lines.push(`<p>Bloqueo: ${escapeHtml(type)}</p>`);
+  if (reason !== undefined) lines.push(`<p>Motivo: ${escapeHtml(reason)}</p>`);
+  if (subtask.block?.lastFailure !== undefined) lines.push(`<p>Último fallo: ${escapeHtml(subtask.block.lastFailure)}</p>`);
+  return lines.join("\n");
+}
+
+function followUpItem(followUp: FollowUpRecord): string {
+  const lines = [
+    `Follow-up ronda ${followUp.round}`,
+    `Criterios: ${list(followUp.criteria)}`,
+    `Fallo: ${followUp.failure}`,
+    `Resultado: ${followUp.outcome}`,
+  ];
+  return `<li class="follow-up">${lines.map(escapeHtml).join("<br>\n")}</li>`;
+}
+
+function followUpsList(followUps: readonly FollowUpRecord[] | undefined): string {
+  if (followUps === undefined || followUps.length === 0) return "";
+  return ["<h4>Follow-up tasks</h4>", "<ul>", ...followUps.map(followUpItem), "</ul>"].join("\n");
+}
+
+function subtaskBlock(subtask: SubtaskRecord): string {
+  return [
+    `<section class="subtask">`,
+    `<h3>${escapeHtml(subtask.id)}</h3>`,
+    `<p>Estado: ${escapeHtml(subtask.state)}</p>`,
+    `<p>Criterios: ${list(subtask.criteria)}</p>`,
+    `<p>Branch: ${escapeHtml(subtask.branch)}</p>`,
+    `<p>Scope extensions: ${list(subtask.scopeExtensions)}</p>`,
+    blockedBlock(subtask),
+    attemptsList(subtask.attempts),
+    `<p>${subtask.gateRejections} rechazos del gate</p>`,
+    `<p>${subtask.verifierRejections} rechazos del independent verifier</p>`,
+    gateBlock(subtask.gate),
+    followUpsList(subtask.followUps),
+    "</section>",
+  ].filter(Boolean).join("\n");
+}
+
+export function subtasksSection(subtasks: readonly SubtaskRecord[]): string {
+  const body = subtasks.length === 0 ? ["<p>Sin subtareas</p>"] : subtasks.map(subtaskBlock);
+  return ["<h2>Subtareas</h2>", ...body].join("\n");
+}
