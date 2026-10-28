@@ -119,6 +119,7 @@ function cli(
       launches.push(launch);
       return 0;
     },
+    signal: new AbortController().signal,
     out: (text) => out.push(text),
     err: (text) => err.push(text),
   };
