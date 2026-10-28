@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { VerificationRecord } from "../../src/coordinator/run-log.ts";
-import { aRun, repoWithRuns, request, runPage, temp, visibleText } from "./run-page-helpers.ts";
+import { aRun, repoWithRuns, request, runPage, temp, visibleText } from "./web-helpers.ts";
 import { handleRequest } from "../../src/web/handler.ts";
 
 afterEach(() => temp.removeAll());

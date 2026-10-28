@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeRunLog, type RunLog } from "../../src/coordinator/run-log.ts";
 import { handleRequest } from "../../src/web/handler.ts";
 import { attemptRecord, subtaskRecord } from "../coordinator/run-log-fixtures.ts";
-import { aRun, request, temp } from "./run-page-helpers.ts";
+import { aRun, request, temp } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 

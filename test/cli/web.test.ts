@@ -1,18 +1,15 @@
 import { request } from "node:http";
 import { createServer, type Server } from "node:net";
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { main, type CliEnv } from "../../src/cli/main.ts";
-import { writeRunLog, type RunLog } from "../../src/coordinator/run-log.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
 import { cleanRun, failedRun } from "../coordinator/run-log-fixtures.ts";
-import { tempDirs } from "../temp-dirs.ts";
+import { repoWithRuns, temp } from "../web/web-helpers.ts";
 
-const temp = tempDirs();
 const stops: AbortController[] = [];
 const blockers: Server[] = [];
 
@@ -53,19 +50,13 @@ function cli(cwd: string) {
   return { env, out, err, stop, firstLine };
 }
 
-async function repoWithRuns(runs: RunLog[]): Promise<string> {
-  const dir = await temp.make("web-cli-repo-");
-  for (const run of runs) await writeRunLog(join(dir, ".factory", "logs", run.runId, "run.json"), run);
-  return dir;
-}
-
 function urlOf(line: string): string {
   return /http:\/\/\S+/.exec(line)?.[0] ?? "";
 }
 
 describe("factory web", () => {
   it("should listen on 127.0.0.1, print the URL, serve the run list and stop on the abort signal leaving no server open", async () => {
-    const dir = await repoWithRuns([cleanRun(0), failedRun(1)]);
+    const dir = await repoWithRuns([{ log: cleanRun(0) }, { log: failedRun(1) }]);
     const { env, err, stop, firstLine } = cli(dir);
     const exit = main(["web", "--port", "0"], env);
 
@@ -82,7 +73,7 @@ describe("factory web", () => {
   });
 
   it("should take the target repo from the argument", async () => {
-    const dir = await repoWithRuns([cleanRun(0)]);
+    const dir = await repoWithRuns([{ log: cleanRun(0) }]);
     const { env, firstLine } = cli(await temp.make("web-cli-elsewhere-"));
     const exit = main(["web", dir, "--port", "0"], env);
 

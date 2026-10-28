@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { handleRequest } from "../../src/web/handler.ts";
-import { aRun, repoWithRuns, request, temp } from "./run-page-helpers.ts";
+import { aRun, repoWithRuns, request, temp } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 

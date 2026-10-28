@@ -1,30 +1,9 @@
-import { utimes } from "node:fs/promises";
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeRunLog, type RunLog } from "../../src/coordinator/run-log.ts";
-import { handleRequest, type WebRequest } from "../../src/web/handler.ts";
+import { handleRequest } from "../../src/web/handler.ts";
 import { cleanRun, failedRun, pausedRun } from "../coordinator/run-log-fixtures.ts";
-import { tempDirs } from "../temp-dirs.ts";
+import { NOW, PORT, repoWithRuns, request, temp, visibleText } from "./web-helpers.ts";
 
-const temp = tempDirs();
 afterEach(() => temp.removeAll());
-
-const NOW = new Date("2026-10-24T08:00:00.000Z");
-const PORT = 7433;
-
-async function repoWithRuns(runs: Array<{ log: RunLog; modifiedAt?: Date }>): Promise<string> {
-  const dir = await temp.make("web-repo-");
-  for (const { log, modifiedAt } of runs) {
-    const path = join(dir, ".factory", "logs", log.runId, "run.json");
-    await writeRunLog(path, log);
-    if (modifiedAt) await utimes(path, modifiedAt, modifiedAt);
-  }
-  return dir;
-}
-
-function request(repoDir: string, overrides: Partial<WebRequest> = {}): WebRequest {
-  return { method: "GET", path: "/", host: `127.0.0.1:${PORT}`, repoDir, port: PORT, now: NOW, ...overrides };
-}
 
 function hoursAgo(hours: number): Date {
   return new Date(NOW.getTime() - hours * 3_600_000);
@@ -110,10 +89,6 @@ describe("the home page", () => {
   });
 });
 
-function visibleText(html: string): string {
-  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
-}
-
 describe("the statistics of the home page", () => {
   it("should show the number of runs for each result above the list of runs", async () => {
     const dir = await repoWithRuns([
@@ -167,37 +142,37 @@ describe("what the handler refuses", () => {
     async (host) => {
       const dir = await temp.make("web-host-");
 
-      expect((await handleRequest(request(dir, { host }))).status).toBe(403);
+      expect((await handleRequest(request(dir, "/", { host }))).status).toBe(403);
     },
   );
 
   it("should answer 403 to a request with no Host header", async () => {
     const dir = await temp.make("web-host-");
 
-    expect((await handleRequest(request(dir, { host: undefined }))).status).toBe(403);
+    expect((await handleRequest(request(dir, "/", { host: undefined }))).status).toBe(403);
   });
 
   it.each([`127.0.0.1:${PORT}`, `localhost:${PORT}`])("should accept the Host header %s", async (host) => {
     const dir = await temp.make("web-host-");
 
-    expect((await handleRequest(request(dir, { host }))).status).toBe(200);
+    expect((await handleRequest(request(dir, "/", { host }))).status).toBe(200);
   });
 
   it.each(["POST", "PUT", "DELETE", "HEAD"])("should answer 405 to the method %s", async (method) => {
     const dir = await temp.make("web-method-");
 
-    expect((await handleRequest(request(dir, { method }))).status).toBe(405);
+    expect((await handleRequest(request(dir, "/", { method }))).status).toBe(405);
   });
 
   it("should answer 404 to an unknown path", async () => {
     const dir = await temp.make("web-path-");
 
-    expect((await handleRequest(request(dir, { path: "/nope" }))).status).toBe(404);
+    expect((await handleRequest(request(dir, "/", { path: "/nope" }))).status).toBe(404);
   });
 
   it("should check the Host header before the method and the path", async () => {
     const dir = await temp.make("web-order-");
 
-    expect((await handleRequest(request(dir, { host: "evil.example", method: "POST", path: "/nope" }))).status).toBe(403);
+    expect((await handleRequest(request(dir, "/", { host: "evil.example", method: "POST", path: "/nope" }))).status).toBe(403);
   });
 });

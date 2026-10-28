@@ -3,10 +3,7 @@ import type { RunLog } from "../../src/coordinator/run-log.ts";
 import { summarizeRuns } from "../../src/coordinator/stats.ts";
 import { statsView } from "../../src/web/stats-view.ts";
 import { cleanRun, failedRun, pausedRun } from "../coordinator/run-log-fixtures.ts";
-
-function visibleText(html: string): string {
-  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
-}
+import { visibleText } from "./web-helpers.ts";
 
 function viewOf(...logs: RunLog[]): string {
   return visibleText(statsView(summarizeRuns(logs)));

@@ -1,46 +1,10 @@
-import { utimes } from "node:fs/promises";
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeRunLog, type RunLog } from "../../src/coordinator/run-log.ts";
-import { handleRequest, type WebRequest } from "../../src/web/handler.ts";
+import type { RunLog } from "../../src/coordinator/run-log.ts";
+import { handleRequest } from "../../src/web/handler.ts";
 import { cleanRun } from "../coordinator/run-log-fixtures.ts";
-import { tempDirs } from "../temp-dirs.ts";
+import { aRun, NOW, repoWithRuns, request, runPage, temp, visibleText } from "./web-helpers.ts";
 
-const temp = tempDirs();
 afterEach(() => temp.removeAll());
-
-const NOW = new Date("2026-10-24T08:00:00.000Z");
-const PORT = 7433;
-
-function withId(log: RunLog, index: number): RunLog {
-  return { ...log, runId: `${log.issue}-2026-10-${String(10 + index).padStart(2, "0")}T08-00-00-000Z` };
-}
-
-function aRun(index: number, overrides: Partial<RunLog> = {}): RunLog {
-  return withId({ ...cleanRun(index), ...overrides }, index);
-}
-
-async function repoWithRuns(runs: Array<{ log: RunLog; modifiedAt?: Date | undefined }>): Promise<string> {
-  const dir = await temp.make("web-run-repo-");
-  for (const { log, modifiedAt } of runs) {
-    const path = join(dir, ".factory", "logs", log.runId, "run.json");
-    await writeRunLog(path, log);
-    if (modifiedAt) await utimes(path, modifiedAt, modifiedAt);
-  }
-  return dir;
-}
-
-function request(repoDir: string, path: string, overrides: Partial<WebRequest> = {}): WebRequest {
-  return { method: "GET", path, host: `127.0.0.1:${PORT}`, repoDir, port: PORT, now: NOW, ...overrides };
-}
-
-async function runPage(log: RunLog, modifiedAt?: Date): Promise<string> {
-  const dir = await repoWithRuns([{ log, modifiedAt }]);
-  const response = await handleRequest(request(dir, `/runs/${log.runId}`));
-  expect(response.status).toBe(200);
-  expect(response.contentType).toBe("text/html; charset=utf-8");
-  return response.body;
-}
 
 describe("the agents of a run", () => {
   it("should show the agent and the model of each role that run.json brings", async () => {
@@ -193,6 +157,20 @@ describe("the block of a run", () => {
     expect(body).toContain("the checks failed on the integration branch");
     expect(body).toContain("abc1234");
     expect(body).toContain("unit-tests");
+  });
+
+  it("should show the first error of a failed check of an integration-check block, as it does for the checks of a gate", async () => {
+    const log = aRun(0, {
+      result: "draft",
+      block: {
+        type: "integration-check",
+        reason: "the checks failed on the integration branch",
+        sha: "abc1234",
+        checks: [{ name: "unit-tests", command: "pnpm test", exitCode: 1, passed: false, firstError: "2 tests failed" }],
+      },
+    });
+
+    expect(visibleText(await runPage(log))).toContain("unit-tests: falla (2 tests failed)");
   });
 
   it("should show the type, the reason and the files of a default-branch-conflict block", async () => {

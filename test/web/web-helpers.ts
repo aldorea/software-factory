@@ -9,7 +9,7 @@ import { tempDirs } from "../temp-dirs.ts";
 export const temp = tempDirs();
 
 export const NOW = new Date("2026-10-24T08:00:00.000Z");
-const PORT = 7433;
+export const PORT = 7433;
 
 export function aRun(index: number, overrides: Partial<RunLog> = {}): RunLog {
   const log = { ...cleanRun(index), ...overrides };
@@ -26,14 +26,15 @@ export async function repoWithRuns(runs: Array<{ log: RunLog; modifiedAt?: Date 
   return dir;
 }
 
-export function request(repoDir: string, path: string, overrides: Partial<WebRequest> = {}): WebRequest {
+export function request(repoDir: string, path = "/", overrides: Partial<WebRequest> = {}): WebRequest {
   return { method: "GET", path, host: `127.0.0.1:${PORT}`, repoDir, port: PORT, now: NOW, ...overrides };
 }
 
-export async function runPage(log: RunLog): Promise<string> {
-  const dir = await repoWithRuns([{ log }]);
+export async function runPage(log: RunLog, modifiedAt?: Date): Promise<string> {
+  const dir = await repoWithRuns([{ log, modifiedAt }]);
   const response = await handleRequest(request(dir, `/runs/${log.runId}`));
   expect(response.status).toBe(200);
+  expect(response.contentType).toBe("text/html; charset=utf-8");
   return response.body;
 }
 
