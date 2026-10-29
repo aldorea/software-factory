@@ -23,6 +23,7 @@ function resultsSection(stats: RunStats): string {
       ["Draft", results.draft],
       ["Paused", results.paused],
       ["Running", results.running],
+      ["Abandoned", results.abandoned],
     ]),
   ].join("\n");
 }

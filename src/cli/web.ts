@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { attemptIdleTimeoutMs } from "../config/load.ts";
 import { DEFAULT_WEB_PORT, startWebServer } from "../web/server.ts";
 import type { CliEnv } from "./main.ts";
 
@@ -40,9 +41,16 @@ export async function web(args: string[], env: WebEnv, usage: string): Promise<n
     env.err(usage);
     return 2;
   }
+  const repoDir = resolve(env.cwd, parsed.repoArg ?? ".");
   let server;
   try {
-    server = await startWebServer({ repoDir: resolve(env.cwd, parsed.repoArg ?? "."), port: parsed.port, clock: env.clock, err: env.err });
+    server = await startWebServer({
+      repoDir,
+      port: parsed.port,
+      clock: env.clock,
+      idleTimeoutMs: await attemptIdleTimeoutMs(repoDir),
+      err: env.err,
+    });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     env.err(

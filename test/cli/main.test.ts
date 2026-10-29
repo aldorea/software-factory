@@ -14,6 +14,7 @@ import { readApproval } from "../../src/spec/approval.ts";
 import { dockerProblem } from "../../src/workers/docker.ts";
 import type { ActivityEvent } from "../../src/workers/types.ts";
 import { execOk } from "../../src/workers/sh.ts";
+import { writeRunningRun } from "../coordinator/running-run.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
@@ -935,5 +936,61 @@ describe("factory CLI: the default branch of the target repo", () => {
     expect(refining.err.join("\n")).toContain("the default branch trunk has no local copy");
     expect(running.err.join("\n")).toContain("the default branch main has no local copy");
     expect(running.runner.workers).toHaveLength(0);
+  });
+});
+
+describe("factory run: the notice of an abandoned run", () => {
+  const NOW = new Date("2026-10-24T08:00:00.000Z");
+
+  function clockTime(at: Date): string {
+    return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+  }
+
+  async function previousRun(repoDir: string, silentMs: number) {
+    const lastChange = new Date(NOW.getTime() - silentMs);
+    const run = await writeRunningRun({ logsDir: join(repoDir, ".factory", "logs"), issue: 42, runJsonAt: lastChange, logAt: lastChange });
+    return { run, lastChange };
+  }
+
+  it("should print which run was abandoned and when before the menu, and start a new run", async () => {
+    const repoDir = await runnableRepo();
+    const { env, out } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+    const { run, lastChange } = await previousRun(repoDir, 30 * 60_000);
+    const seenByMenu: string[] = [];
+    env.ask = async () => {
+      seenByMenu.push(...out);
+      return {};
+    };
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    const notice = `run ${run.runId} of #42 was abandoned at ${clockTime(lastChange)}; starting a new run`;
+    expect(seenByMenu).toContain(notice);
+    expect(out.indexOf(notice)).toBeLessThan(out.indexOf("Preparing run #42; factory web shows it at http://127.0.0.1:7433/"));
+    expect((await lastRunLog(repoDir)).runId).not.toBe(run.runId);
+  });
+
+  it("should not warn about a run that is still working", async () => {
+    const repoDir = await runnableRepo();
+    const { env, out } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+    await previousRun(repoDir, 60_000);
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    expect(out.some((line) => line.includes("was abandoned"))).toBe(false);
+  });
+
+  it("should not warn when the last run of the issue finished", async () => {
+    const repoDir = await runnableRepo();
+    const { env, out } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+    expect(await main(["run", "42"], env)).toBe(0);
+    out.length = 0;
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    expect(out.some((line) => line.includes("was abandoned"))).toBe(false);
   });
 });

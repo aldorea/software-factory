@@ -1,6 +1,7 @@
 import { WORKER_LAYER_FAILURE_KINDS, type WorkerLayerFailureKind } from "../workers/failures.ts";
 import type { AgentKind, TokenUsage } from "../workers/types.ts";
-import { BLOCK_TYPES, type CriteriaRecord, type FrictionRecord, type RunLog, type RunResult } from "./run-log.ts";
+import type { RunStatus } from "./abandoned.ts";
+import { BLOCK_TYPES, type CriteriaRecord, type FrictionRecord, type RunLog } from "./run-log.ts";
 import { emptyFriction } from "./run-totals.ts";
 import { countedTokens, formatDuration } from "./stop-rules.ts";
 
@@ -13,7 +14,7 @@ export interface AgentStats {
 
 export interface RunStats {
   runs: number;
-  results: Record<RunResult, number>;
+  results: Record<RunStatus, number>;
   criteria: Record<keyof CriteriaRecord, number>;
   cost: {
     attempts: number;
@@ -32,10 +33,10 @@ function average(total: number, count: number): number {
   return count === 0 ? 0 : total / count;
 }
 
-export function summarizeRuns(logs: readonly RunLog[]): RunStats {
+export function summarizeRuns(logs: readonly RunLog[], abandoned: ReadonlySet<RunLog> = new Set()): RunStats {
   const stats: RunStats = {
     runs: logs.length,
-    results: { ready: 0, draft: 0, paused: 0, running: 0 },
+    results: { ready: 0, draft: 0, paused: 0, running: 0, abandoned: 0 },
     criteria: { passing: 0, blocked: 0, human: 0, pending: 0 },
     cost: {
       attempts: 0,
@@ -54,7 +55,7 @@ export function summarizeRuns(logs: readonly RunLog[]): RunStats {
   let subtaskTokens = 0;
   let subtaskAttempts = 0;
   for (const log of logs) {
-    stats.results[log.result] += 1;
+    stats.results[abandoned.has(log) ? "abandoned" : log.result] += 1;
     for (const key of Object.keys(stats.criteria) as (keyof CriteriaRecord)[]) stats.criteria[key] += log.criteria[key].length;
     stats.cost.attempts += log.cost.attempts;
     stats.cost.countedTokens += countedTokens(log.cost.usage);
@@ -109,8 +110,9 @@ export function formatStats(stats: RunStats, unreadable: readonly string[] = [])
       `  ${kind}: ${plural(agent.runs, "run")}, ${plural(agent.attempts, "attempt")}, ${agent.countedTokens} tokens, ${plural(agent.pauses, "pause")}`,
   );
   const running = results.running > 0 ? `, running ${results.running}` : "";
+  const abandoned = results.abandoned > 0 ? `, abandoned ${results.abandoned}` : "";
   return [
-    `Runs: ${stats.runs} (ready ${results.ready}, draft ${results.draft}, paused ${results.paused}${running})`,
+    `Runs: ${stats.runs} (ready ${results.ready}, draft ${results.draft}, paused ${results.paused}${running}${abandoned})`,
     `Criteria: passing ${criteria.passing}, blocked ${criteria.blocked}, human ${criteria.human}, pending ${criteria.pending}`,
     "",
     "Cost",
