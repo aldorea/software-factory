@@ -15,7 +15,8 @@ function attemptItem(attempt: AttemptRecord, logUrl: LogUrl): string {
   ];
   if (attempt.detail !== undefined) lines.push(`Detalle: ${attempt.detail}`);
   if (attempt.failure !== undefined) lines.push(`Fallo: ${attempt.failure.description}`);
-  lines.push(`Tokens: ${countedTokens(attempt.usage)}`, `Inicio: ${attempt.startedAt}`, `Fin: ${attempt.endedAt}`);
+  lines.push(`Tokens: ${countedTokens(attempt.usage)}`, `Inicio: ${attempt.startedAt}`);
+  if (attempt.endedAt !== undefined) lines.push(`Fin: ${attempt.endedAt}`);
   return `<li class="attempt">${[...lines.map(escapeHtml), ...logAnchors(logUrl(attempt.logPath), RAW_LOG)].join("<br>\n")}</li>`;
 }
 

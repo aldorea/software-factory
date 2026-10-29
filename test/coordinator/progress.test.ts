@@ -35,6 +35,17 @@ describe("the progress lines of a run", () => {
     expect(progressLines(before, after)).toEqual(["S1: attempt 1 agent-error: agent-error: no output", "S1: blocked (patience)"]);
   });
 
+  it("should not report an attempt that is running, and report it once when it ends, so that the activity is not repeated by the progress", () => {
+    const started = { ...attemptRecord("claude-code", 0, 0), outcome: "running" as const };
+    const ended = attemptRecord("claude-code", 10, 5);
+    const states = (attempts: (typeof started | typeof ended)[]) =>
+      running({ subtasks: [subtaskRecord("S1", { state: "working", attempts }), subtaskRecord("S2", { state: "pending" })] });
+
+    expect(progressLines(states([]), states([started]))).toEqual([]);
+    expect(progressLines(states([started]), states([ended]))).toEqual(["S1: attempt 1 completed"]);
+    expect(progressLines(states([ended]), states([ended]))).toEqual([]);
+  });
+
   it("should report the integrated verification, the result and the pull request once each", () => {
     const after = running({
       result: "ready",

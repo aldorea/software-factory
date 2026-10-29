@@ -70,6 +70,20 @@ describe("the summary of the run logs of a repo", () => {
     expect(stats.cost.perSubtask.maxCountedTokens).toBe(4000);
   });
 
+  it("should count an attempt that has no outcome yet as an attempt that spent no tokens, without breaking the summary", () => {
+    const unfinished = { ...attemptRecord("claude-code", 0, 0), number: 2, outcome: "running" as const };
+    const { endedAt: _endedAt, ...withoutEnd } = unfinished;
+    const run = runRecord(0, [subtaskRecord("S1", { attempts: [attemptRecord("claude-code", 100, 50), withoutEnd] })], { result: "running" });
+
+    const stats = summarizeRuns([run]);
+
+    expect(stats.results.running).toBe(1);
+    expect(stats.cost.attempts).toBe(2);
+    expect(stats.cost.countedTokens).toBe(150);
+    expect(stats.perAgent["claude-code"]).toMatchObject({ attempts: 2, countedTokens: 150 });
+    expect(formatStats(stats)).toContain("Attempts: 2");
+  });
+
   it("should split runs, attempts, tokens and pauses per agent to compare the subscriptions", () => {
     const stats = summarizeRuns(history());
     expect(stats.perAgent["claude-code"]).toEqual({ runs: 3, attempts: 5, countedTokens: 11_500, pauses: 0 });

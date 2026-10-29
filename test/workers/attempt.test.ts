@@ -201,6 +201,32 @@ describe("attempt", () => {
     expect(stopped).toEqual(["opencode"]);
   });
 
+  it("should announce the log path before the agent starts, so that the log can be read while it grows", async () => {
+    const dir = await temp.make("attempt-");
+    const logPath = join(dir, "log.jsonl");
+    const events: string[] = [];
+    const result = await performAttempt({
+      adapter: adapterFor("claude-code"),
+      model: "claude-haiku-5-5",
+      prompt: "x",
+      limits: soon(),
+      hooks: {
+        onStart: (start) => {
+          events.push(`start ${start.logPath}`);
+        },
+      },
+      logPath,
+      launch: () => {
+        events.push("launch");
+        return { command: "true", args: [] };
+      },
+      stop: async () => undefined,
+      exec: noExport,
+    });
+    expect(events).toEqual([`start ${logPath}`, "launch"]);
+    expect(result.startedAt).toBeInstanceOf(Date);
+  });
+
   it("should pass the command of the adapter to the launcher", async () => {
     const dir = await temp.make("attempt-");
     let received: string[] = [];
