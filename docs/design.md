@@ -15,7 +15,7 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 
 | Command | What it does |
 |---|---|
-| `factory refine <n>` | Interactive refinement of issue `<n>` |
+| `factory refine <n> [--refinement-agent <agent>:<model>]` | Interactive refinement of issue `<n>` |
 | `factory validate <n>` | Checks `specs/<n>.md` on the integration branch against the issue and the config, and changes nothing |
 | `factory approve <n>` | Validates the spec and approves it with a hash |
 | `factory run <n>` | Implements, verifies and opens the PR |
@@ -25,11 +25,23 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 
 The target repo is the current directory, or the last argument. The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker is not running, or when `gh` is missing or not signed in (`gh auth status`). It reports every such problem before it loads the config or asks for the agent of any role. To set a repo up, see the [onboarding guide](onboarding.md).
 
-Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from a menu with one step per role that a flag did not fix; else from that default. Each step lists agent and model pairs, with the default already selected and its origin shown (`.factory/config.ts` or the paused run that resumes), and an entry per agent to type another model. ← or Esc goes back to the previous step and keeps its choice; on the first step it does nothing. A last step shows the choice of every role, the ones fixed by a flag marked as such, and Enter starts the run. Ctrl-C at any step cancels and starts nothing. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
+Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from a menu; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. See [ADR 0003](adr/0003-interchangeable-agents.md).
+
+The menu opens on a summary with the choice of every role, by its name in the glossary, each with its origin: `.factory/config.ts`, the paused run that resumes, or a flag. Enter starts. ↑/↓ selects a role that no flag fixed and → opens its step, which lists agent and model pairs with the current choice selected and an entry per agent to type another model; ← or Esc goes back to the summary and keeps the choice. Ctrl-C cancels and starts nothing. When the paused run reached the plan limit of an agent that the summary still holds and `now` is before its `resetsAt`, the summary warns that the run will pause again:
+
+```
+❯ workers:               claude-code opus (paused run)
+  ⚠ claude-code plan limit until 14:00: the run will pause again
+  independent verifier:  opencode opencode-go/glm-5.3 (config)
+  acceptance tester:     claude-code sonnet (flag)
+Enter to start · → to change a role
+```
+
+Before `factory refine` starts, the developer chooses the agent and the model of the refinement the same way: from `--refinement-agent`, else in a terminal from the same menu with one role, else from `roles.refinement` of `.factory/config.ts`. Only Claude Code is offered until the refinement skill works on another agent ([ADR 0003](adr/0003-interchangeable-agents.md)).
 
 ## Flow
 
-1. **Refine.** `claude` runs in an interactive session in the terminal, on the host, in the worktree of the issue. A refinement skill reads the issue and the code, writes the technical part, and asks only the open decisions (product, ambiguities, doubtful criteria), in rounds, each with a recommended answer. At the end it:
+1. **Refine.** The agent of the refinement runs with the chosen model in an interactive session in the terminal, on the host, in the worktree of the issue. A refinement skill reads the issue and the code, writes the technical part, and asks only the open decisions (product, ambiguities, doubtful criteria), in rounds, each with a recommended answer. At the end it:
    - rewrites the criteria of the issue with IDs `A1`, `A2`…;
    - writes `specs/<n>.md` on the integration branch;
    - posts a comment on the issue with the decisions and their reasons.
@@ -171,7 +183,7 @@ The coordinator never asks me during a run. It records each block in the PR and 
 A macOS notification links to the PR when a run ends, pauses or blocks. Before the run starts, `factory run` prints the URL of `factory web`, and a notice when the last run of the issue is abandoned (see [Web view](#web-view)). While the run works, it prints two kinds of line to the terminal, each with the time (`hh:mm:ss`):
 
 - **Progress:** one line for each change of `run.json` that a developer watches: a subtask that changes state, a finished attempt, the integrated verification, a pause, the result and the PR. Its colour follows the result: green for merged, red for blocked, yellow for paused.
-- **Activity:** one line for each event of the activity of an attempt, of an independent verifier question or of the acceptance tester, with its prefix (`S2`, `verifier A3`, `tester`) in a colour of its own and the rest dimmed. An event is a message of the agent (its first line, cut to about 100 characters), a tool with its target (`Edit src/api/users.ts`, `Bash pnpm test`) or the end of the attempt. The CLI filters none of them; the raw log keeps everything.
+- **Activity:** one line for each event of the activity of an attempt, of an independent verifier question or of the acceptance tester, with its prefix in a colour of its own and the rest dimmed. The prefix is the subtask (`S2`), `verifier` and the criterion (`verifier A3`) for the independent verifier, or `tester` for the acceptance tester: the short key of the role in the flags and the config, not its name in the glossary, so that the lines stay aligned. An event is a message of the agent (its first line, cut to about 100 characters), a tool with its target (`Edit src/api/users.ts`, `Bash pnpm test`) or the end of the attempt. The CLI filters none of them; the raw log keeps everything.
 
 In a terminal, one last line stays at the bottom and is redrawn every second: each attempt in progress, its duration and the time since its last activity, so that an agent that thinks for minutes does not look dead. When the output is not a terminal, the same lines go out with no colour and no bottom line. The run ends with a short summary: the result, the subtasks merged and blocked, the wall clock, the tokens and the URL of the PR.
 
@@ -241,7 +253,7 @@ The issue, `specs/<n>.md` and the PR are the records. A new session starts again
   - collect its commits;
   - ask the independent verifier and get its answer, or an error if it used a tool or gave no answer;
   - start the acceptance tester on the integrated app and get its verdict per criterion with the paths of its evidence, or an error if it gave no usable report.
-- Each agent has an adapter in the layer. An agent can serve as the workers only if its adapter reads its token usage and detects its plan limit, as the acceptance tester only if its adapter reads its token usage, and as the independent verifier only if every tool can be denied to it with a fail-closed check. An agent that misses one is not offered for that role.
+- Each agent has an adapter in the layer. An agent can serve as the workers only if its adapter reads its token usage and detects its plan limit, as the acceptance tester only if its adapter reads its token usage, as the independent verifier only if every tool can be denied to it with a fail-closed check, and as the refinement only if its adapter starts the refinement skill in an interactive session on the host. An agent that misses one is not offered for that role.
 - Each adapter turns the lines of its agent's stream into the common events of the activity: a message, a tool with its target, the end. It gives only what its stream holds: the `--format json` stream of OpenCode 2.0.16 has no tool events, so OpenCode shows messages and the end.
 - Sandcastle (`mattpocock/sandcastle`) is a design reference only: see [ADR 0002](adr/0002-own-worker-layer.md).
 - A toy repo with trivial tasks tests the layer before `askwell`.
@@ -257,7 +269,7 @@ Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-onl
 
 | Role | Agents it can use |
 |---|---|
-| Refinement | Claude Code, interactive, on the host |
+| Refinement | Claude Code (the only agent offered), interactive, on the host, with the chosen model |
 | Base subtask and workers | Claude Code or OpenCode Go, in Docker |
 | Independent verifier | Claude Code or OpenCode Go, in Docker, with every tool denied by a fail-closed check |
 | Acceptance tester | Claude Code or OpenCode Go, in Docker |
