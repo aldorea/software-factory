@@ -1,6 +1,6 @@
 import type { ActivityEntry } from "../coordinator/ports.ts";
 import type { RunLog } from "../coordinator/run-log.ts";
-import { CLEAR_LINE, renderActivity, renderProgress, runningAttempts, statusLine, type RunningAttempt } from "./terminal-render.ts";
+import { CLEAR_LINE, renderActivity, renderProgress, runningAttempts, sourceColours, statusLine, type RunningAttempt } from "./terminal-render.ts";
 
 export interface RunViewOptions {
   now(): Date;
@@ -12,6 +12,7 @@ export class RunView {
   private readonly options: RunViewOptions;
   private attempts: RunningAttempt[] = [];
   private readonly lastActivity = new Map<string, Date>();
+  private readonly colours = sourceColours();
   private drawn = false;
 
   constructor(options: RunViewOptions) {
@@ -19,12 +20,12 @@ export class RunView {
   }
 
   progress(line: string): void {
-    this.history(renderProgress(line, true));
+    this.history(renderProgress(line, this.options.now(), true));
   }
 
   activity(entry: ActivityEntry): void {
     this.lastActivity.set(entry.source, entry.at);
-    this.history(renderActivity(entry, true));
+    this.history(renderActivity(entry, true, this.colours));
   }
 
   snapshot(log: RunLog): void {

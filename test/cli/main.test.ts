@@ -249,7 +249,8 @@ describe("factory run: the choice of the agent of each role", () => {
     expect(await main(["run", "42"], env)).toBe(0);
 
     expect(out[0]).toBe("Preparing run #42; factory web shows it at http://127.0.0.1:7433/");
-    expect(out).toContain("S1: working");
+    expect(out.some((line) => /^\d\d:\d\d:\d\d S1: working$/.test(line))).toBe(true);
+    expect(out).not.toContain("S1: working");
     expect(out.some((line) => /^Run 42-.*: (ready|draft)$/.test(line))).toBe(true);
   });
 
@@ -277,8 +278,8 @@ describe("factory run: the choice of the agent of each role", () => {
       "10:02:20 S1 · Bash pnpm test",
       "10:02:20 S1 · attempt ended",
     ]);
-    expect(out.indexOf("S1: working")).toBeLessThan(out.indexOf(activity[0] as string));
-    expect(out.indexOf(activity[4] as string)).toBeLessThan(out.indexOf("S1: attempt 1 completed"));
+    expect(out.indexOf("10:02:20 S1: working")).toBeLessThan(out.indexOf(activity[0] as string));
+    expect(out.indexOf(activity[4] as string)).toBeLessThan(out.indexOf("10:02:20 S1: attempt 1 completed"));
   });
 
   it("should print no ANSI code and no bottom line when the output is not a terminal", async () => {
@@ -321,24 +322,24 @@ describe("factory run: the choice of the agent of each role", () => {
       .split("\n")
       .filter((line) => line !== "");
     expect(history).toEqual([
-      expect.stringMatching(/^run 42-.*: 1 subtask, workers on claude-code sonnet$/),
-      "S1: working",
+      expect.stringMatching(/^10:02:20 run 42-.*: 1 subtask, workers on claude-code sonnet$/),
+      "10:02:20 S1: working",
       '10:02:20 S1 · "Reading the module."',
       "10:02:20 S1 · Edit src/a.txt",
       "10:02:20 S1 · attempt ended",
-      "S1: attempt 1 completed",
-      "S1: gating",
-      "S1: merged",
-      expect.stringMatching(/^integrated verification at /),
-      expect.stringMatching(/^run 42-.*: (ready|draft)$/),
-      expect.stringMatching(/^pull request: /),
+      "10:02:20 S1: attempt 1 completed",
+      "10:02:20 S1: gating",
+      "10:02:20 S1: merged",
+      expect.stringMatching(/^10:02:20 integrated verification at /),
+      expect.stringMatching(/^10:02:20 run 42-.*: (ready|draft)$/),
+      expect.stringMatching(/^10:02:20 pull request: /),
     ]);
-    expect(screen).toContain("\u001b[32mS1: merged\u001b[0m");
+    expect(screen).toContain("\u001b[2m10:02:20 \u001b[0m\u001b[32mS1: merged\u001b[0m");
     expect(screen).toContain("⏳ S1 attempt 1 · 0s · last activity 0s ago");
     expect(writes.at(-1)).not.toContain("⏳");
     expect(writes.at(-1)?.endsWith("\n")).toBe(true);
     expect(out.join("\n")).not.toMatch(/⏳|\u001b/);
-    expect(out).not.toContain("S1: merged");
+    expect(out.some((line) => line.includes("S1: merged"))).toBe(false);
     expect(out.some((line) => /^Run 42-/.test(line))).toBe(true);
   });
 
@@ -446,7 +447,6 @@ describe("factory run: the choice of the agent of each role", () => {
     expect(notes).toEqual([
       {
         workers: [expect.stringMatching(/^⚠ claude-code plan limit until \d\d:\d\d: the run will pause again$/)],
-        tester: [expect.stringMatching(/^⚠ claude-code plan limit until \d\d:\d\d: the run will pause again$/)],
       },
     ]);
   });

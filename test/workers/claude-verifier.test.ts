@@ -88,13 +88,17 @@ describe("Claude Code verifier outcome", () => {
 
 describe("Claude Code verifier activity", () => {
   it("should translate the stream of the verifier into the same events as the stream of a worker, so a verifier that uses no tools shows only messages and its end", () => {
-    const activityOf = verifierActivity("claude-code");
+    const activity = verifierActivity("claude-code");
 
-    const events = [initWithNoTools, assistantText("The test only checks the status code.\nIt never reads the page."), answer("REFUTE")].flatMap(activityOf);
+    const events = [initWithNoTools, assistantText("The test only checks the status code.\nIt never reads the page."), answer("REFUTE")].flatMap(activity.onLine);
 
     expect(events).toEqual([
       { kind: "message", text: "The test only checks the status code." },
       { kind: "end", outcome: "completed" },
     ]);
+  });
+
+  it("should add no end event when the verifier outcome is known, because the result line of the stream already gave it", () => {
+    expect(verifierActivity("claude-code").finish({ kind: "completed", summary: "ACCEPT" })).toEqual([]);
   });
 });

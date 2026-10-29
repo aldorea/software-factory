@@ -35,7 +35,7 @@ describe("run view", () => {
 
     v.progress("S1: merged");
 
-    expect(writes.join("")).toBe(`${CLEAR_LINE}${ESC}[32mS1: merged${ESC}[0m\n`);
+    expect(writes.join("")).toBe(`${CLEAR_LINE}${ESC}[2m10:00:00 ${ESC}[0m${ESC}[32mS1: merged${ESC}[0m\n`);
   });
 
   it("should draw the bottom line after a history line and clear the old one before it, so that the history is never overwritten", () => {
@@ -46,7 +46,7 @@ describe("run view", () => {
 
     v.progress("S1: merged");
 
-    expect(writes.at(-1)).toBe(`${CLEAR_LINE}${ESC}[32mS1: merged${ESC}[0m\n⏳ S2 attempt 1 · 4m12s · no activity yet`);
+    expect(writes.at(-1)).toBe(`${CLEAR_LINE}${ESC}[2m10:04:12 ${ESC}[0m${ESC}[32mS1: merged${ESC}[0m\n⏳ S2 attempt 1 · 4m12s · no activity yet`);
   });
 
   it("should count the time since the last activity of an attempt from its activity entries", () => {
@@ -118,6 +118,16 @@ describe("run view", () => {
     v.activity({ source: "S1", at: new Date(2026, 9, 28, 10, 2, 20), event: { kind: "tool", tool: "Edit", target: "src/a.ts" } });
 
     expect((writes.join("").replace(CLEAR_LINE, "").replace(ansi, ""))).toBe("10:02:20 S1 · Edit src/a.ts\n");
+  });
+
+  it("should give each source a colour in order of first appearance, so the first sources of a run never share one", () => {
+    const { view: v, writes } = view();
+    const sources = ["S1", "S2", "S3", "verifier A1", "tester", "S4"];
+
+    for (const source of sources) v.activity({ source, at: new Date(2026, 9, 28, 10, 0, 0), event: { kind: "tool", tool: "Read" } });
+
+    const colours = writes.map((text) => new RegExp(`(\\u001b\\[[0-9;]*m)${"(?:S\\d|verifier A1|tester)"}`).exec(text)?.[1]);
+    expect(new Set(colours).size).toBe(sources.length);
   });
 
   it("should clear the bottom line when the run ends and write nothing when none is drawn", () => {

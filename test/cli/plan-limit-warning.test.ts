@@ -61,12 +61,20 @@ describe("planLimitReached", () => {
 });
 
 describe("planLimitAnnotate", () => {
-  it("should put the warning under every role that still holds the agent that reached the limit", () => {
+  it("should put the warning once, under the first role that still holds the agent that reached the limit, so the summary does not repeat it", () => {
     const entries = ENTRIES.map((entry) => ({ ...entry, choice: { agent: "claude-code", model: "sonnet" } }) as RoleEntry);
     const notes = planLimitAnnotate(pausedAt(RESETS_AT), BEFORE)(entries);
     const warning = "⚠ claude-code plan limit until 14:00: the run will pause again";
 
-    expect(notes).toEqual({ workers: [warning], verifier: [warning], tester: [warning] });
+    expect(notes).toEqual({ workers: [warning] });
+  });
+
+  it("should put the warning under a later role when the earlier roles hold another agent", () => {
+    const [workers, verifier, tester] = ENTRIES as [RoleEntry, RoleEntry, RoleEntry];
+    const entries: RoleEntry[] = [workers, { ...verifier, choice: { agent: "claude-code", model: "sonnet" } }, { ...tester, choice: { agent: "claude-code", model: "sonnet" } }];
+    const notes = planLimitAnnotate(pausedAt(RESETS_AT), BEFORE)([{ ...workers, choice: { agent: "opencode", model: "opencode-go/glm-5.3" } }, ...entries.slice(1)]);
+
+    expect(Object.keys(notes)).toEqual(["verifier"]);
   });
 
   it("should warn about nothing after the reset, in a new run or in a run paused for another reason", () => {

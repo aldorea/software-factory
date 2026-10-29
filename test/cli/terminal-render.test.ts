@@ -3,6 +3,7 @@ import {
   renderActivity,
   renderProgress,
   runningAttempts,
+  sourceColours,
   statusLine,
   type RunningAttempt,
 } from "../../src/cli/terminal-render.ts";
@@ -20,38 +21,43 @@ const entry = (source: string, event: ActivityEntry["event"] = { kind: "tool", t
 });
 
 describe("progress rendering", () => {
-  it("should leave a progress line as plain text when the output is not a terminal", () => {
-    expect(renderProgress("S1: merged", false)).toBe("S1: merged");
+  it("should start a plain progress line with the local time as hh:mm:ss when the output is not a terminal", () => {
+    expect(renderProgress("S1: merged", at, false)).toBe("10:02:20 S1: merged");
+    expect(renderProgress("S1: merged", at, false)).not.toMatch(ansi);
   });
 
-  it("should colour a merged subtask in green", () => {
-    expect(renderProgress("S1: merged", true)).toBe(`${ESC}[32mS1: merged${ESC}[0m`);
+  it("should dim the time of a progress line in a terminal and colour a merged subtask in green", () => {
+    expect(renderProgress("S1: merged", at, true)).toBe(`${ESC}[2m10:02:20 ${ESC}[0m${ESC}[32mS1: merged${ESC}[0m`);
   });
 
   it("should colour a blocked subtask in red, with its block type", () => {
-    expect(renderProgress("S2: blocked (patience)", true)).toBe(`${ESC}[31mS2: blocked (patience)${ESC}[0m`);
+    expect(renderProgress("S2: blocked (patience)", at, true)).toBe(`${ESC}[2m10:02:20 ${ESC}[0m${ESC}[31mS2: blocked (patience)${ESC}[0m`);
   });
 
   it("should colour the pause of the run in yellow", () => {
-    expect(renderProgress("run paused: claude-code plan limit", true)).toBe(`${ESC}[33mrun paused: claude-code plan limit${ESC}[0m`);
-    expect(renderProgress("run 42-a1: paused", true)).toBe(`${ESC}[33mrun 42-a1: paused${ESC}[0m`);
+    expect(renderProgress("run paused: claude-code plan limit", at, true)).toBe(
+      `${ESC}[2m10:02:20 ${ESC}[0m${ESC}[33mrun paused: claude-code plan limit${ESC}[0m`,
+    );
+    expect(renderProgress("run 42-a1: paused", at, true)).toBe(`${ESC}[2m10:02:20 ${ESC}[0m${ESC}[33mrun 42-a1: paused${ESC}[0m`);
   });
 
-  it("should leave any other progress line in normal text, with no colour code", () => {
-    expect(renderProgress("S1: attempt 1 completed", true)).toBe("S1: attempt 1 completed");
-    expect(renderProgress("S1: working", true)).toBe("S1: working");
-    expect(renderProgress("pull request: https://github.test/pull/1", true)).toBe("pull request: https://github.test/pull/1");
+  it("should leave any other progress line in normal text after its dim time", () => {
+    expect(renderProgress("S1: attempt 1 completed", at, true)).toBe(`${ESC}[2m10:02:20 ${ESC}[0mS1: attempt 1 completed`);
+    expect(renderProgress("S1: working", at, true)).toBe(`${ESC}[2m10:02:20 ${ESC}[0mS1: working`);
+    expect(renderProgress("pull request: https://github.test/pull/1", at, true)).toBe(
+      `${ESC}[2m10:02:20 ${ESC}[0mpull request: https://github.test/pull/1`,
+    );
   });
 });
 
 describe("activity rendering", () => {
   it("should give the same text as the plain activity line when the output is not a terminal", () => {
-    expect(renderActivity(entry("S1"), false)).toBe("10:02:20 S1 · Edit src/a.ts");
-    expect(renderActivity(entry("S1"), false)).not.toMatch(ansi);
+    expect(renderActivity(entry("S1"), false, sourceColours())).toBe("10:02:20 S1 · Edit src/a.ts");
+    expect(renderActivity(entry("S1"), false, sourceColours())).not.toMatch(ansi);
   });
 
   it("should dim the whole line of a terminal and colour the prefix", () => {
-    const rendered = renderActivity(entry("S1"), true);
+    const rendered = renderActivity(entry("S1"), true, sourceColours());
 
     expect(rendered).toMatch(ansi);
     expect(rendered.replace(new RegExp(ansi, "g"), "")).toBe("10:02:20 S1 · Edit src/a.ts");
@@ -59,19 +65,34 @@ describe("activity rendering", () => {
     expect(rendered.endsWith(`${ESC}[2m · Edit src/a.ts${ESC}[0m`)).toBe(true);
   });
 
-  it("should give each subtask a colour of its own and the same colour every time", () => {
-    const prefix = (source: string) => /\u001b\[2m\d\d:\d\d:\d\d \u001b\[0m(\u001b\[[0-9;]*m)S/.exec(renderActivity(entry(source), true))?.[1];
+  it("should give the first sources of a run distinct colours, in order of first appearance, and the same colour every time", () => {
+    const colours = sourceColours();
+    const sources = ["S1", "S2", "S3", "verifier A3", "tester", "S4"];
 
-    expect(prefix("S1")).not.toBe(prefix("S2"));
-    expect(prefix("S1")).toBe(prefix("S1"));
+    const first = sources.map((source) => colours(source));
+
+    expect(new Set(first).size).toBe(sources.length);
+    expect(sources.map((source) => colours(source))).toEqual(first);
+  });
+
+  it("should not depend on the name of the source for its colour, so two names with the same character sum still differ", () => {
+    const colours = sourceColours();
+
+    expect(colours("S12")).not.toBe(colours("S21"));
+  });
+
+  it("should start again from the first colour for each run", () => {
+    expect(sourceColours()("tester")).toBe(sourceColours()("S1"));
   });
 
   it("should colour the prefix of the verifier and the tester by their source string", () => {
-    const colour = (source: string) => new RegExp(`(\\u001b\\[[0-9;]*m)${source}`).exec(renderActivity(entry(source), true))?.[1];
+    const colours = sourceColours();
+    const colour = (source: string) => new RegExp(`(\\u001b\\[[0-9;]*m)${source}`).exec(renderActivity(entry(source), true, colours))?.[1];
 
     expect(colour("verifier A3")).toBeDefined();
     expect(colour("verifier A3")).toBe(colour("verifier A3"));
     expect(colour("tester")).toBeDefined();
+    expect(colour("tester")).not.toBe(colour("verifier A3"));
   });
 });
 

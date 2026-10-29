@@ -11,6 +11,7 @@ import { askRolesInTerminal } from "./ask-role.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
 import { CLEAR_LINE } from "./terminal-render.ts";
+import { terminalFeatures } from "./tty.ts";
 
 const clock = { now: () => new Date() };
 
@@ -20,8 +21,9 @@ if (process.argv[2] === "web") {
   process.once("SIGTERM", () => stop.abort());
 }
 
+const features = terminalFeatures({ stdout: Boolean(process.stdout.isTTY), stdin: Boolean(process.stdin.isTTY) });
 const terminal =
-  process.stdout.isTTY && process.stdin.isTTY
+  features.screen
     ? { columns: () => process.stdout.columns || 80, write: (text: string) => void process.stdout.write(text) }
     : undefined;
 if (process.argv[2] === "run" && terminal) {
@@ -49,7 +51,7 @@ process.exitCode = await main(process.argv.slice(2), {
   credentials,
   docker: () => dockerProblem(),
   gh: () => ghProblem(),
-  ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: askRolesInTerminal } : {}),
+  ...(features.menu ? { ask: askRolesInTerminal } : {}),
   ...(terminal ? { terminal } : {}),
   launch: launchInteractive,
   signal: stop.signal,

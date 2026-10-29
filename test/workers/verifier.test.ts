@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { toEnvFile } from "../../src/workers/docker-runner.ts";
 import { applyOpenCodeLine, initialOpenCodeState } from "../../src/workers/opencode.ts";
 import type { SupervisedProcess } from "../../src/workers/supervise.ts";
-import { verifierOutcome } from "../../src/workers/verifier.ts";
+import { verifierActivity, verifierOutcome } from "../../src/workers/verifier.ts";
 
 const exited: SupervisedProcess = { stopReason: "exited", exitCode: 0, stderrTail: "" };
 
@@ -43,5 +43,14 @@ describe("Env file", () => {
 
   it("should refuse a value with a newline, so a secret cannot inject another variable", () => {
     expect(() => toEnvFile({ TOKEN: "abc\nGH_TOKEN=x" })).toThrow(/TOKEN has a newline/);
+  });
+});
+
+describe("OpenCode verifier activity", () => {
+  it("should end with an end event when the verifier outcome is known, because the OpenCode stream has no end line of its own", () => {
+    expect(verifierActivity("opencode").finish({ kind: "completed", summary: "OK" })).toEqual([{ kind: "end", outcome: "completed" }]);
+    expect(verifierActivity("opencode").finish({ kind: "agent-error", message: "no answer", exitCode: 0 })).toEqual([
+      { kind: "end", outcome: "failed" },
+    ]);
   });
 });

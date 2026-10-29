@@ -19,11 +19,13 @@ import { WEB_HOST } from "../web/host.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import { activityLine } from "./activity-line.ts";
+import { clockMinutes } from "./clock-time.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
 import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
 import { runSummary } from "./run-summary.ts";
 import { RunView } from "./run-view.ts";
+import { renderProgress } from "./terminal-render.ts";
 import { web, WEB_USAGE } from "./web.ts";
 
 export interface CliEnv {
@@ -155,7 +157,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
   const latest = await latestRunEntry(join(repoDir, ".factory", "logs"), issue);
   const previous = latest?.log ?? null;
   if (latest !== null && runAbandoned(latest, env.clock.now(), config.limits.attemptIdleTimeoutMs)) {
-    env.out(`run ${latest.log.runId} of #${issue} was abandoned at ${clockTime(lastChange(latest))}; starting a new run`);
+    env.out(`run ${latest.log.runId} of #${issue} was abandoned at ${clockMinutes(lastChange(latest))}; starting a new run`);
   }
   const defaults = resumeDefaults(previous, config.roles);
   const flagged: Partial<Record<RunRole, RoleChoice>> = {};
@@ -203,7 +205,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
         github: env.github(repoDir),
         notifier: env.notifier,
         clock: env.clock,
-        progress: view ? (line) => view.progress(line) : env.out,
+        progress: view ? (line) => view.progress(line) : (line) => env.out(renderProgress(line, env.clock.now(), false)),
         activity: view ? (entry) => view.activity(entry) : (entry) => env.out(activityLine(entry)),
         ...(view ? { snapshot: (log) => view.snapshot(log) } : {}),
       },
@@ -214,10 +216,6 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
   }
   for (const line of runSummary(report.log)) env.out(line);
   return 0;
-}
-
-function clockTime(at: Date): string {
-  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
 }
 
 async function refine(repoDir: string, issue: number, flag: string | undefined, env: CliEnv): Promise<number> {

@@ -1,5 +1,6 @@
 import type { RunLog } from "../coordinator/run-log.ts";
 import type { AgentKind } from "../workers/types.ts";
+import { clockMinutes } from "./clock-time.ts";
 import type { Annotate } from "./role-menu.ts";
 
 export interface PlanLimitReached {
@@ -17,9 +18,7 @@ export function planLimitReached(previous: RunLog | null): PlanLimitReached | nu
 
 export function planLimitWarning(limit: PlanLimitReached, now: Date): string | null {
   if (now.getTime() >= limit.resetsAt.getTime()) return null;
-  const hours = String(limit.resetsAt.getHours()).padStart(2, "0");
-  const minutes = String(limit.resetsAt.getMinutes()).padStart(2, "0");
-  return `⚠ ${limit.agent} plan limit until ${hours}:${minutes}: the run will pause again`;
+  return `⚠ ${limit.agent} plan limit until ${clockMinutes(limit.resetsAt)}: the run will pause again`;
 }
 
 export function planLimitAnnotate(previous: RunLog | null, now: Date): Annotate {
@@ -27,6 +26,7 @@ export function planLimitAnnotate(previous: RunLog | null, now: Date): Annotate 
   const warning = limit === null ? null : planLimitWarning(limit, now);
   return (entries) => {
     if (limit === null || warning === null) return {};
-    return Object.fromEntries(entries.filter((entry) => entry.choice?.agent === limit.agent).map((entry) => [entry.role, [warning]]));
+    const first = entries.find((entry) => entry.choice?.agent === limit.agent);
+    return first === undefined ? {} : { [first.role]: [warning] };
   };
 }
