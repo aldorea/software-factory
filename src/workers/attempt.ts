@@ -40,6 +40,7 @@ export async function performAttempt(request: AttemptRequest): Promise<AttemptRe
   });
   const plan = stream.plan();
   const outcome = stream.outcome(supervised);
+  for (const event of stream.finish?.(outcome) ?? []) request.hooks?.onActivity?.(event);
   return {
     outcome,
     usage: await usageOf(request, stream, outcome),
