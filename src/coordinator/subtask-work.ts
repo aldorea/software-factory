@@ -253,8 +253,8 @@ async function workInWorker(context: RunContext, request: WorkerRequest): Promis
       limits: { ...stopLimits(config, workers), attemptIdleTimeoutMs: config.limits.attemptIdleTimeoutMs },
       runStartedAt: context.startedAt,
       runTokens: () => agentRunTokens(context.log, workers.agent),
-      attempt: (prompt, attemptLimits) =>
-        inStage("attempt", () => worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits)),
+      attempt: (prompt, attemptLimits, hooks) =>
+        inStage("attempt", () => worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits, hooks)),
       gate: request.gate,
       extendScope: (requested) => extendScope(context, subtask, requested),
       save: () => context.save(),

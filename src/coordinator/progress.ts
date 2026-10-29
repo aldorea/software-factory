@@ -22,7 +22,9 @@ function startLine(log: RunLog): string {
 }
 
 function subtaskLines(before: SubtaskRecord | undefined, after: SubtaskRecord): string[] {
-  const attempts = after.attempts.slice(before?.attempts.length ?? 0).map((attempt) => attemptLine(after.id, attempt));
+  const attempts = after.attempts
+    .filter((attempt, index) => attempt.outcome !== "running" && (before?.attempts[index] === undefined || before.attempts[index]?.outcome === "running"))
+    .map((attempt) => attemptLine(after.id, attempt));
   if (after.state === before?.state) return attempts;
   return [...attempts, `${after.id}: ${after.state}${after.state === "blocked" && after.blockType ? ` (${after.blockType})` : ""}`];
 }

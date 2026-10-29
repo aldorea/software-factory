@@ -66,8 +66,9 @@ function continued(fresh: SubtaskRecord, earlier: SubtaskRecord | undefined, mer
     conflictFiles: _conflictFiles,
     ...kept
   } = earlier;
-  if (merged) return { ...kept, criteria: fresh.criteria, branch: fresh.branch, state: "merged" };
-  return { ...kept, criteria: fresh.criteria, branch: fresh.branch, state: "pending" };
+  const attempts = kept.attempts.filter((attempt) => attempt.outcome !== "running");
+  if (merged) return { ...kept, attempts, criteria: fresh.criteria, branch: fresh.branch, state: "merged" };
+  return { ...kept, attempts, criteria: fresh.criteria, branch: fresh.branch, state: "pending" };
 }
 
 function agentChanges(previous: RunLog, fresh: RunLog, now: Date): AgentChangeRecord[] {

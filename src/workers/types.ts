@@ -23,6 +23,15 @@ export interface AttemptLimits {
   idleTimeoutMs: number;
 }
 
+export interface AttemptStart {
+  logPath: string;
+  startedAt: Date;
+}
+
+export interface AttemptHooks {
+  onStart?: (start: AttemptStart) => void | Promise<void>;
+}
+
 export interface TokenUsage {
   inputTokens: number;
   cacheCreationInputTokens: number;
@@ -71,7 +80,7 @@ export interface CloseResult {
 export interface Worker {
   readonly spec: WorkerSpec;
   readonly worktreePath: string;
-  attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult>;
+  attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits, hooks?: AttemptHooks): Promise<AttemptResult>;
   exec(command: string, options?: { timeoutMs?: number }): Promise<ExecResult>;
   commits(): Promise<string[]>;
   close(): Promise<CloseResult>;
