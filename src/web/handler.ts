@@ -17,7 +17,6 @@ export interface WebRequest {
   repoDir: string;
   port: number;
   now: Date;
-  idleTimeoutMs: number;
 }
 
 export interface WebResponse {
@@ -37,11 +36,11 @@ function refusal(status: number, title: string): WebResponse {
   return html(status, page(title, `<h1>${title}</h1>`));
 }
 
-async function runPage(logsDir: string, runId: string, now: Date, idleTimeoutMs: number): Promise<WebResponse | null> {
+async function runPage(logsDir: string, runId: string, now: Date): Promise<WebResponse | null> {
   const read = await readRunEntry(logsDir, runId);
   if (read.kind !== "found") return null;
   const logUrl = await logLinks(runId, join(logsDir, runId), read.entry.log);
-  return html(200, runView({ entry: read.entry, now, idleTimeoutMs, logUrl }));
+  return html(200, runView({ entry: read.entry, now, logUrl }));
 }
 
 async function runLog(logsDir: string, runId: string, segments: string[]): Promise<WebResponse | null> {
@@ -59,11 +58,11 @@ export async function handleRequest(request: WebRequest): Promise<WebResponse> {
     const { runs, unreadable } = await readRunEntries(logsDir);
     const stats = summarizeRuns(
       runs.map((entry) => entry.log),
-      abandonedLogs(runs, request.now, request.idleTimeoutMs),
+      abandonedLogs(runs, request.now),
     );
-    return html(200, homeView({ runs, stats, unreadable, now: request.now, idleTimeoutMs: request.idleTimeoutMs }));
+    return html(200, homeView({ runs, stats, unreadable, now: request.now }));
   }
-  if (route.kind === "run") return (await runPage(logsDir, route.runId, request.now, request.idleTimeoutMs)) ?? refusal(404, "404 Not Found");
+  if (route.kind === "run") return (await runPage(logsDir, route.runId, request.now)) ?? refusal(404, "404 Not Found");
   if (route.kind === "log") return (await runLog(logsDir, route.runId, route.segments)) ?? refusal(404, "404 Not Found");
   return refusal(404, "404 Not Found");
 }

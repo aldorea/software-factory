@@ -46,6 +46,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     issue: request.issue,
     integrationBranch: branch,
     startedAt: now.toISOString(),
+    attemptIdleTimeoutMs: prepared.config.limits.attemptIdleTimeoutMs,
     result: "running",
     agents: { workers, verifier, tester, changes: [] },
     criteria: { passing: [], blocked: [], human: humanCriteria, pending: [] },

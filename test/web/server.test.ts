@@ -24,7 +24,6 @@ async function start(repoDir?: string): Promise<WebServer> {
     repoDir: repoDir ?? (await temp.make("web-server-")),
     port: 0,
     clock: new FakeClock("2026-10-24T08:00:00.000Z"),
-    idleTimeoutMs: 600_000,
     err: (text) => errors.push(text),
   });
   servers.push(server);

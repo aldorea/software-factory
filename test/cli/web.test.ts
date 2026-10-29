@@ -75,17 +75,17 @@ describe("factory web", () => {
     expect(err).toEqual([]);
   });
 
-  it("should show a run whose process died as abandoned using the default attemptIdleTimeoutMs, and as running when the config allows a longer silence", async () => {
+  it("should show a run whose process died as abandoned using the default attemptIdleTimeoutMs for a run log without it, and as running when the run log recorded a longer silence", async () => {
     const silent = new Date(Date.parse("2026-10-24T08:00:00.000Z") - 30 * 60_000);
     const abandonedDir = await temp.make("web-cli-abandoned-");
     await writeRunningRun({ logsDir: join(abandonedDir, ".factory", "logs"), runJsonAt: silent, logAt: silent });
     const patientDir = await temp.make("web-cli-patient-");
-    await writeRunningRun({ logsDir: join(patientDir, ".factory", "logs"), runJsonAt: silent, logAt: silent });
-    await mkdir(join(patientDir, ".factory"), { recursive: true });
-    await writeFile(
-      join(patientDir, ".factory", "config.ts"),
-      'export default { image: "worker:dev", checks: [{ name: "spec", command: "true" }], environment: () => ({}), protectedPaths: [], limits: { attemptIdleTimeoutMs: 3_600_000 } };\n',
-    );
+    await writeRunningRun({
+      logsDir: join(patientDir, ".factory", "logs"),
+      runJsonAt: silent,
+      logAt: silent,
+      attemptIdleTimeoutMs: 3_600_000,
+    });
     const pages: string[] = [];
 
     for (const dir of [abandonedDir, patientDir]) {
@@ -98,6 +98,27 @@ describe("factory web", () => {
 
     expect(pages[0]).toContain(">abandoned<");
     expect(pages[1]).toContain(">running<");
+  });
+
+  it.each([
+    ["is broken", "export default { this is not valid"],
+    ["is invalid", "export default {};\n"],
+    ["does not exist", null],
+  ])("should start and serve the run list when the .factory/config.ts of the repo %s, because it only reads .factory/logs", async (_case, config) => {
+    const dir = await repoWithRuns([{ log: cleanRun(0) }]);
+    if (config !== null) {
+      await mkdir(join(dir, ".factory"), { recursive: true });
+      await writeFile(join(dir, ".factory", "config.ts"), config);
+    }
+    const { env, err, stop, firstLine } = cli(dir);
+    const exit = main(["web", "--port", "0"], env);
+
+    const response = await fetch(urlOf(await firstLine));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("1-run-00");
+    stop.abort();
+    expect(await exit).toBe(0);
+    expect(err).toEqual([]);
   });
 
   it("should take the target repo from the argument", async () => {

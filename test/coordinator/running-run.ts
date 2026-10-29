@@ -9,6 +9,7 @@ export interface RunningRunInput {
   issue?: number;
   runJsonAt: Date;
   logAt: Date;
+  attemptIdleTimeoutMs?: number;
 }
 
 export interface RunningRun {
@@ -18,7 +19,7 @@ export interface RunningRun {
   log: RunLog;
 }
 
-export async function writeRunningRun({ logsDir, issue = 7, runJsonAt, logAt }: RunningRunInput): Promise<RunningRun> {
+export async function writeRunningRun({ logsDir, issue = 7, runJsonAt, logAt, attemptIdleTimeoutMs }: RunningRunInput): Promise<RunningRun> {
   const runId = `${issue}-${runJsonAt.toISOString().replace(/[:.]/g, "-")}`;
   const runDir = join(logsDir, runId);
   const logPath = join(runDir, "S1-attempt-1.jsonl");
@@ -26,6 +27,7 @@ export async function writeRunningRun({ logsDir, issue = 7, runJsonAt, logAt }: 
   const log: RunLog = {
     ...base,
     startedAt: runJsonAt.toISOString(),
+    ...(attemptIdleTimeoutMs !== undefined ? { attemptIdleTimeoutMs } : {}),
     subtasks: [
       subtaskRecord("S1", {
         state: "working",

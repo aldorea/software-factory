@@ -12,7 +12,6 @@ export interface HomeData {
   stats: RunStats;
   unreadable: string[];
   now: Date;
-  idleTimeoutMs: number;
 }
 
 function pullRequestCell(entry: RunEntry): string {
@@ -26,26 +25,26 @@ function runIdCell(entry: RunEntry): string {
   return link(`/runs/${entry.dir}`, entry.log.runId);
 }
 
-function runRow(entry: RunEntry, now: Date, idleTimeoutMs: number): string {
+function runRow(entry: RunEntry, now: Date): string {
   const { log } = entry;
   return [
     "<tr>",
     `<td>#${escapeHtml(String(log.issue))}</td>`,
     `<td>${runIdCell(entry)}</td>`,
-    `<td>${badge(runStatus(entry, now, idleTimeoutMs))}</td>`,
+    `<td>${badge(runStatus(entry, now))}</td>`,
     `<td>${escapeHtml(relativeTime(entry.modifiedAt, now))}</td>`,
     `<td>${pullRequestCell(entry)}</td>`,
     "</tr>",
   ].join("");
 }
 
-function runsTable(runs: RunEntry[], now: Date, idleTimeoutMs: number): string {
+function runsTable(runs: RunEntry[], now: Date): string {
   if (runs.length === 0) return "<p>Todavía no hay runs: .factory/logs no tiene ficheros run.json.</p>";
   return [
     "<table>",
     "<thead><tr><th>Issue</th><th>Run ID</th><th>Resultado</th><th>Último cambio</th><th>Pull request</th></tr></thead>",
     "<tbody>",
-    ...runs.map((entry) => runRow(entry, now, idleTimeoutMs)),
+    ...runs.map((entry) => runRow(entry, now)),
     "</tbody>",
     "</table>",
   ].join("\n");
@@ -56,12 +55,12 @@ function unreadableList(unreadable: string[]): string {
   return titledList("h2", "run.json ilegibles", unreadable.map((name) => `<li>${escapeHtml(name)}</li>`));
 }
 
-export function homeView({ runs, stats, unreadable, now, idleTimeoutMs }: HomeData): string {
+export function homeView({ runs, stats, unreadable, now }: HomeData): string {
   const newestFirst = [...runs].reverse();
   const statistics = runs.length === 0 ? "" : statsView(stats);
   return page(
     "factory web",
-    [statistics, "<h1>Runs</h1>", runsTable(newestFirst, now, idleTimeoutMs), unreadableList(unreadable)].filter(Boolean).join("\n"),
-    { reload: shouldReload(runs.filter((entry) => runStatus(entry, now, idleTimeoutMs) === "running").map((entry) => entry.log)) },
+    [statistics, "<h1>Runs</h1>", runsTable(newestFirst, now), unreadableList(unreadable)].filter(Boolean).join("\n"),
+    { reload: shouldReload(runs.filter((entry) => runStatus(entry, now) === "running").map((entry) => entry.log)) },
   );
 }

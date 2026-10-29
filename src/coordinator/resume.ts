@@ -50,6 +50,9 @@ export function resumedLog({ fresh, previous, merged, now }: ResumeInput): RunLo
   return {
     ...kept,
     result: "running",
+    ...(kept.attemptIdleTimeoutMs === undefined && fresh.attemptIdleTimeoutMs !== undefined
+      ? { attemptIdleTimeoutMs: fresh.attemptIdleTimeoutMs }
+      : {}),
     agents: {
       workers: fresh.agents.workers,
       ...(fresh.agents.verifier !== undefined ? { verifier: fresh.agents.verifier } : {}),

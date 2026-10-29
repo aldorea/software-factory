@@ -66,19 +66,19 @@ describe("factory stats", () => {
     expect(out.join("\n")).toContain("Runs: 3 (ready 1, draft 0, paused 0, running 1, abandoned 1)");
   });
 
-  it("should take attemptIdleTimeoutMs from the config of the repo", async () => {
-    const dir = await temp.make("stats-config-");
+  it("should take attemptIdleTimeoutMs from each run log and not from the config of the repo", async () => {
+    const dir = await temp.make("stats-run-log-");
     const now = new FakeClock("2026-10-24T08:00:00.000Z").now();
     const silent = new Date(now.getTime() - 30 * 60_000);
-    await writeRunningRun({ logsDir: join(dir, ".factory", "logs"), runJsonAt: silent, logAt: silent });
-    await writeFile(
-      join(dir, ".factory", "config.ts"),
-      'export default { image: "worker:dev", checks: [{ name: "spec", command: "true" }], environment: () => ({}), protectedPaths: [], limits: { attemptIdleTimeoutMs: 3_600_000 } };\n',
-    );
-    const { env, out } = cli(dir);
+    const logsDir = join(dir, ".factory", "logs");
+    await writeRunningRun({ logsDir, issue: 1, runJsonAt: silent, logAt: silent, attemptIdleTimeoutMs: 3_600_000 });
+    await writeRunningRun({ logsDir, issue: 2, runJsonAt: silent, logAt: silent });
+    await writeFile(join(dir, ".factory", "config.ts"), "export default { this is not valid");
+    const { env, out, err } = cli(dir);
 
     expect(await main(["stats"], env)).toBe(0);
-    expect(out.join("\n")).toContain("Runs: 1 (ready 0, draft 0, paused 0, running 1)");
+    expect(out.join("\n")).toContain("Runs: 2 (ready 0, draft 0, paused 0, running 1, abandoned 1)");
+    expect(err).toEqual([]);
   });
 
   it("should take the target repo from the argument", async () => {

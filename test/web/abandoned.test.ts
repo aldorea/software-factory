@@ -13,24 +13,29 @@ function before(ms: number): Date {
   return new Date(NOW.getTime() - ms);
 }
 
-async function repoWith(runJsonSilentMs: number, logSilentMs: number): Promise<{ dir: string; run: RunningRun }> {
+async function repoWith(
+  runJsonSilentMs: number,
+  logSilentMs: number,
+  attemptIdleTimeoutMs?: number,
+): Promise<{ dir: string; run: RunningRun }> {
   const dir = await temp.make("web-abandoned-");
   const run = await writeRunningRun({
     logsDir: join(dir, ".factory", "logs"),
     runJsonAt: before(runJsonSilentMs),
     logAt: before(logSilentMs),
+    ...(attemptIdleTimeoutMs !== undefined ? { attemptIdleTimeoutMs } : {}),
   });
   return { dir, run };
 }
 
 async function homeText(dir: string): Promise<string> {
-  const response = await handleRequest(request(dir, "/", { idleTimeoutMs: TIMEOUT }));
+  const response = await handleRequest(request(dir, "/"));
   expect(response.status).toBe(200);
   return response.body;
 }
 
 async function runBody(dir: string, run: RunningRun): Promise<string> {
-  const response = await handleRequest(request(dir, `/runs/${run.runId}`, { idleTimeoutMs: TIMEOUT }));
+  const response = await handleRequest(request(dir, `/runs/${run.runId}`));
   expect(response.status).toBe(200);
   return response.body;
 }
@@ -86,11 +91,16 @@ describe("a run in progress in factory web", () => {
     expect(page).toContain(RELOAD);
   });
 
-  it("should take attemptIdleTimeoutMs from the request so a longer limit keeps the run in progress", async () => {
+  it("should take attemptIdleTimeoutMs from the run log so a longer limit keeps the run in progress", async () => {
+    const { dir, run } = await repoWith(TIMEOUT + 60_000, TIMEOUT + 60_000, 2 * TIMEOUT);
+
+    expect(await homeText(dir)).toContain('<span class="badge info">running</span>');
+    expect(await runBody(dir, run)).toContain("Resultado: <span class=\"badge info\">running</span>");
+  });
+
+  it("should use the 10 minute default for a run log without attemptIdleTimeoutMs, as the runs of older versions", async () => {
     const { dir } = await repoWith(TIMEOUT + 60_000, TIMEOUT + 60_000);
 
-    const response = await handleRequest(request(dir, "/", { idleTimeoutMs: 2 * TIMEOUT }));
-
-    expect(response.body).toContain('<span class="badge info">running</span>');
+    expect(await homeText(dir)).toContain('<span class="badge warn">abandoned</span>');
   });
 });

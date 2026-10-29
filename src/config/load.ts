@@ -1,18 +1,10 @@
 import { access, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DEFAULT_LIMITS, resolveConfig, type ResolvedConfig } from "./config.ts";
+import { resolveConfig, type ResolvedConfig } from "./config.ts";
 
 export function configPath(repoDir: string): string {
   return join(repoDir, ".factory", "config.ts");
-}
-
-export async function attemptIdleTimeoutMs(repoDir: string): Promise<number> {
-  const configured = await access(configPath(repoDir)).then(
-    () => true,
-    () => false,
-  );
-  return configured ? (await loadConfig(repoDir)).limits.attemptIdleTimeoutMs : DEFAULT_LIMITS.run.attemptIdleTimeoutMs;
 }
 
 let loads = 0;

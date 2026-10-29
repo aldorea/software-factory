@@ -50,6 +50,32 @@ describe("resumedLog", () => {
   });
 });
 
+describe("resumedLog and the idle threshold of the run", () => {
+  it("should keep the attemptIdleTimeoutMs the paused run recorded, although the new start carries another", () => {
+    const previous = runRecord(0, [], { result: "paused", attemptIdleTimeoutMs: 1_800_000 });
+
+    const log = resumedLog({ fresh: { ...fresh(), attemptIdleTimeoutMs: 60_000 }, previous, merged: new Set(), now: NOW });
+
+    expect(log.attemptIdleTimeoutMs).toBe(1_800_000);
+  });
+
+  it("should take the attemptIdleTimeoutMs of the new start when the paused run is older than the field", () => {
+    const previous = runRecord(0, [], { result: "paused" });
+
+    const log = resumedLog({ fresh: { ...fresh(), attemptIdleTimeoutMs: 60_000 }, previous, merged: new Set(), now: NOW });
+
+    expect(log.attemptIdleTimeoutMs).toBe(60_000);
+  });
+
+  it("should record the attemptIdleTimeoutMs of the new start on a run that does not continue a paused one", () => {
+    const previous = runRecord(0, [], { result: "draft", attemptIdleTimeoutMs: 1_800_000 });
+
+    const log = resumedLog({ fresh: { ...fresh(), attemptIdleTimeoutMs: 60_000 }, previous, merged: new Set(), now: NOW });
+
+    expect(log.attemptIdleTimeoutMs).toBe(60_000);
+  });
+});
+
 describe("defaultOrigin", () => {
   const paused = (agents: Partial<Record<"verifier" | "tester", { agent: "claude-code"; model: string }>>) => {
     const log = runRecord(0, [], { result: "paused" });

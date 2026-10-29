@@ -1,6 +1,5 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { attemptIdleTimeoutMs } from "../config/load.ts";
 import { DEFAULT_WEB_PORT, startWebServer } from "../web/server.ts";
 import type { CliEnv } from "./main.ts";
 
@@ -48,7 +47,6 @@ export async function web(args: string[], env: WebEnv, usage: string): Promise<n
       repoDir,
       port: parsed.port,
       clock: env.clock,
-      idleTimeoutMs: await attemptIdleTimeoutMs(repoDir),
       err: env.err,
     });
   } catch (error) {

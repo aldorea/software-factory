@@ -218,6 +218,7 @@ export interface RunLog {
   resetsAt?: string;
   pauses?: PauseRecord[];
   maxParallel?: number;
+  attemptIdleTimeoutMs?: number;
   agents: AgentsRecord;
   criteria: CriteriaRecord;
   cost: CostRecord;

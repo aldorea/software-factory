@@ -13,7 +13,6 @@ import { verificationSection } from "./verification-view.ts";
 export interface RunData {
   entry: RunEntry;
   now: Date;
-  idleTimeoutMs: number;
   logUrl: LogUrl;
 }
 
@@ -95,9 +94,9 @@ function linksSection({ pullRequest, evidence }: RunLog): string {
   return lines.join("\n");
 }
 
-export function runView({ entry, now, idleTimeoutMs, logUrl }: RunData): string {
+export function runView({ entry, now, logUrl }: RunData): string {
   const { log } = entry;
-  const status = runStatus(entry, now, idleTimeoutMs);
+  const status = runStatus(entry, now);
   const body = [
     `<p><a href="/">Runs</a></p>`,
     `<h1>#${escapeHtml(String(log.issue))} ${escapeHtml(log.runId)}</h1>`,
@@ -108,7 +107,7 @@ export function runView({ entry, now, idleTimeoutMs, logUrl }: RunData): string 
     blockSection(log, logUrl),
     agentsSection(log),
     criteriaSection(log),
-    subtasksSection(log.subtasks, logUrl, (attempt) => attemptAbandoned(attempt, entry.logTimes, now, idleTimeoutMs)),
+    subtasksSection(log.subtasks, logUrl, (attempt) => attemptAbandoned(attempt, entry, now)),
     verificationSection(log.verification, logUrl),
   ].filter(Boolean);
   return page(`run ${log.runId}`, body.join("\n"), { reload: shouldReload(status === "running" ? [log] : []) });

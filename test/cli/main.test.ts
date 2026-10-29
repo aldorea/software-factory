@@ -971,6 +971,24 @@ describe("factory run: the notice of an abandoned run", () => {
     expect((await lastRunLog(repoDir)).runId).not.toBe(run.runId);
   });
 
+  it("should take the threshold from the run log, so a run that recorded a longer silence is not called abandoned", async () => {
+    const repoDir = await runnableRepo();
+    const { env, out } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+    const lastChange = new Date(NOW.getTime() - 30 * 60_000);
+    await writeRunningRun({
+      logsDir: join(repoDir, ".factory", "logs"),
+      issue: 42,
+      runJsonAt: lastChange,
+      logAt: lastChange,
+      attemptIdleTimeoutMs: 3_600_000,
+    });
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    expect(out.some((line) => line.includes("was abandoned"))).toBe(false);
+  });
+
   it("should not warn about a run that is still working", async () => {
     const repoDir = await runnableRepo();
     const { env, out } = cli(repoDir);

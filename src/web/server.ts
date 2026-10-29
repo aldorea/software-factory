@@ -16,7 +16,6 @@ export interface WebServerOptions {
   repoDir: string;
   port: number;
   clock: Clock;
-  idleTimeoutMs: number;
   err: (text: string) => void;
 }
 
@@ -33,7 +32,6 @@ async function respond(incoming: IncomingMessage, outgoing: ServerResponse, opti
       repoDir: options.repoDir,
       port,
       now: options.clock.now(),
-      idleTimeoutMs: options.idleTimeoutMs,
     });
     outgoing.writeHead(response.status, {
       "content-type": response.contentType,

@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../commands/approve.ts";
 import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
 import type { ResolvedConfig, Role, RoleChoice, RunRole } from "../config/config.ts";
-import { attemptIdleTimeoutMs, configPath, loadConfig } from "../config/load.ts";
+import { configPath, loadConfig } from "../config/load.ts";
 import { choiceProblems, chooseRole, parseRoleFlag, ROLES, type ChosenRole } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
 import { abandonedLogs, lastChange, runAbandoned } from "../coordinator/abandoned.ts";
@@ -156,7 +156,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
   const config = await loadConfig(repoDir);
   const latest = await latestRunEntry(join(repoDir, ".factory", "logs"), issue);
   const previous = latest?.log ?? null;
-  if (latest !== null && runAbandoned(latest, env.clock.now(), config.limits.attemptIdleTimeoutMs)) {
+  if (latest !== null && runAbandoned(latest, env.clock.now())) {
     env.out(`run ${latest.log.runId} of #${issue} was abandoned at ${clockMinutes(lastChange(latest))}; starting a new run`);
   }
   const defaults = resumeDefaults(previous, config.roles);
@@ -295,7 +295,7 @@ async function stats(args: string[], env: CliEnv): Promise<number> {
   try {
     const repoDir = resolve(env.cwd, args[0] ?? ".");
     const { runs, unreadable } = await readRunEntries(join(repoDir, ".factory", "logs"));
-    const abandoned = abandonedLogs(runs, env.clock.now(), await attemptIdleTimeoutMs(repoDir));
+    const abandoned = abandonedLogs(runs, env.clock.now());
     env.out(formatStats(summarizeRuns(runs.map((entry) => entry.log), abandoned), unreadable));
     return 0;
   } catch (error) {
