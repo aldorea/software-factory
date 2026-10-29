@@ -84,6 +84,38 @@ function press(entries: RoleEntry[], ...keys: MenuKey[]) {
 
 const chars = (text: string): MenuKey[] => [...text].map((char) => ({ char }));
 
+describe("the role menu with the refinement alone", () => {
+  const REFINEMENT: RoleEntry[] = menuEntries({
+    roles: ["refinement"],
+    flagged: {},
+    defaults: {},
+    defaultOrigin: () => "config",
+  });
+
+  it("should offer only Claude Code, the one agent that starts the refinement skill, and open its step on Enter because nothing is chosen", () => {
+    const state = press(REFINEMENT, "enter");
+
+    expect(REFINEMENT).toEqual([{ role: "refinement", offered: ["claude-code"] }]);
+    expect(state.view).toEqual({
+      kind: "step",
+      options: [
+        { agent: "claude-code", model: "opus" },
+        { agent: "claude-code", model: "sonnet" },
+        { agent: "claude-code" },
+      ],
+      cursor: 0,
+    });
+    expect(renderMenu(state)[0]).toBe("Agent and model of the refinement (↑/↓ move · Enter choose · ← back):");
+  });
+
+  it("should start with the model chosen in the step", () => {
+    const state = press(REFINEMENT, "enter", "down", "enter", "enter");
+
+    expect(state.outcome).toBe("started");
+    expect(menuChoices(state)).toEqual({ refinement: { agent: "claude-code", model: "sonnet" } });
+  });
+});
+
 describe("the role menu: the summary", () => {
   it("should render the role names of the glossary, each with the origin of its value, as in the design", () => {
     expect(renderMenu(initialMenu(ENTRIES, MODELS))).toEqual([
