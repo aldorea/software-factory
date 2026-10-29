@@ -20,6 +20,7 @@ import { activityLine } from "./activity-line.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { menuEntries, type RoleEntry } from "./role-menu.ts";
 import { runSummary } from "./run-summary.ts";
+import { RunView } from "./run-view.ts";
 import { web, WEB_USAGE } from "./web.ts";
 
 export interface CliEnv {
@@ -34,6 +35,7 @@ export interface CliEnv {
   docker(): Promise<string | null>;
   gh(): Promise<string | null>;
   ask?: (entries: RoleEntry[]) => Promise<Partial<Record<Role, RoleChoice>>>;
+  terminal?: { columns(): number; write(text: string): void };
   launch(launch: InteractiveLaunch): Promise<number>;
   signal: AbortSignal;
   out(text: string): void;
@@ -164,18 +166,27 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     roles[role] = chosen.choice;
   }
   env.out(`Preparing run #${issue}; factory web shows it at http://${WEB_HOST}:${DEFAULT_WEB_PORT}/`);
-  const report = await runIssue(
-    { repoDir, issue, credentials: env.credentials, roles },
-    {
-      runner: env.runner(),
-      verifier: env.verifier(config, roles.verifier as RoleChoice),
-      github: env.github(repoDir),
-      notifier: env.notifier,
-      clock: env.clock,
-      progress: env.out,
-      activity: (entry) => env.out(activityLine(entry)),
-    },
-  );
+  const view = env.terminal ? new RunView({ now: () => env.clock.now(), ...env.terminal }) : null;
+  const ticker = view ? setInterval(() => view.tick(), 1000) : null;
+  let report;
+  try {
+    report = await runIssue(
+      { repoDir, issue, credentials: env.credentials, roles },
+      {
+        runner: env.runner(),
+        verifier: env.verifier(config, roles.verifier as RoleChoice),
+        github: env.github(repoDir),
+        notifier: env.notifier,
+        clock: env.clock,
+        progress: view ? (line) => view.progress(line) : env.out,
+        activity: view ? (entry) => view.activity(entry) : (entry) => env.out(activityLine(entry)),
+        ...(view ? { snapshot: (log) => view.snapshot(log) } : {}),
+      },
+    );
+  } finally {
+    if (ticker) clearInterval(ticker);
+    view?.finish();
+  }
   for (const line of runSummary(report.log)) env.out(line);
   return 0;
 }

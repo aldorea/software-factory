@@ -274,6 +274,67 @@ describe("factory run: the choice of the agent of each role", () => {
     expect(out.indexOf(activity[4] as string)).toBeLessThan(out.indexOf("S1: attempt 1 completed"));
   });
 
+  it("should print no ANSI code and no bottom line when the output is not a terminal", async () => {
+    const repoDir = await runnableRepo();
+    const { env, out } = cli(repoDir, undefined, () => ({
+      files: { "src/a.txt": "a\n" },
+      activity: [{ kind: "tool", tool: "Edit", target: "src/a.txt" }],
+    }));
+    expect(await main(["approve", "42"], env)).toBe(0);
+    out.length = 0;
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    expect(out.join("\n")).not.toMatch(/\u001b|⏳/);
+  });
+
+  it("should keep every progress and activity line in the history of a terminal, colour them, and leave no bottom line when the run ends", async () => {
+    const repoDir = await runnableRepo();
+    const { env, out } = cli(repoDir, undefined, () => ({
+      files: { "src/a.txt": "a\n" },
+      activity: [
+        { kind: "message", text: "Reading the module." },
+        { kind: "tool", tool: "Edit", target: "src/a.txt" },
+        { kind: "end", outcome: "completed" },
+      ],
+    }));
+    env.clock = new FakeClock("2026-10-24T10:02:20");
+    const writes: string[] = [];
+    env.terminal = { columns: () => 120, write: (text) => writes.push(text) };
+    expect(await main(["approve", "42"], env)).toBe(0);
+    out.length = 0;
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    const screen = writes.join("");
+    const history = screen
+      .replace(/⏳[^\r\n]*/g, "")
+      .replace(/\r\u001b\[2K/g, "")
+      .replace(/\u001b\[[0-9;]*m/g, "")
+      .split("\n")
+      .filter((line) => line !== "");
+    expect(history).toEqual([
+      expect.stringMatching(/^run 42-.*: 1 subtask, workers on claude-code sonnet$/),
+      "S1: working",
+      '10:02:20 S1 · "Reading the module."',
+      "10:02:20 S1 · Edit src/a.txt",
+      "10:02:20 S1 · attempt ended",
+      "S1: attempt 1 completed",
+      "S1: gating",
+      "S1: merged",
+      expect.stringMatching(/^integrated verification at /),
+      expect.stringMatching(/^run 42-.*: (ready|draft)$/),
+      expect.stringMatching(/^pull request: /),
+    ]);
+    expect(screen).toContain("\u001b[32mS1: merged\u001b[0m");
+    expect(screen).toContain("⏳ S1 attempt 1 · 0s · last activity 0s ago");
+    expect(writes.at(-1)).not.toContain("⏳");
+    expect(writes.at(-1)?.endsWith("\n")).toBe(true);
+    expect(out.join("\n")).not.toMatch(/⏳|\u001b/);
+    expect(out).not.toContain("S1: merged");
+    expect(out.some((line) => /^Run 42-/.test(line))).toBe(true);
+  });
+
   it("should write the same run.json for an attempt that emits activity and one that does not, because the activity is only shown", async () => {
     const written = async (activity: ActivityEvent[] | undefined) => {
       const repoDir = await runnableRepo();

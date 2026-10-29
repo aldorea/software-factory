@@ -84,6 +84,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
       await writeRunLog(runLogPath, log);
       for (const line of progressLines(reported, log)) ports.progress?.(line);
       reported = structuredClone(log);
+      ports.snapshot?.(reported);
     });
   const context: RunContext = {
     request,

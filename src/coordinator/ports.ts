@@ -1,5 +1,6 @@
 import type { GitHub } from "../github/github.ts";
 import type { ActivityEvent, WorkerRunner } from "../workers/types.ts";
+import type { RunLog } from "./run-log.ts";
 import type { Verifier } from "./verifier.ts";
 
 export interface Clock {
@@ -30,4 +31,5 @@ export interface RunPorts {
   clock: Clock;
   progress?(line: string): void;
   activity?(entry: ActivityEntry): void;
+  snapshot?(log: RunLog): void;
 }
