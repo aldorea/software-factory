@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { approveSpec } from "../../src/commands/approve.ts";
 import { runIssue } from "../../src/coordinator/run.ts";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
+import type { ActivityEntry } from "../../src/coordinator/ports.ts";
 import type { VerifierQuestion } from "../../src/coordinator/verifier.ts";
+import type { ActivityEvent } from "../../src/workers/types.ts";
 import { revParse } from "../../src/workers/git.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
@@ -123,12 +125,20 @@ function harness(
 ) {
   const runner = new FakeWorkerRunner(script);
   const verifier = new FakeVerifier(answer);
+  const activity: ActivityEntry[] = [];
   const run = () =>
     runIssue(
       { repoDir: target.repoDir, issue: ISSUE, credentials: { "claude-code": "token-of-the-host", opencode: "key-of-the-host" } },
-      { runner, verifier, github: target.github, notifier: new FakeNotifier(), clock: new FakeClock("2026-10-24T08:00:00.000Z") },
+      {
+        runner,
+        verifier,
+        github: target.github,
+        notifier: new FakeNotifier(),
+        clock: new FakeClock("2026-10-24T08:00:00.000Z"),
+        activity: (entry) => activity.push(entry),
+      },
     );
-  return { runner, verifier, run };
+  return { runner, verifier, activity, run };
 }
 
 const writesGreetingAndTest: AttemptScript = () => ({
@@ -141,6 +151,29 @@ async function readRunLog(path: string): Promise<RunLog> {
 }
 
 describe("the independent verifier at the gate", () => {
+  it("should report the activity of the verifier with the prefix verifier and the criterion, and keep its verdict as it is without activity", async () => {
+    const answered = async (activity: ActivityEvent[]) => {
+      const target = await targetRepo();
+      const { run, activity: shown } = harness(target, writesGreetingAndTest, () => ({ kind: "accept", activity }));
+      const report = await run();
+      return { shown, verdicts: report.log.subtasks[0]?.gate?.verifier ?? [] };
+    };
+
+    const talkative = await answered([
+      { kind: "message", text: "The test only checks the status code." },
+      { kind: "end", outcome: "completed" },
+    ]);
+    const quiet = await answered([]);
+
+    expect(talkative.shown.map((entry) => [entry.source, entry.event])).toEqual([
+      ["verifier A1", { kind: "message", text: "The test only checks the status code." }],
+      ["verifier A1", { kind: "end", outcome: "completed" }],
+    ]);
+    expect(quiet.shown).toEqual([]);
+    expect(talkative.verdicts.map(({ id, verdict }) => ({ id, verdict }))).toEqual([{ id: "A1", verdict: "accept" }]);
+    expect(quiet.verdicts.map(({ id, verdict }) => ({ id, verdict }))).toEqual([{ id: "A1", verdict: "accept" }]);
+  });
+
   it("should ask the verifier about each Playwright criterion with only its text and its test, and merge when it accepts", async () => {
     const target = await targetRepo();
     const { run, verifier } = harness(target, writesGreetingAndTest);

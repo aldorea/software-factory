@@ -1,4 +1,4 @@
-import type { TokenUsage } from "../workers/types.ts";
+import type { ActivitySink, TokenUsage } from "../workers/types.ts";
 
 export interface VerifierQuestion {
   id: string;
@@ -16,5 +16,5 @@ export type VerifierVerdict =
 export type VerifierAnswer = VerifierVerdict & { usage: TokenUsage; usageProblem?: string };
 
 export interface Verifier {
-  judge(question: VerifierQuestion): Promise<VerifierAnswer>;
+  judge(question: VerifierQuestion, onActivity?: ActivitySink): Promise<VerifierAnswer>;
 }
