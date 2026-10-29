@@ -1,4 +1,4 @@
-import type { ResolvedConfig, Role, RoleChoice } from "../config/config.ts";
+import type { ResolvedConfig, RoleChoice, RunRole } from "../config/config.ts";
 import { loadConfig } from "../config/load.ts";
 import { chooseRole, choiceProblems, credentialProblem, ROLES } from "../config/roles.ts";
 import { defaultBranch, integrationBranch, showFile } from "../git/repo.ts";
@@ -47,10 +47,10 @@ export async function prepare(request: RunRequest, ports: RunPorts): Promise<Pre
 function chosenRoles(
   request: RunRequest,
   config: ResolvedConfig,
-  needsCredential: Record<Role, boolean>,
-): Record<Role, RoleChoice> {
+  needsCredential: Record<RunRole, boolean>,
+): Record<RunRole, RoleChoice> {
   const problems: string[] = [];
-  const roles: Partial<Record<Role, RoleChoice>> = {};
+  const roles: Partial<Record<RunRole, RoleChoice>> = {};
   for (const role of ROLES) {
     const chosen = chooseRole({ role, ...optional("flag", request.roles?.[role]), ...optional("fallback", config.roles[role]) });
     if (!chosen.ok) {
@@ -63,7 +63,7 @@ function chosenRoles(
     roles[role] = chosen.choice;
   }
   if (problems.length > 0) throw new Error(problems.join("; "));
-  return roles as Record<Role, RoleChoice>;
+  return roles as Record<RunRole, RoleChoice>;
 }
 
 function optional<K extends string, T>(key: K, value: T | undefined): Partial<Record<K, T>> {

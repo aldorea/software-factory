@@ -166,7 +166,7 @@ export function openCodeUsageProbe(sessionId: () => string | undefined): UsagePr
 export const openCodeAdapter: AgentAdapter = {
   kind: "opencode",
   processName: "opencode",
-  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: true },
+  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: true, startsInteractiveSession: false },
   command: (model) => openCodeArgs(model),
   createStream() {
     let state = initialOpenCodeState();

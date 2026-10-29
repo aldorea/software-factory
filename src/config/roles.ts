@@ -1,14 +1,17 @@
-import type { Role } from "../workers/agent-adapter.ts";
+import type { Role, RunRole } from "../workers/agent-adapter.ts";
 import { AGENT_KINDS, missingRequirements } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { RoleChoice } from "./config.ts";
 
-export const ROLES: Role[] = ["workers", "verifier", "tester"];
+export const ROLES: RunRole[] = ["workers", "verifier", "tester"];
+
+export const CONFIGURED_ROLES: Role[] = [...ROLES, "refinement"];
 
 export const ROLE_FLAGS: Record<Role, string> = {
   workers: "--worker-agent",
   verifier: "--verifier-agent",
   tester: "--tester-agent",
+  refinement: "--refinement-agent",
 };
 
 export const CREDENTIAL_VARIABLES: Record<AgentKind, string> = {
