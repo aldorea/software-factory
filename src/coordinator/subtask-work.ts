@@ -160,6 +160,8 @@ async function gate(context: RunContext, request: GateRequest): Promise<GateDeci
         texts: criteriaText(issue.body),
         logDir: context.runDir,
         label: `${label}-attempt-${attempt}`,
+        onActivity: (criterion, event) =>
+          context.ports.activity?.({ source: `verifier ${criterion}`, at: context.ports.clock.now(), event }),
       })
     : NO_JUDGMENT;
   if (judgment.usage !== undefined) {

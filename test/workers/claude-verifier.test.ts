@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { applyClaudeLine, claudeVerifierArgs, initialClaudeState, type ClaudeStreamState } from "../../src/workers/claude-code.ts";
 import type { SupervisedProcess } from "../../src/workers/supervise.ts";
-import { claudeVerifierOutcome } from "../../src/workers/verifier.ts";
+import { claudeVerifierOutcome, verifierActivity } from "../../src/workers/verifier.ts";
 
 const exited: SupervisedProcess = { stopReason: "exited", exitCode: 0, stderrTail: "" };
 const fixture = (name: string) => readFileSync(join(import.meta.dirname, "fixtures", name), "utf8").trim();
@@ -12,6 +12,9 @@ const initWithDefaultTools = fixture("claude-init-default.jsonl");
 
 const answer = (text: string) =>
   JSON.stringify({ type: "result", subtype: "success", is_error: false, result: text, api_error_status: null, usage: {} });
+
+const assistantText = (text: string) =>
+  JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } });
 
 function feed(lines: string[]): ClaudeStreamState {
   return lines.reduce(applyClaudeLine, initialClaudeState());
@@ -80,5 +83,18 @@ describe("Claude Code verifier outcome", () => {
       message: "The verifier gave no answer",
       exitCode: 0,
     });
+  });
+});
+
+describe("Claude Code verifier activity", () => {
+  it("should translate the stream of the verifier into the same events as the stream of a worker, so a verifier that uses no tools shows only messages and its end", () => {
+    const activityOf = verifierActivity("claude-code");
+
+    const events = [initWithNoTools, assistantText("The test only checks the status code.\nIt never reads the page."), answer("REFUTE")].flatMap(activityOf);
+
+    expect(events).toEqual([
+      { kind: "message", text: "The test only checks the status code." },
+      { kind: "end", outcome: "completed" },
+    ]);
   });
 });

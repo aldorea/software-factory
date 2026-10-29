@@ -68,6 +68,7 @@ export interface TesterCall extends AttemptCall {
 }
 
 export interface ScriptedTesterAttempt {
+  activity?: ActivityEvent[];
   evidence?: Record<string, string>;
   links?: Record<string, string>;
   outcome?: AttemptOutcome;
@@ -157,7 +158,7 @@ class FakeWorker implements Worker {
     await hooks?.onStart?.({ logPath, startedAt });
     const attemptFault = this.faults.attempt?.(call);
     if (attemptFault) throw attemptFault;
-    if (this.spec.outputDir !== undefined) return this.test(call, this.spec.outputDir, startedAt, logPath);
+    if (this.spec.outputDir !== undefined) return this.test(call, this.spec.outputDir, startedAt, logPath, hooks);
     const scripted = await this.script(call);
     for (const event of scripted.activity ?? []) hooks?.onActivity?.(event);
     for (const [path, content] of Object.entries(scripted.files ?? {})) {
@@ -179,9 +180,10 @@ class FakeWorker implements Worker {
     };
   }
 
-  private async test(call: AttemptCall, evidenceDir: string, startedAt: Date, logPath: string): Promise<AttemptResult> {
+  private async test(call: AttemptCall, evidenceDir: string, startedAt: Date, logPath: string, hooks?: AttemptHooks): Promise<AttemptResult> {
     const criteria = [...call.prompt.matchAll(/^- (A[0-9]+) \(/gm)].map((match) => match[1] as string);
     const scripted = await this.tester({ ...call, criteria, evidenceDir });
+    for (const event of scripted.activity ?? []) hooks?.onActivity?.(event);
     for (const [path, content] of Object.entries(scripted.evidence ?? {})) {
       await mkdir(dirname(join(evidenceDir, path)), { recursive: true });
       await writeFile(join(evidenceDir, path), content);

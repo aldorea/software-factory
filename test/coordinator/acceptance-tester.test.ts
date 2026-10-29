@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { ActivityEvent } from "../../src/workers/types.ts";
 import {
   passingTester,
   testerReport,
@@ -88,6 +89,32 @@ const failsSecondOnce: TesterScript = (call) => {
 };
 
 describe("factory run: the acceptance tester", () => {
+  it("should report the activity of the tester with the prefix tester, in order, and leave the run log as it is without activity", async () => {
+    const withActivity = async (events: ActivityEvent[]) => {
+      const repo = await target();
+      const { run, activity } = harness(repo, bothParts, {}, (call) => ({ ...passingTester(call), activity: events }));
+      const report = await run();
+      return { activity, report };
+    };
+
+    const talkative = await withActivity([
+      { kind: "tool", tool: "Navigate", target: "/login" },
+      { kind: "message", text: "The login page answers." },
+      { kind: "end", outcome: "completed" },
+    ]);
+    const quiet = await withActivity([]);
+
+    expect(talkative.activity.map((entry) => [entry.source, entry.event])).toEqual([
+      ["tester", { kind: "tool", tool: "Navigate", target: "/login" }],
+      ["tester", { kind: "message", text: "The login page answers." }],
+      ["tester", { kind: "end", outcome: "completed" }],
+    ]);
+    expect(talkative.activity.every((entry) => entry.at.getTime() === new Date("2026-10-24T08:00:00.000Z").getTime())).toBe(true);
+    expect(quiet.activity).toEqual([]);
+    expect(talkative.report.result).toBe(quiet.report.result);
+    expect(talkative.report.log.verification?.tester).toEqual(quiet.report.log.verification?.tester);
+  });
+
   it("should give the tester the text of every Playwright and request criterion of the run, and never a human one", async () => {
     const repo = await target();
     const { run, runner } = harness(repo, bothParts);
