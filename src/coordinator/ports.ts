@@ -1,5 +1,5 @@
 import type { GitHub } from "../github/github.ts";
-import type { WorkerRunner } from "../workers/types.ts";
+import type { ActivityEvent, WorkerRunner } from "../workers/types.ts";
 import type { Verifier } from "./verifier.ts";
 
 export interface Clock {
@@ -16,6 +16,12 @@ export interface Notifier {
   notify(notification: Notification): Promise<void>;
 }
 
+export interface ActivityEntry {
+  source: string;
+  at: Date;
+  event: ActivityEvent;
+}
+
 export interface RunPorts {
   runner: WorkerRunner;
   verifier: Verifier;
@@ -23,4 +29,5 @@ export interface RunPorts {
   notifier: Notifier;
   clock: Clock;
   progress?(line: string): void;
+  activity?(entry: ActivityEntry): void;
 }

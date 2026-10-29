@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultOrigin, MERGED_EARLIER, resumedLog } from "../../src/coordinator/resume.ts";
-import { runRecord, subtaskRecord } from "./run-log-fixtures.ts";
+import { attemptRecord, runRecord, subtaskRecord } from "./run-log-fixtures.ts";
 
 const NOW = new Date("2026-10-02T12:00:00.000Z");
 
@@ -25,6 +25,19 @@ describe("resumedLog", () => {
     expect(log.subtasks[0]).toMatchObject({ blockType: "scope", reason: "It needs x.", block: { type: "scope" } });
     expect(log.subtasks[1]?.carriedLoop).toEqual({ firstAttempt: 0, elapsedMs: 5 });
     expect(log.subtasks[2]).not.toHaveProperty("reason");
+  });
+
+  it("should not carry an attempt that never got its outcome into the continued run, because no process is working on it", () => {
+    const unfinished = { ...attemptRecord("claude-code", 0, 0), number: 2, outcome: "running" as const };
+    const previous = runRecord(
+      0,
+      [subtaskRecord("S1", { state: "pending", attempts: [{ ...attemptRecord("claude-code", 5, 5), number: 1 }, unfinished] })],
+      { result: "paused" },
+    );
+
+    const log = resumedLog({ fresh: fresh(), previous, merged: new Set(), now: NOW });
+
+    expect(log.subtasks[0]?.attempts.map((attempt) => [attempt.number, attempt.outcome])).toEqual([[1, "completed"]]);
   });
 
   it("should start every subtask that is not merged again on a new run, because only a paused run is continued", () => {

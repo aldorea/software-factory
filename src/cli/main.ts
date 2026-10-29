@@ -16,9 +16,11 @@ import { initRepo } from "../init/init.ts";
 import { WEB_HOST } from "../web/host.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
+import { activityLine } from "./activity-line.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
 import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
+import { runSummary } from "./run-summary.ts";
 import { web, WEB_USAGE } from "./web.ts";
 
 export interface CliEnv {
@@ -175,9 +177,10 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
       notifier: env.notifier,
       clock: env.clock,
       progress: env.out,
+      activity: (entry) => env.out(activityLine(entry)),
     },
   );
-  env.out(`Run ${report.log.runId}: ${report.result}, ${report.pullRequest.url}`);
+  for (const line of runSummary(report.log)) env.out(line);
   return 0;
 }
 

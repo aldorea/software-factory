@@ -2,13 +2,14 @@ import type { AgentAdapter, AgentStream } from "./agent-adapter.ts";
 import { WorkerLayerError } from "./failures.ts";
 import { supervise } from "./supervise.ts";
 import { readUsage } from "./usage.ts";
-import type { AttemptLimits, AttemptOutcome, AttemptResult, ExecResult, TokenUsage } from "./types.ts";
+import type { AttemptHooks, AttemptLimits, AttemptOutcome, AttemptResult, ExecResult, TokenUsage } from "./types.ts";
 
 export interface AttemptRequest {
   adapter: AgentAdapter;
   model: string;
   prompt: string;
   limits: AttemptLimits;
+  hooks?: AttemptHooks;
   logPath: string;
   launch: (agentCommand: string[]) => { command: string; args: string[] };
   stop: (processName: string) => Promise<void>;
@@ -18,6 +19,7 @@ export interface AttemptRequest {
 export async function performAttempt(request: AttemptRequest): Promise<AttemptResult> {
   const { adapter } = request;
   const startedAt = new Date();
+  await request.hooks?.onStart?.({ logPath: request.logPath, startedAt });
   const stream = adapter.createStream();
   const { command, args } = request.launch(adapter.command(request.model));
   const supervised = await supervise({
@@ -27,7 +29,12 @@ export async function performAttempt(request: AttemptRequest): Promise<AttemptRe
     logPath: request.logPath,
     deadline: request.limits.deadline,
     idleTimeoutMs: request.limits.idleTimeoutMs,
-    onLine: (line) => stream.onLine(line),
+    onLine: (line) => {
+      stream.onLine(line);
+      const onActivity = request.hooks?.onActivity;
+      if (onActivity === undefined) return;
+      for (const event of stream.activity?.(line) ?? []) onActivity(event);
+    },
     ...(adapter.isFinalLine ? { isFinalLine: adapter.isFinalLine } : {}),
     terminate: () => request.stop(adapter.processName),
   });

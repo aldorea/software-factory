@@ -15,7 +15,9 @@ import {
 } from "../../src/workers/git.ts";
 import { exec, execOk } from "../../src/workers/sh.ts";
 import type {
+  ActivityEvent,
   AgentSpec,
+  AttemptHooks,
   AttemptLimits,
   AttemptOutcome,
   AttemptResult,
@@ -29,6 +31,7 @@ import type {
 } from "../../src/workers/types.ts";
 
 export interface ScriptedAttempt {
+  activity?: ActivityEvent[];
   files?: Record<string, string>;
   commit?: string;
   outcome?: AttemptOutcome;
@@ -144,14 +147,19 @@ class FakeWorker implements Worker {
     return this.record.worktreePath;
   }
 
-  async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
+  async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits, hooks?: AttemptHooks): Promise<AttemptResult> {
     const call: AttemptCall = { spec: this.spec, agent, prompt, limits, number: this.record.attempts.length + 1 };
     this.record.attempts.push(call);
+    const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${call.number}.jsonl`);
+    const startedAt = new Date();
+    await mkdir(this.spec.logDir, { recursive: true });
+    await writeFile(logPath, "");
+    await hooks?.onStart?.({ logPath, startedAt });
     const attemptFault = this.faults.attempt?.(call);
     if (attemptFault) throw attemptFault;
-    const startedAt = new Date();
-    if (this.spec.outputDir !== undefined) return this.test(call, this.spec.outputDir, startedAt);
+    if (this.spec.outputDir !== undefined) return this.test(call, this.spec.outputDir, startedAt, logPath);
     const scripted = await this.script(call);
+    for (const event of scripted.activity ?? []) hooks?.onActivity?.(event);
     for (const [path, content] of Object.entries(scripted.files ?? {})) {
       await mkdir(dirname(join(this.worktreePath, path)), { recursive: true });
       await writeFile(join(this.worktreePath, path), content);
@@ -160,8 +168,6 @@ class FakeWorker implements Worker {
       await execOk("git", ["-C", this.worktreePath, "add", "-A"]);
       await execOk("git", ["-C", this.worktreePath, "commit", "-q", "-m", scripted.commit ?? `Work on ${this.spec.id}`]);
     }
-    const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${call.number}.jsonl`);
-    await mkdir(this.spec.logDir, { recursive: true });
     await writeFile(logPath, `${JSON.stringify({ type: "fake-attempt", number: call.number })}\n`);
     return {
       outcome: scripted.outcome ?? { kind: "completed", summary: "done" },
@@ -173,7 +179,7 @@ class FakeWorker implements Worker {
     };
   }
 
-  private async test(call: AttemptCall, evidenceDir: string, startedAt: Date): Promise<AttemptResult> {
+  private async test(call: AttemptCall, evidenceDir: string, startedAt: Date, logPath: string): Promise<AttemptResult> {
     const criteria = [...call.prompt.matchAll(/^- (A[0-9]+) \(/gm)].map((match) => match[1] as string);
     const scripted = await this.tester({ ...call, criteria, evidenceDir });
     for (const [path, content] of Object.entries(scripted.evidence ?? {})) {
@@ -184,8 +190,6 @@ class FakeWorker implements Worker {
       await mkdir(dirname(join(evidenceDir, path)), { recursive: true });
       await symlink(target, join(evidenceDir, path));
     }
-    const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${call.number}.jsonl`);
-    await mkdir(this.spec.logDir, { recursive: true });
     await writeFile(logPath, `${JSON.stringify({ type: "fake-tester", number: call.number })}\n`);
     return {
       outcome: scripted.outcome ?? { kind: "completed", summary: "done" },

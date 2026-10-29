@@ -1,4 +1,4 @@
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { writeRunLog, type RunLog } from "../../src/coordinator/run-log.ts";
@@ -93,6 +93,40 @@ describe("the link of an attempt to its raw log", () => {
     const href = hrefIn(itemsOf(page.body, "attempt")[0] as string);
     expect(href).toBe(`/runs/${page.runId}/a%20b%23c%3F.jsonl`);
     expect((await open(page, href as string)).body).toBe("odd name");
+  });
+});
+
+describe("the link of an attempt in progress to its raw log", () => {
+  const running = (logPath: string) => {
+    const { endedAt: _endedAt, ...rest } = attemptRecord("claude-code", 0, 0);
+    return { ...rest, outcome: "running" as const, logPath };
+  };
+
+  it("should show the attempt as running and serve its raw log as plain text while it grows", async () => {
+    const page = await pageWith(
+      (runDir) => ({ subtasks: [subtaskRecord("S1", { state: "working", attempts: [running(join(runDir, "S1-attempt-1.jsonl"))] })] }),
+      { "S1-attempt-1.jsonl": '{"type":"assistant"}\n' },
+    );
+
+    const item = itemsOf(page.body, "attempt")[0] as string;
+    expect(item).toContain("Resultado: running");
+    expect(item).not.toContain("Fin:");
+    const href = hrefIn(item);
+    expect(href).toBe(`/runs/${page.runId}/S1-attempt-1.jsonl`);
+    await appendFile(join(page.runDir, "S1-attempt-1.jsonl"), '{"type":"result"}\n');
+    const response = await open(page, href as string);
+    expect(response.status).toBe(200);
+    expect(response.contentType).toMatch(/^text\/plain/);
+    expect(response.body).toBe('{"type":"assistant"}\n{"type":"result"}\n');
+  });
+
+  it("should apply the same path rules to the log of an attempt in progress", async () => {
+    const page = await pageWith(() => ({
+      subtasks: [subtaskRecord("S1", { state: "working", attempts: [running("../../../secret.txt")] })],
+    }));
+
+    expect(itemsOf(page.body, "attempt")).toHaveLength(1);
+    expect(logHrefs(page.body)).toEqual([]);
   });
 });
 

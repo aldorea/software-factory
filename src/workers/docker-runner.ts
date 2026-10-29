@@ -19,6 +19,7 @@ import {
 import { exec, execOk } from "./sh.ts";
 import type {
   AgentSpec,
+  AttemptHooks,
   AttemptLimits,
   AttemptResult,
   CloseResult,
@@ -98,7 +99,7 @@ class DockerWorker implements Worker {
     this.secretsDir = secretsDir;
   }
 
-  async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
+  async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits, hooks?: AttemptHooks): Promise<AttemptResult> {
     this.attempts += 1;
     const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${this.attempts}.jsonl`);
     return performAttempt({
@@ -106,6 +107,7 @@ class DockerWorker implements Worker {
       model: agent.model,
       prompt,
       limits,
+      ...(hooks ? { hooks } : {}),
       logPath,
       launch: (agentCommand) => ({ command: "docker", args: ["exec", "-i", this.container, ...agentCommand] }),
       stop: async (processName) => {

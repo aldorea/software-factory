@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { adapterFor } from "../../src/workers/agents.ts";
 import { performAttempt, type AttemptRequest } from "../../src/workers/attempt.ts";
 import { WorkerLayerError } from "../../src/workers/failures.ts";
+import type { ActivityEvent } from "../../src/workers/types.ts";
 import { exec } from "../../src/workers/sh.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
@@ -201,6 +202,32 @@ describe("attempt", () => {
     expect(stopped).toEqual(["opencode"]);
   });
 
+  it("should announce the log path before the agent starts, so that the log can be read while it grows", async () => {
+    const dir = await temp.make("attempt-");
+    const logPath = join(dir, "log.jsonl");
+    const events: string[] = [];
+    const result = await performAttempt({
+      adapter: adapterFor("claude-code"),
+      model: "claude-haiku-5-5",
+      prompt: "x",
+      limits: soon(),
+      hooks: {
+        onStart: (start) => {
+          events.push(`start ${start.logPath}`);
+        },
+      },
+      logPath,
+      launch: () => {
+        events.push("launch");
+        return { command: "true", args: [] };
+      },
+      stop: async () => undefined,
+      exec: noExport,
+    });
+    expect(events).toEqual([`start ${logPath}`, "launch"]);
+    expect(result.startedAt).toBeInstanceOf(Date);
+  });
+
   it("should pass the command of the adapter to the launcher", async () => {
     const dir = await temp.make("attempt-");
     let received: string[] = [];
@@ -218,5 +245,64 @@ describe("attempt", () => {
       exec: noExport,
     });
     expect(received).toEqual(adapterFor("claude-code").command("claude-haiku-5-5"));
+  });
+
+  it("should give the activity of a Claude Code stream to the observer while the attempt runs, in order", async () => {
+    const stream = readFileSync(join(fixtureDir, "claude-activity.jsonl"), "utf8").trim().split("\n");
+    const fake = await emitter(stream);
+    const seen: ActivityEvent[] = [];
+    const result = await performAttempt({
+      adapter: adapterFor("claude-code"),
+      model: "claude-haiku-5-5",
+      prompt: "x",
+      limits: soon(),
+      logPath: join(fake.dir, "log.jsonl"),
+      hooks: { onActivity: (event) => seen.push(event) },
+      launch: fake.run,
+      stop: async () => undefined,
+      exec: noExport,
+    });
+    expect(seen[0]).toEqual({ kind: "message", text: "I will start by reading the users module." });
+    expect(seen[1]).toEqual({ kind: "tool", tool: "Read", target: "src/api/users.ts" });
+    expect(seen.at(-1)).toEqual({ kind: "end", outcome: "completed" });
+    expect(result.outcome).toEqual({ kind: "completed", summary: "Added the route and the tests pass." });
+  });
+
+  it("should give the same result with or without an observer, because the activity is only shown", async () => {
+    const stream = readFileSync(join(fixtureDir, "claude-activity.jsonl"), "utf8").trim().split("\n");
+    const run = async (onActivity?: (event: ActivityEvent) => void) => {
+      const fake = await emitter(stream);
+      const result = await performAttempt({
+        adapter: adapterFor("claude-code"),
+        model: "claude-haiku-5-5",
+        prompt: "x",
+        limits: soon(),
+        logPath: join(fake.dir, "log.jsonl"),
+        ...(onActivity ? { hooks: { onActivity } } : {}),
+        launch: fake.run,
+        stop: async () => undefined,
+        exec: noExport,
+      });
+      return { outcome: result.outcome, usage: result.usage };
+    };
+    expect(await run((): void => undefined)).toEqual(await run());
+  });
+
+  it("should complete an attempt of an adapter that gives no activity", async () => {
+    const fake = await emitter(realRun);
+    const seen: ActivityEvent[] = [];
+    const result = await performAttempt({
+      adapter: adapterFor("opencode"),
+      model: "opencode-go/glm-5.3",
+      prompt: "x",
+      limits: soon(),
+      logPath: join(fake.dir, "log.jsonl"),
+      hooks: { onActivity: (event) => seen.push(event) },
+      launch: fake.run,
+      stop: async () => undefined,
+      exec: exporting(exportFile),
+    });
+    expect(seen).toEqual([]);
+    expect(result.outcome).toEqual({ kind: "completed", summary: "OK" });
   });
 });

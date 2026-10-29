@@ -1,6 +1,7 @@
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import type { RoleChoice } from "../config/config.ts";
-import type { AgentKind, AttemptLimits, AttemptResult } from "../workers/types.ts";
+import { emptyUsage } from "../workers/agent-adapter.ts";
+import type { AgentKind, AttemptHooks, AttemptLimits, AttemptResult } from "../workers/types.ts";
 import { outcomeFailure, gateFailure, type AttemptFailure } from "./failures.ts";
 import type { GateDecision } from "./gate.ts";
 import type { Clock } from "./ports.ts";
@@ -22,7 +23,7 @@ export interface SubtaskLoop {
   limits: LoopLimits;
   runStartedAt: Date;
   runTokens: () => number;
-  attempt: (prompt: string, limits: AttemptLimits) => Promise<AttemptResult>;
+  attempt: (prompt: string, limits: AttemptLimits, hooks: AttemptHooks) => Promise<AttemptResult>;
   gate: (attempt: number) => Promise<GateDecision | PlanLimitHit | EnvironmentHit | null>;
   extendScope: (requested: string[]) => ScopeExtensionDecision;
   save: () => Promise<void>;
@@ -87,9 +88,30 @@ async function attemptsUntilDone(loop: SubtaskLoop, startedAt: Date, first: numb
       Math.min(startedAt.getTime() + limits.subtaskWallClockMs, loop.runStartedAt.getTime() + limits.runWallClockMs),
     );
     const prompt = [last ? await retryPrompt(loop.prompt, last) : loop.prompt, ...extensions].join("\n\n");
-    const result = await loop.attempt(prompt, { deadline, idleTimeoutMs: limits.attemptIdleTimeoutMs });
+    const hooks: AttemptHooks = {
+      onStart: async ({ logPath, startedAt: attemptStartedAt }) => {
+        record.attempts.push({
+          number,
+          agent: loop.agent,
+          outcome: "running",
+          usage: emptyUsage(),
+          logPath,
+          startedAt: attemptStartedAt.toISOString(),
+        });
+        await loop.save();
+      },
+    };
+    let result: AttemptResult;
+    try {
+      result = await loop.attempt(prompt, { deadline, idleTimeoutMs: limits.attemptIdleTimeoutMs }, hooks);
+    } catch (error) {
+      record.attempts = record.attempts.filter((entry) => !(entry.number === number && entry.outcome === "running"));
+      throw error;
+    }
     const attempt = attemptRecord(number, result, loop.agent);
-    record.attempts.push(attempt);
+    const started = record.attempts.findIndex((entry) => entry.number === number && entry.outcome === "running");
+    if (started === -1) record.attempts.push(attempt);
+    else record.attempts[started] = attempt;
 
     if (result.outcome.kind === "plan-limit") {
       const resetsAt = result.outcome.resetsAt ?? result.plan?.resetsAt;
