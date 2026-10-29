@@ -1,9 +1,9 @@
-import type { Role } from "../workers/agent-adapter.ts";
+import type { Role, RunRole } from "../workers/agent-adapter.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
-import { choiceProblems, isAgentKind, ROLES } from "./roles.ts";
+import { choiceProblems, CONFIGURED_ROLES, isAgentKind } from "./roles.ts";
 
-export type { AgentKind, Role };
+export type { AgentKind, Role, RunRole };
 
 export interface Check {
   name: string;
@@ -210,14 +210,14 @@ function readEvidence(value: unknown, problems: string[]): EvidenceCommands {
 function readRoles(value: unknown, problems: string[]): Partial<Record<Role, RoleChoice>> {
   if (value === undefined) return {};
   if (!isRecord(value)) {
-    problems.push("roles must give the default agent and model of the workers, the verifier and the tester");
+    problems.push("roles must give the default agent and model of the workers, the verifier, the tester and the refinement");
     return {};
   }
   const roles: Partial<Record<Role, RoleChoice>> = {};
   for (const key of Object.keys(value)) {
-    if (!(ROLES as string[]).includes(key)) problems.push(`roles.${key} is not a role`);
+    if (!(CONFIGURED_ROLES as string[]).includes(key)) problems.push(`roles.${key} is not a role`);
   }
-  for (const role of ROLES) {
+  for (const role of CONFIGURED_ROLES) {
     const choice = value[role];
     if (choice === undefined) continue;
     if (!isRecord(choice)) {

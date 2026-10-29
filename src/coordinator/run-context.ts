@@ -1,4 +1,4 @@
-import type { ResolvedConfig, Role, RoleChoice, WorkerEnvironmentContext } from "../config/config.ts";
+import type { ResolvedConfig, RoleChoice, RunRole, WorkerEnvironmentContext } from "../config/config.ts";
 import type { Issue } from "../github/github.ts";
 import type { Spec } from "../spec/spec.ts";
 import type { AgentKind } from "../workers/types.ts";
@@ -13,7 +13,7 @@ export interface RunRequest {
   repoDir: string;
   issue: number;
   credentials: Partial<Record<AgentKind, string>>;
-  roles?: Partial<Record<Role, RoleChoice>>;
+  roles?: Partial<Record<RunRole, RoleChoice>>;
 }
 
 export interface Prepared {

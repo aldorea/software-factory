@@ -5,9 +5,12 @@ export interface AgentCapabilities {
   readsTokenUsage: boolean;
   detectsPlanLimit: boolean;
   deniesEveryTool: boolean;
+  startsInteractiveSession: boolean;
 }
 
-export type Role = "workers" | "verifier" | "tester";
+export type RunRole = "workers" | "verifier" | "tester";
+
+export type Role = RunRole | "refinement";
 
 export type UsageReading = { ok: true; usage: TokenUsage } | { ok: false; problem: string };
 

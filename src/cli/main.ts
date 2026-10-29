@@ -1,10 +1,11 @@
+import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../commands/approve.ts";
 import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
-import type { ResolvedConfig, Role, RoleChoice } from "../config/config.ts";
-import { loadConfig } from "../config/load.ts";
-import { chooseRole, parseRoleFlag, ROLES } from "../config/roles.ts";
+import type { ResolvedConfig, Role, RoleChoice, RunRole } from "../config/config.ts";
+import { configPath, loadConfig } from "../config/load.ts";
+import { choiceProblems, chooseRole, parseRoleFlag, ROLES, type ChosenRole } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
 import { defaultOrigin, resumeDefaults } from "../coordinator/resume.ts";
 import { latestRunLog, readRunLogs } from "../coordinator/run-history.ts";
@@ -44,19 +45,21 @@ export interface CliEnv {
 const COMMANDS = ["refine", "approve", "validate", "run"];
 const USAGE = [
   `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`,
+  "       factory refine <issue> [target-repo] [--refinement-agent <agent>:<model>]",
   "       factory run <issue> [target-repo] [--worker-agent <agent>:<model>] [--verifier-agent <agent>:<model>] [--tester-agent <agent>:<model>]",
   "       factory stats [target-repo]",
   `       ${WEB_USAGE}`,
   "       factory init [target-repo]",
 ].join("\n");
 
-type RoleFlags = Partial<Record<Role, string>>;
+type RoleFlags = Partial<Record<RunRole, string>>;
 
 interface Command {
   command: string;
   issue: number;
   repoArg?: string;
   flags: RoleFlags;
+  refinementFlag?: string;
 }
 
 export async function main(args: string[], env: CliEnv): Promise<number> {
@@ -68,9 +71,9 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
     env.err(USAGE);
     return 2;
   }
-  const { command, issue, repoArg, flags } = parsed;
+  const { command, issue, repoArg, flags, refinementFlag } = parsed;
   const repoDir = resolve(env.cwd, repoArg ?? ".");
-  if (command === "refine") return refine(repoDir, issue, env);
+  if (command === "refine") return refine(repoDir, issue, refinementFlag, env);
   try {
     if (command === "run") return await run(repoDir, issue, flags, env);
     const input: SpecCommandInput = {
@@ -104,7 +107,12 @@ function parseCommand(args: string[]): Command | null {
       args,
       allowPositionals: true,
       strict: true,
-      options: { "worker-agent": { type: "string" }, "verifier-agent": { type: "string" }, "tester-agent": { type: "string" } },
+      options: {
+        "worker-agent": { type: "string" },
+        "verifier-agent": { type: "string" },
+        "tester-agent": { type: "string" },
+        "refinement-agent": { type: "string" },
+      },
     });
   } catch {
     return null;
@@ -122,8 +130,16 @@ function parseCommand(args: string[]): Command | null {
     ...(verifier !== undefined ? { verifier } : {}),
     ...(tester !== undefined ? { tester } : {}),
   };
+  const refinementFlag = parsed.values["refinement-agent"];
   if (command !== "run" && Object.keys(flags).length > 0) return null;
-  return { command, issue, ...(repoArg !== undefined ? { repoArg } : {}), flags };
+  if (command !== "refine" && refinementFlag !== undefined) return null;
+  return {
+    command,
+    issue,
+    ...(repoArg !== undefined ? { repoArg } : {}),
+    flags,
+    ...(refinementFlag !== undefined ? { refinementFlag } : {}),
+  };
 }
 
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
@@ -135,7 +151,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
   const config = await loadConfig(repoDir);
   const previous = await latestRunLog(join(repoDir, ".factory", "logs"), issue);
   const defaults = resumeDefaults(previous, config.roles);
-  const flagged: Partial<Record<Role, RoleChoice>> = {};
+  const flagged: Partial<Record<RunRole, RoleChoice>> = {};
   for (const role of ROLES) {
     const flag = flags[role];
     if (flag === undefined) continue;
@@ -153,7 +169,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
           menuEntries({ roles: ROLES, flagged, defaults, defaultOrigin: (role) => defaultOrigin(previous, role) }),
           planLimitAnnotate(previous, env.clock.now()),
         );
-  const roles: Partial<Record<Role, RoleChoice>> = {};
+  const roles: Partial<Record<RunRole, RoleChoice>> = {};
   for (const role of ROLES) {
     const chosen = chooseRole({
       role,
@@ -184,15 +200,59 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
   return 0;
 }
 
-async function refine(repoDir: string, issue: number, env: CliEnv): Promise<number> {
+async function refine(repoDir: string, issue: number, flag: string | undefined, env: CliEnv): Promise<number> {
   try {
+    const chosen = await refinementChoice(repoDir, flag, env);
+    if (!chosen.ok) {
+      env.err(`factory: ${chosen.problem}`);
+      return 1;
+    }
     const workspace = await prepareRefinement({ repoDir, issue, github: env.github(repoDir) });
     env.out(`${workspace.created ? "Created" : "Reusing"} ${workspace.branch} in ${workspace.worktree}`);
-    return await env.launch(refineLaunch({ worktree: workspace.worktree, issue, factoryRoot: env.factoryRoot }));
+    return await env.launch(
+      refineLaunch({ worktree: workspace.worktree, issue, factoryRoot: env.factoryRoot, model: chosen.choice.model }),
+    );
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);
     return 1;
   }
+}
+
+async function refinementChoice(repoDir: string, flag: string | undefined, env: CliEnv): Promise<ChosenRole> {
+  const configured = await configuredRefinement(repoDir);
+  const flagged = flag === undefined ? undefined : parseRoleFlag("refinement", flag, configured);
+  if (flagged !== undefined && !flagged.ok) return flagged;
+  const prompted =
+    flagged === undefined && env.ask !== undefined
+      ? (
+          await env.ask(
+            menuEntries({
+              roles: ["refinement"],
+              flagged: {},
+              defaults: configured ? { refinement: configured } : {},
+              defaultOrigin: () => "config",
+            }),
+            () => ({}),
+          )
+        ).refinement
+      : undefined;
+  const chosen = chooseRole({
+    role: "refinement",
+    ...(flagged?.ok ? { flag: flagged.choice } : {}),
+    ...(prompted ? { prompted } : {}),
+    ...(configured ? { fallback: configured } : {}),
+  });
+  if (!chosen.ok) return chosen;
+  const problems = choiceProblems("refinement", chosen.choice);
+  return problems.length > 0 ? { ok: false, problem: problems.join("; ") } : chosen;
+}
+
+async function configuredRefinement(repoDir: string): Promise<RoleChoice | undefined> {
+  const present = await access(configPath(repoDir)).then(
+    () => true,
+    () => false,
+  );
+  return present ? (await loadConfig(repoDir)).roles.refinement : undefined;
 }
 
 async function init(args: string[], env: CliEnv): Promise<number> {

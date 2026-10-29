@@ -14,6 +14,7 @@ export const ROLE_REQUIREMENTS: Record<Role, (keyof AgentCapabilities)[]> = {
   workers: ["readsTokenUsage", "detectsPlanLimit"],
   verifier: ["deniesEveryTool"],
   tester: ["readsTokenUsage"],
+  refinement: ["startsInteractiveSession"],
 };
 
 export function adapterFor(kind: AgentKind): AgentAdapter {
