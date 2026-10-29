@@ -15,6 +15,8 @@ import {
 } from "../../src/workers/git.ts";
 import { exec, execOk } from "../../src/workers/sh.ts";
 import type {
+  ActivityEvent,
+  ActivitySink,
   AgentSpec,
   AttemptLimits,
   AttemptOutcome,
@@ -29,6 +31,7 @@ import type {
 } from "../../src/workers/types.ts";
 
 export interface ScriptedAttempt {
+  activity?: ActivityEvent[];
   files?: Record<string, string>;
   commit?: string;
   outcome?: AttemptOutcome;
@@ -144,7 +147,7 @@ class FakeWorker implements Worker {
     return this.record.worktreePath;
   }
 
-  async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
+  async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits, onActivity?: ActivitySink): Promise<AttemptResult> {
     const call: AttemptCall = { spec: this.spec, agent, prompt, limits, number: this.record.attempts.length + 1 };
     this.record.attempts.push(call);
     const attemptFault = this.faults.attempt?.(call);
@@ -152,6 +155,7 @@ class FakeWorker implements Worker {
     const startedAt = new Date();
     if (this.spec.outputDir !== undefined) return this.test(call, this.spec.outputDir, startedAt);
     const scripted = await this.script(call);
+    for (const event of scripted.activity ?? []) onActivity?.(event);
     for (const [path, content] of Object.entries(scripted.files ?? {})) {
       await mkdir(dirname(join(this.worktreePath, path)), { recursive: true });
       await writeFile(join(this.worktreePath, path), content);

@@ -17,6 +17,7 @@ import { WEB_HOST } from "../web/host.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
 import { agentsForRole } from "../workers/agents.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
+import { activityLine } from "./activity-line.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { web, WEB_USAGE } from "./web.ts";
 
@@ -156,6 +157,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
       notifier: env.notifier,
       clock: env.clock,
       progress: env.out,
+      activity: (entry) => env.out(activityLine(entry)),
     },
   );
   env.out(`Run ${report.log.runId}: ${report.result}, ${report.pullRequest.url}`);

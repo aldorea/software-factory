@@ -10,6 +10,7 @@ import type { GitHub } from "../../src/github/github.ts";
 import { ghGitHub, ghProblem } from "../../src/github/gh.ts";
 import { readApproval } from "../../src/spec/approval.ts";
 import { dockerProblem } from "../../src/workers/docker.ts";
+import type { ActivityEvent } from "../../src/workers/types.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
@@ -209,6 +210,62 @@ describe("factory run: the choice of the agent of each role", () => {
     expect(out[0]).toBe("Preparing run #42; factory web shows it at http://127.0.0.1:7433/");
     expect(out).toContain("S1: working");
     expect(out.at(-1)).toMatch(/^Run 42-.*: (ready|draft), /);
+  });
+
+  it("should print a line for each activity event of an attempt, in order, with the time and the prefix of the subtask, between the progress lines", async () => {
+    const repoDir = await runnableRepo();
+    const events: ActivityEvent[] = [
+      { kind: "message", text: "Reading the module." },
+      { kind: "tool", tool: "Read", target: "src/api/users.ts" },
+      { kind: "tool", tool: "Edit", target: "src/api/users.ts" },
+      { kind: "tool", tool: "Bash", target: "pnpm test" },
+      { kind: "end", outcome: "completed" },
+    ];
+    const { env, out } = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" }, activity: events }));
+    env.clock = new FakeClock("2026-10-24T10:02:20");
+    expect(await main(["approve", "42"], env)).toBe(0);
+    out.length = 0;
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    const activity = out.filter((line) => line.startsWith("10:02:20 S1 · "));
+    expect(activity).toEqual([
+      '10:02:20 S1 · "Reading the module."',
+      "10:02:20 S1 · Read src/api/users.ts",
+      "10:02:20 S1 · Edit src/api/users.ts",
+      "10:02:20 S1 · Bash pnpm test",
+      "10:02:20 S1 · attempt ended",
+    ]);
+    expect(out.indexOf("S1: working")).toBeLessThan(out.indexOf(activity[0] as string));
+    expect(out.indexOf(activity[4] as string)).toBeLessThan(out.indexOf("S1: attempt 1 completed"));
+  });
+
+  it("should write the same run.json for an attempt that emits activity and one that does not, because the activity is only shown", async () => {
+    const written = async (activity: ActivityEvent[] | undefined) => {
+      const repoDir = await runnableRepo();
+      const { env } = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" }, ...(activity ? { activity } : {}) }));
+      env.clock = new FakeClock("2026-10-24T10:02:20");
+      expect(await main(["approve", "42"], env)).toBe(0);
+      expect(await main(["run", "42"], env)).toBe(0);
+      const logs = join(repoDir, ".factory", "logs");
+      const runId = (await readdir(logs)).sort().at(-1) ?? "";
+      const text = (await readFile(join(logs, runId, "run.json"), "utf8")).replaceAll(repoDir, "<repo>").replace(/\b[0-9a-f]{40}\b/g, "<sha>");
+      const parsed = JSON.parse(text) as { subtasks: { attempts: Record<string, unknown>[] }[] };
+      for (const attempt of parsed.subtasks.flatMap((subtask) => subtask.attempts)) {
+        delete attempt.startedAt;
+        delete attempt.endedAt;
+      }
+      return parsed;
+    };
+
+    const quiet = await written(undefined);
+    const talkative = await written([
+      { kind: "message", text: "Working." },
+      { kind: "tool", tool: "Edit", target: "src/a.txt" },
+      { kind: "end", outcome: "completed" },
+    ]);
+
+    expect(talkative).toEqual(quiet);
   });
 
   it("should refuse to start, with no worker, when neither a flag, a prompt nor the config gives the agent of a role", async () => {

@@ -1,5 +1,5 @@
 import type { SupervisedProcess } from "./supervise.ts";
-import type { AgentKind, AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
+import type { ActivityEvent, AgentKind, AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
 
 export interface AgentCapabilities {
   readsTokenUsage: boolean;
@@ -18,6 +18,7 @@ export interface UsageProbe {
 
 export interface AgentStream {
   onLine(line: string): void;
+  activity?(line: string): ActivityEvent[];
   usage(): TokenUsage;
   usageProbe?: UsageProbe;
   plan(): PlanStatus | undefined;

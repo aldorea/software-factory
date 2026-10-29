@@ -254,7 +254,11 @@ async function workInWorker(context: RunContext, request: WorkerRequest): Promis
       runStartedAt: context.startedAt,
       runTokens: () => agentRunTokens(context.log, workers.agent),
       attempt: (prompt, attemptLimits) =>
-        inStage("attempt", () => worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits)),
+        inStage("attempt", () =>
+          worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits, (event) =>
+            context.ports.activity?.({ source: subtask.id, at: context.ports.clock.now(), event }),
+          ),
+        ),
       gate: request.gate,
       extendScope: (requested) => extendScope(context, subtask, requested),
       save: () => context.save(),

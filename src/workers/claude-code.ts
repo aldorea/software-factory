@@ -1,6 +1,7 @@
+import { firstLine } from "./activity.ts";
 import { emptyUsage, type AgentAdapter } from "./agent-adapter.ts";
 import type { SupervisedProcess } from "./supervise.ts";
-import type { AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
+import type { ActivityEvent, AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
 
 export function claudeCodeArgs(model: string): string[] {
   return [
@@ -47,6 +48,7 @@ export interface ClaudeInit {
 
 export interface ClaudeStreamState {
   usage: TokenUsage;
+  cwd?: string;
   init?: ClaudeInit;
   plan?: PlanStatus;
   result?: {
@@ -70,7 +72,11 @@ export function applyClaudeLine(state: ClaudeStreamState, line: string): ClaudeS
   if (!event) return state;
 
   if (event.type === "system" && event.subtype === "init") {
-    return { ...state, init: { ...namesOf("tools", event.tools), ...namesOf("mcpServers", event.mcp_servers) } };
+    return {
+      ...state,
+      ...(typeof event.cwd === "string" ? { cwd: event.cwd } : {}),
+      init: { ...namesOf("tools", event.tools), ...namesOf("mcpServers", event.mcp_servers) },
+    };
   }
 
   if (event.type === "rate_limit_event" && isRecord(event.rate_limit_info)) {
@@ -111,12 +117,47 @@ export const claudeCodeAdapter: AgentAdapter = {
       onLine(line) {
         state = applyClaudeLine(state, line);
       },
+      activity: (line) => claudeActivity(state, line),
       usage: () => state.usage,
       plan: () => state.plan,
       outcome: (supervised) => claudeOutcome(state, supervised),
     };
   },
 };
+
+const TARGET_FIELDS = ["file_path", "notebook_path", "command", "pattern", "url", "query", "skill", "description", "path"];
+
+export function claudeActivity(state: ClaudeStreamState, line: string): ActivityEvent[] {
+  const event = parseJson(line);
+  if (!event) return [];
+
+  if (event.type === "result") return [{ kind: "end", outcome: event.is_error === true ? "failed" : "completed" }];
+
+  if (event.type !== "assistant" || !isRecord(event.message) || !Array.isArray(event.message.content)) return [];
+  return event.message.content.flatMap((block: unknown): ActivityEvent[] => {
+    if (!isRecord(block)) return [];
+    if (block.type === "text" && typeof block.text === "string") {
+      const text = firstLine(block.text);
+      return text === undefined ? [] : [{ kind: "message", text }];
+    }
+    if (block.type === "tool_use" && typeof block.name === "string") {
+      const target = toolTarget(block.input, state.cwd);
+      return [{ kind: "tool", tool: block.name, ...(target !== undefined ? { target } : {}) }];
+    }
+    return [];
+  });
+}
+
+function toolTarget(input: unknown, cwd: string | undefined): string | undefined {
+  if (!isRecord(input)) return undefined;
+  for (const field of TARGET_FIELDS) {
+    const value = input[field];
+    if (typeof value !== "string") continue;
+    const target = firstLine(cwd !== undefined && value.startsWith(`${cwd}/`) ? value.slice(cwd.length + 1) : value);
+    if (target !== undefined) return target;
+  }
+  return undefined;
+}
 
 const PLAN_LIMIT_TEXT = /usage limit|limit reached|rate limit/i;
 

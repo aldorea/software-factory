@@ -18,6 +18,7 @@ import {
 } from "./git.ts";
 import { exec, execOk } from "./sh.ts";
 import type {
+  ActivitySink,
   AgentSpec,
   AttemptLimits,
   AttemptResult,
@@ -98,7 +99,7 @@ class DockerWorker implements Worker {
     this.secretsDir = secretsDir;
   }
 
-  async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult> {
+  async attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits, onActivity?: ActivitySink): Promise<AttemptResult> {
     this.attempts += 1;
     const logPath = join(this.spec.logDir, `${this.spec.id}-attempt-${this.attempts}.jsonl`);
     return performAttempt({
@@ -107,6 +108,7 @@ class DockerWorker implements Worker {
       prompt,
       limits,
       logPath,
+      ...(onActivity ? { onActivity } : {}),
       launch: (agentCommand) => ({ command: "docker", args: ["exec", "-i", this.container, ...agentCommand] }),
       stop: async (processName) => {
         await exec("docker", ["exec", this.container, "pkill", "-KILL", "-f", processName]);

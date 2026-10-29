@@ -49,6 +49,13 @@ export type AttemptOutcome =
   | { kind: "idle-timeout" }
   | { kind: "agent-error"; message: string; exitCode: number | null };
 
+export type ActivityEvent =
+  | { kind: "message"; text: string }
+  | { kind: "tool"; tool: string; target?: string }
+  | { kind: "end"; outcome: "completed" | "failed" };
+
+export type ActivitySink = (event: ActivityEvent) => void;
+
 export interface AttemptResult {
   outcome: AttemptOutcome;
   usage: TokenUsage;
@@ -71,7 +78,7 @@ export interface CloseResult {
 export interface Worker {
   readonly spec: WorkerSpec;
   readonly worktreePath: string;
-  attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits): Promise<AttemptResult>;
+  attempt(agent: AgentSpec, prompt: string, limits: AttemptLimits, onActivity?: ActivitySink): Promise<AttemptResult>;
   exec(command: string, options?: { timeoutMs?: number }): Promise<ExecResult>;
   commits(): Promise<string[]>;
   close(): Promise<CloseResult>;

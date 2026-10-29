@@ -2,7 +2,7 @@ import type { AgentAdapter, AgentStream } from "./agent-adapter.ts";
 import { WorkerLayerError } from "./failures.ts";
 import { supervise } from "./supervise.ts";
 import { readUsage } from "./usage.ts";
-import type { AttemptLimits, AttemptOutcome, AttemptResult, ExecResult, TokenUsage } from "./types.ts";
+import type { ActivitySink, AttemptLimits, AttemptOutcome, AttemptResult, ExecResult, TokenUsage } from "./types.ts";
 
 export interface AttemptRequest {
   adapter: AgentAdapter;
@@ -10,6 +10,7 @@ export interface AttemptRequest {
   prompt: string;
   limits: AttemptLimits;
   logPath: string;
+  onActivity?: ActivitySink;
   launch: (agentCommand: string[]) => { command: string; args: string[] };
   stop: (processName: string) => Promise<void>;
   exec: (command: string[]) => Promise<ExecResult>;
@@ -27,7 +28,11 @@ export async function performAttempt(request: AttemptRequest): Promise<AttemptRe
     logPath: request.logPath,
     deadline: request.limits.deadline,
     idleTimeoutMs: request.limits.idleTimeoutMs,
-    onLine: (line) => stream.onLine(line),
+    onLine: (line) => {
+      stream.onLine(line);
+      if (request.onActivity === undefined) return;
+      for (const event of stream.activity?.(line) ?? []) request.onActivity(event);
+    },
     ...(adapter.isFinalLine ? { isFinalLine: adapter.isFinalLine } : {}),
     terminate: () => request.stop(adapter.processName),
   });
