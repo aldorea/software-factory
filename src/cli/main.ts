@@ -18,6 +18,7 @@ import { DEFAULT_WEB_PORT } from "../web/server.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { menuEntries, type RoleEntry } from "./role-menu.ts";
+import { runSummary } from "./run-summary.ts";
 import { web, WEB_USAGE } from "./web.ts";
 
 export interface CliEnv {
@@ -173,7 +174,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
       progress: env.out,
     },
   );
-  env.out(`Run ${report.log.runId}: ${report.result}, ${report.pullRequest.url}`);
+  for (const line of runSummary(report.log)) env.out(line);
   return 0;
 }
 
