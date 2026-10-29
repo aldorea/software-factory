@@ -6,10 +6,16 @@ import { defaultBranch, findIntegrationBranch } from "../git/repo.ts";
 
 const MAX_SLUG_LENGTH = 40;
 
-export function refineLaunch(input: { worktree: string; issue: number; factoryRoot: string }): InteractiveLaunch {
+export function refineLaunch(input: { worktree: string; issue: number; factoryRoot: string; model: string }): InteractiveLaunch {
   return {
     command: "claude",
-    args: ["--plugin-dir", join(input.factoryRoot, "plugins", "refinement"), `/factory:refine ${input.issue}`],
+    args: [
+      "--plugin-dir",
+      join(input.factoryRoot, "plugins", "refinement"),
+      "--model",
+      input.model,
+      `/factory:refine ${input.issue}`,
+    ],
     cwd: input.worktree,
     env: { FACTORY_CLI: join(input.factoryRoot, "src", "cli", "factory.ts") },
   };

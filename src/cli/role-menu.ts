@@ -18,6 +18,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   workers: "workers",
   verifier: "independent verifier",
   tester: "acceptance tester",
+  refinement: "refinement",
 };
 
 export type RoleOrigin = "config" | "paused run" | "flag" | "chosen";

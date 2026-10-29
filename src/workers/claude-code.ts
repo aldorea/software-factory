@@ -102,7 +102,7 @@ export function applyClaudeLine(state: ClaudeStreamState, line: string): ClaudeS
 export const claudeCodeAdapter: AgentAdapter = {
   kind: "claude-code",
   processName: "claude",
-  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: true },
+  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: true, startsInteractiveSession: true },
   command: claudeCodeArgs,
   isFinalLine: isClaudeFinalLine,
   createStream() {
