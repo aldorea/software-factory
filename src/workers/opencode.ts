@@ -1,6 +1,7 @@
+import { firstLine } from "./activity.ts";
 import { emptyUsage, type AgentAdapter, type UsageProbe, type UsageReading } from "./agent-adapter.ts";
 import type { SupervisedProcess } from "./supervise.ts";
-import type { AttemptOutcome } from "./types.ts";
+import type { ActivityEvent, AttemptOutcome } from "./types.ts";
 
 export const SUBSCRIPTION_PROVIDER = "opencode-go";
 
@@ -66,6 +67,22 @@ export function applyOpenCodeLine(state: OpenCodeStreamState, line: string): Ope
   }
 
   return state;
+}
+
+export function openCodeActivity(line: string): ActivityEvent[] {
+  let event: unknown;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return [];
+  }
+  if (!isRecord(event) || event.type !== "text" || !isRecord(event.part) || typeof event.part.text !== "string") return [];
+  const text = firstLine(event.part.text);
+  return text === undefined ? [] : [{ kind: "message", text }];
+}
+
+export function openCodeFinish(outcome: AttemptOutcome): ActivityEvent[] {
+  return [{ kind: "end", outcome: outcome.kind === "completed" ? "completed" : "failed" }];
 }
 
 function sessionIdOf(event: object): string | undefined {
@@ -174,6 +191,8 @@ export const openCodeAdapter: AgentAdapter = {
       onLine(line) {
         state = applyOpenCodeLine(state, line);
       },
+      activity: openCodeActivity,
+      finish: openCodeFinish,
       usage: emptyUsage,
       usageProbe: openCodeUsageProbe(() => state.sessionId),
       plan: () => undefined,

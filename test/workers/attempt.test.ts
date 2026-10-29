@@ -288,7 +288,7 @@ describe("attempt", () => {
     expect(await run((): void => undefined)).toEqual(await run());
   });
 
-  it("should complete an attempt of an adapter that gives no activity", async () => {
+  it("should give the messages and the end of an OpenCode attempt to the observer, and read its usage as before", async () => {
     const fake = await emitter(realRun);
     const seen: ActivityEvent[] = [];
     const result = await performAttempt({
@@ -302,7 +302,29 @@ describe("attempt", () => {
       stop: async () => undefined,
       exec: exporting(exportFile),
     });
-    expect(seen).toEqual([]);
+    expect(seen).toEqual([
+      { kind: "message", text: "OK" },
+      { kind: "end", outcome: "completed" },
+    ]);
     expect(result.outcome).toEqual({ kind: "completed", summary: "OK" });
+    expect(result.usage.outputTokens).toBeGreaterThan(0);
+  });
+
+  it("should end the activity of an OpenCode attempt that hit the plan limit as failed", async () => {
+    const fake = await emitter(readFileSync(join(fixtureDir, "opencode-go-limit.jsonl"), "utf8").trim().split("\n"));
+    const seen: ActivityEvent[] = [];
+    const result = await performAttempt({
+      adapter: adapterFor("opencode"),
+      model: "opencode-go/glm-5.3",
+      prompt: "x",
+      limits: soon(),
+      logPath: join(fake.dir, "log.jsonl"),
+      hooks: { onActivity: (event) => seen.push(event) },
+      launch: fake.run,
+      stop: async () => undefined,
+      exec: exporting(exportFile),
+    });
+    expect(seen).toEqual([{ kind: "end", outcome: "failed" }]);
+    expect(result.outcome.kind).toBe("plan-limit");
   });
 });

@@ -22,6 +22,7 @@ export interface UsageProbe {
 export interface AgentStream {
   onLine(line: string): void;
   activity?(line: string): ActivityEvent[];
+  finish?(outcome: AttemptOutcome): ActivityEvent[];
   usage(): TokenUsage;
   usageProbe?: UsageProbe;
   plan(): PlanStatus | undefined;
