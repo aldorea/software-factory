@@ -7,9 +7,11 @@ import type { ActivityEvent, AttemptOutcome } from "../../src/workers/types.ts";
 const fixture = (name: string) => readFileSync(join(import.meta.dirname, "fixtures", name), "utf8").trim().split("\n");
 const realRun = fixture("opencode-run.jsonl");
 const realLimit = fixture("opencode-go-limit.jsonl");
+const realTools = fixture("opencode-tools.jsonl");
+const WORKTREE = "/Users/sito/Documents/askwell/.factory/worktrees/27-deleted-option";
 
-function activityOf(lines: string[]): ActivityEvent[] {
-  const stream = openCodeAdapter.createStream();
+function activityOf(lines: string[], options: { cwd?: string } = { cwd: WORKTREE }): ActivityEvent[] {
+  const stream = openCodeAdapter.createStream(options);
   return lines.flatMap((line) => {
     stream.onLine(line);
     return stream.activity?.(line) ?? [];
@@ -22,13 +24,54 @@ function withText(line: string, text: string): string {
   return JSON.stringify(event);
 }
 
+function withTool(line: string, tool: string, input: Record<string, unknown>): string {
+  const event = JSON.parse(line) as { part: { tool: string; state: { input: Record<string, unknown> } } };
+  event.part.tool = tool;
+  event.part.state.input = input;
+  return JSON.stringify(event);
+}
+
 function endOf(outcome: AttemptOutcome): ActivityEvent[] {
   return openCodeAdapter.createStream().finish?.(outcome) ?? [];
 }
 
 describe("OpenCode activity", () => {
-  it("should show the message of a real run and nothing for its step start, because its stream has no tool events", () => {
+  it("should show the message of a real run and nothing for its step start", () => {
     expect(activityOf(realRun)).toEqual([{ kind: "message", text: "OK" }]);
+  });
+
+  it("should show the tools of a real run with their target, in order, and nothing for step starts and finishes", () => {
+    expect(activityOf(realTools)).toEqual([
+      { kind: "tool", tool: "read", target: "apps/nextjs/e2e/deleted-option.spec.ts" },
+      { kind: "tool", tool: "shell", target: "cd /Users/sito/Documents/askwell/.factory/worktrees/27-deleted-option && git log --oneline -5 && gi…" },
+      { kind: "tool", tool: "grep", target: "runner\\.(start|saveAnswer|complete)|response\\.list|question\\.(create|update)|form\\.(create|publish)" },
+      { kind: "message", text: "Now I understand the codebase. Let me implement the changes in `csv.ts`:" },
+      { kind: "tool", tool: "edit", target: "packages/forms/src/csv.ts" },
+    ]);
+  });
+
+  it("should show a path outside the worktree as the agent wrote it, because only the worktree path is noise", () => {
+    const readLine = realTools[1] as string;
+
+    expect(activityOf([withTool(readLine, "read", { path: "/etc/hostname" })])).toEqual([
+      { kind: "tool", tool: "read", target: "/etc/hostname" },
+    ]);
+  });
+
+  it("should show a path as the agent wrote it when the worktree is not known", () => {
+    const readLine = realTools[1] as string;
+
+    expect(activityOf([readLine], {})).toEqual([
+      {
+        kind: "tool",
+        tool: "read",
+        target: "/Users/sito/Documents/askwell/.factory/worktrees/27-deleted-option/apps/nextjs/e2e/deleted-option.s…",
+      },
+    ]);
+  });
+
+  it("should show a tool with no target when its input has none of the usual fields", () => {
+    expect(activityOf([withTool(realTools[1] as string, "todowrite", {})])).toEqual([{ kind: "tool", tool: "todowrite" }]);
   });
 
   it("should show a message by its first line only, cut to 100 characters", () => {

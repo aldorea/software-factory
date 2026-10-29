@@ -109,6 +109,7 @@ class DockerWorker implements Worker {
       limits,
       ...(hooks ? { hooks } : {}),
       logPath,
+      cwd: this.worktreePath,
       launch: (agentCommand) => ({ command: "docker", args: ["exec", "-i", this.container, ...agentCommand] }),
       stop: async (processName) => {
         await exec("docker", ["exec", this.container, "pkill", "-KILL", "-f", processName]);

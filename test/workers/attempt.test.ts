@@ -262,10 +262,14 @@ describe("attempt", () => {
       stop: async () => undefined,
       exec: noExport,
     });
-    expect(seen[0]).toEqual({ kind: "message", text: "I will start by reading the users module." });
-    expect(seen[1]).toEqual({ kind: "tool", tool: "Read", target: "src/api/users.ts" });
+    expect(seen.map((event) => event.kind)).toEqual(["tool", "message", "message", "message", "end"]);
+    expect(seen[0]).toMatchObject({ kind: "tool", tool: "Bash" });
+    expect(seen[1]).toMatchObject({ kind: "message", text: expect.stringMatching(/^The files already exist\./) });
     expect(seen.at(-1)).toEqual({ kind: "end", outcome: "completed" });
-    expect(result.outcome).toEqual({ kind: "completed", summary: "Added the route and the tests pass." });
+    expect(result.outcome).toMatchObject({
+      kind: "completed",
+      summary: expect.stringMatching(/^`GET \/api\/health` is implemented and committed/),
+    });
   });
 
   it("should give the same result with or without an observer, because the activity is only shown", async () => {
@@ -307,6 +311,27 @@ describe("attempt", () => {
       { kind: "end", outcome: "completed" },
     ]);
     expect(result.outcome).toEqual({ kind: "completed", summary: "OK" });
+    expect(result.usage.outputTokens).toBeGreaterThan(0);
+  });
+
+  it("should give the tools of an OpenCode attempt to the observer relative to the worktree it ran in, and read its usage as before", async () => {
+    const fake = await emitter(readFileSync(join(fixtureDir, "opencode-tools.jsonl"), "utf8").trim().split("\n"));
+    const seen: ActivityEvent[] = [];
+    const result = await performAttempt({
+      adapter: adapterFor("opencode"),
+      model: "opencode-go/glm-5.3",
+      prompt: "x",
+      limits: soon(),
+      logPath: join(fake.dir, "log.jsonl"),
+      cwd: "/Users/sito/Documents/askwell/.factory/worktrees/27-deleted-option",
+      hooks: { onActivity: (event) => seen.push(event) },
+      launch: fake.run,
+      stop: async () => undefined,
+      exec: exporting(exportFile),
+    });
+    expect(seen.map((event) => event.kind)).toEqual(["tool", "tool", "tool", "message", "tool", "end"]);
+    expect(seen[0]).toEqual({ kind: "tool", tool: "read", target: "apps/nextjs/e2e/deleted-option.spec.ts" });
+    expect(seen[4]).toEqual({ kind: "tool", tool: "edit", target: "packages/forms/src/csv.ts" });
     expect(result.usage.outputTokens).toBeGreaterThan(0);
   });
 

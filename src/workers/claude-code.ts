@@ -1,4 +1,4 @@
-import { firstLine } from "./activity.ts";
+import { firstLine, toolTarget } from "./activity.ts";
 import { emptyUsage, type AgentAdapter } from "./agent-adapter.ts";
 import type { SupervisedProcess } from "./supervise.ts";
 import type { ActivityEvent, AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
@@ -125,8 +125,6 @@ export const claudeCodeAdapter: AgentAdapter = {
   },
 };
 
-const TARGET_FIELDS = ["file_path", "notebook_path", "command", "pattern", "url", "query", "skill", "description", "path"];
-
 export function claudeActivity(state: ClaudeStreamState, line: string): ActivityEvent[] {
   const event = parseJson(line);
   if (!event) return [];
@@ -146,17 +144,6 @@ export function claudeActivity(state: ClaudeStreamState, line: string): Activity
     }
     return [];
   });
-}
-
-function toolTarget(input: unknown, cwd: string | undefined): string | undefined {
-  if (!isRecord(input)) return undefined;
-  for (const field of TARGET_FIELDS) {
-    const value = input[field];
-    if (typeof value !== "string") continue;
-    const target = firstLine(cwd !== undefined && value.startsWith(`${cwd}/`) ? value.slice(cwd.length + 1) : value);
-    if (target !== undefined) return target;
-  }
-  return undefined;
 }
 
 const PLAN_LIMIT_TEXT = /usage limit|limit reached|rate limit/i;

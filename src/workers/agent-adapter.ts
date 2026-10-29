@@ -29,13 +29,17 @@ export interface AgentStream {
   outcome(supervised: SupervisedProcess): AttemptOutcome;
 }
 
+export interface StreamOptions {
+  cwd?: string;
+}
+
 export interface AgentAdapter {
   kind: AgentKind;
   processName: string;
   capabilities: AgentCapabilities;
   command(model: string): string[];
   isFinalLine?(line: string): boolean;
-  createStream(): AgentStream;
+  createStream(options?: StreamOptions): AgentStream;
 }
 
 export function emptyUsage(): TokenUsage {

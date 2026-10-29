@@ -11,6 +11,7 @@ export interface AttemptRequest {
   limits: AttemptLimits;
   hooks?: AttemptHooks;
   logPath: string;
+  cwd?: string;
   launch: (agentCommand: string[]) => { command: string; args: string[] };
   stop: (processName: string) => Promise<void>;
   exec: (command: string[]) => Promise<ExecResult>;
@@ -20,7 +21,7 @@ export async function performAttempt(request: AttemptRequest): Promise<AttemptRe
   const { adapter } = request;
   const startedAt = new Date();
   await request.hooks?.onStart?.({ logPath: request.logPath, startedAt });
-  const stream = adapter.createStream();
+  const stream = adapter.createStream(request.cwd !== undefined ? { cwd: request.cwd } : undefined);
   const { command, args } = request.launch(adapter.command(request.model));
   const supervised = await supervise({
     command,
