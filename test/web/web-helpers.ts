@@ -1,6 +1,7 @@
 import { utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { expect } from "vitest";
+import { DEFAULT_LIMITS } from "../../src/config/config.ts";
 import { writeRunLog, type RunLog } from "../../src/coordinator/run-log.ts";
 import { handleRequest, type WebRequest } from "../../src/web/handler.ts";
 import { cleanRun } from "../coordinator/run-log-fixtures.ts";
@@ -27,7 +28,7 @@ export async function repoWithRuns(runs: Array<{ log: RunLog; modifiedAt?: Date 
 }
 
 export function request(repoDir: string, path = "/", overrides: Partial<WebRequest> = {}): WebRequest {
-  return { method: "GET", path, host: `127.0.0.1:${PORT}`, repoDir, port: PORT, now: NOW, ...overrides };
+  return { method: "GET", path, host: `127.0.0.1:${PORT}`, repoDir, port: PORT, now: NOW, idleTimeoutMs: DEFAULT_LIMITS.run.attemptIdleTimeoutMs, ...overrides };
 }
 
 export async function runPage(log: RunLog, modifiedAt?: Date): Promise<string> {

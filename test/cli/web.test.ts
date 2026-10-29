@@ -1,5 +1,7 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { createServer, type Server } from "node:net";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { main, type CliEnv } from "../../src/cli/main.ts";
 import { FakeClock } from "../fakes/clock.ts";
@@ -8,6 +10,7 @@ import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
 import { cleanRun, failedRun } from "../coordinator/run-log-fixtures.ts";
+import { writeRunningRun } from "../coordinator/running-run.ts";
 import { repoWithRuns, temp } from "../web/web-helpers.ts";
 
 const stops: AbortController[] = [];
@@ -70,6 +73,31 @@ describe("factory web", () => {
     expect(await exit).toBe(0);
     await expect(fetch(url)).rejects.toThrow();
     expect(err).toEqual([]);
+  });
+
+  it("should show a run whose process died as abandoned using the default attemptIdleTimeoutMs, and as running when the config allows a longer silence", async () => {
+    const silent = new Date(Date.parse("2026-10-24T08:00:00.000Z") - 30 * 60_000);
+    const abandonedDir = await temp.make("web-cli-abandoned-");
+    await writeRunningRun({ logsDir: join(abandonedDir, ".factory", "logs"), runJsonAt: silent, logAt: silent });
+    const patientDir = await temp.make("web-cli-patient-");
+    await writeRunningRun({ logsDir: join(patientDir, ".factory", "logs"), runJsonAt: silent, logAt: silent });
+    await mkdir(join(patientDir, ".factory"), { recursive: true });
+    await writeFile(
+      join(patientDir, ".factory", "config.ts"),
+      'export default { image: "worker:dev", checks: [{ name: "spec", command: "true" }], environment: () => ({}), protectedPaths: [], limits: { attemptIdleTimeoutMs: 3_600_000 } };\n',
+    );
+    const pages: string[] = [];
+
+    for (const dir of [abandonedDir, patientDir]) {
+      const { env, firstLine, stop } = cli(dir);
+      const exit = main(["web", "--port", "0"], env);
+      pages.push(await (await fetch(urlOf(await firstLine))).text());
+      stop.abort();
+      expect(await exit).toBe(0);
+    }
+
+    expect(pages[0]).toContain(">abandoned<");
+    expect(pages[1]).toContain(">running<");
   });
 
   it("should take the target repo from the argument", async () => {

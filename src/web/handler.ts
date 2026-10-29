@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { abandonedLogs } from "../coordinator/abandoned.ts";
 import { readRunEntries, readRunEntry } from "../coordinator/run-history.ts";
 import { summarizeRuns } from "../coordinator/stats.ts";
 import { page } from "./html.ts";
@@ -16,6 +17,7 @@ export interface WebRequest {
   repoDir: string;
   port: number;
   now: Date;
+  idleTimeoutMs: number;
 }
 
 export interface WebResponse {
@@ -35,11 +37,11 @@ function refusal(status: number, title: string): WebResponse {
   return html(status, page(title, `<h1>${title}</h1>`));
 }
 
-async function runPage(logsDir: string, runId: string, now: Date): Promise<WebResponse | null> {
+async function runPage(logsDir: string, runId: string, now: Date, idleTimeoutMs: number): Promise<WebResponse | null> {
   const read = await readRunEntry(logsDir, runId);
   if (read.kind !== "found") return null;
   const logUrl = await logLinks(runId, join(logsDir, runId), read.entry.log);
-  return html(200, runView({ entry: read.entry, now, logUrl }));
+  return html(200, runView({ entry: read.entry, now, idleTimeoutMs, logUrl }));
 }
 
 async function runLog(logsDir: string, runId: string, segments: string[]): Promise<WebResponse | null> {
@@ -55,10 +57,13 @@ export async function handleRequest(request: WebRequest): Promise<WebResponse> {
   const route = matchRoute(request.path);
   if (route.kind === "home") {
     const { runs, unreadable } = await readRunEntries(logsDir);
-    const stats = summarizeRuns(runs.map((entry) => entry.log));
-    return html(200, homeView({ runs, stats, unreadable, now: request.now }));
+    const stats = summarizeRuns(
+      runs.map((entry) => entry.log),
+      abandonedLogs(runs, request.now, request.idleTimeoutMs),
+    );
+    return html(200, homeView({ runs, stats, unreadable, now: request.now, idleTimeoutMs: request.idleTimeoutMs }));
   }
-  if (route.kind === "run") return (await runPage(logsDir, route.runId, request.now)) ?? refusal(404, "404 Not Found");
+  if (route.kind === "run") return (await runPage(logsDir, route.runId, request.now, request.idleTimeoutMs)) ?? refusal(404, "404 Not Found");
   if (route.kind === "log") return (await runLog(logsDir, route.runId, route.segments)) ?? refusal(404, "404 Not Found");
   return refusal(404, "404 Not Found");
 }

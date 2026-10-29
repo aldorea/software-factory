@@ -8,10 +8,12 @@ function list(values: readonly string[]): string {
   return values.length === 0 ? "ninguno" : values.map(escapeHtml).join(", ");
 }
 
-function attemptItem(attempt: AttemptRecord, logUrl: LogUrl): string {
+export type AttemptAbandoned = (attempt: AttemptRecord) => boolean;
+
+function attemptItem(attempt: AttemptRecord, logUrl: LogUrl, abandoned: AttemptAbandoned): string {
   const lines = [
     `Intento ${attempt.number}: ${attempt.agent.agent} / ${attempt.agent.model}`,
-    `Resultado: ${attempt.outcome}`,
+    `Resultado: ${abandoned(attempt) ? "abandoned" : attempt.outcome}`,
   ];
   if (attempt.detail !== undefined) lines.push(`Detalle: ${attempt.detail}`);
   if (attempt.failure !== undefined) lines.push(`Fallo: ${attempt.failure.description}`);
@@ -20,9 +22,9 @@ function attemptItem(attempt: AttemptRecord, logUrl: LogUrl): string {
   return `<li class="attempt">${[...lines.map(escapeHtml), ...logAnchors(logUrl(attempt.logPath), RAW_LOG)].join("<br>\n")}</li>`;
 }
 
-function attemptsList(attempts: readonly AttemptRecord[], logUrl: LogUrl): string {
+function attemptsList(attempts: readonly AttemptRecord[], logUrl: LogUrl, abandoned: AttemptAbandoned): string {
   if (attempts.length === 0) return "";
-  return titledList("h4", "Intentos", attempts.map((attempt) => attemptItem(attempt, logUrl)));
+  return titledList("h4", "Intentos", attempts.map((attempt) => attemptItem(attempt, logUrl, abandoned)));
 }
 
 function verifierItem(record: VerifierRecord, logUrl: LogUrl): string {
@@ -80,7 +82,7 @@ function followUpsList(followUps: readonly FollowUpRecord[] | undefined): string
   return titledList("h4", "Follow-up tasks", followUps.map(followUpItem));
 }
 
-function subtaskBlock(subtask: SubtaskRecord, logUrl: LogUrl): string {
+function subtaskBlock(subtask: SubtaskRecord, logUrl: LogUrl, abandoned: AttemptAbandoned): string {
   return [
     `<section class="subtask">`,
     `<h3>${escapeHtml(subtask.id)}</h3>`,
@@ -89,7 +91,7 @@ function subtaskBlock(subtask: SubtaskRecord, logUrl: LogUrl): string {
     `<p>Branch: ${escapeHtml(subtask.branch)}</p>`,
     `<p>Scope extensions: ${list(subtask.scopeExtensions)}</p>`,
     blockedBlock(subtask),
-    attemptsList(subtask.attempts, logUrl),
+    attemptsList(subtask.attempts, logUrl, abandoned),
     `<p>${subtask.gateRejections} rechazos del gate</p>`,
     `<p>${subtask.verifierRejections} rechazos del independent verifier</p>`,
     gateBlock(subtask.gate, logUrl),
@@ -98,7 +100,7 @@ function subtaskBlock(subtask: SubtaskRecord, logUrl: LogUrl): string {
   ].filter(Boolean).join("\n");
 }
 
-export function subtasksSection(subtasks: readonly SubtaskRecord[], logUrl: LogUrl): string {
-  const body = subtasks.length === 0 ? ["<p>Sin subtareas</p>"] : subtasks.map((subtask) => subtaskBlock(subtask, logUrl));
+export function subtasksSection(subtasks: readonly SubtaskRecord[], logUrl: LogUrl, abandoned: AttemptAbandoned): string {
+  const body = subtasks.length === 0 ? ["<p>Sin subtareas</p>"] : subtasks.map((subtask) => subtaskBlock(subtask, logUrl, abandoned));
   return ["<h2>Subtareas</h2>", ...body].join("\n");
 }

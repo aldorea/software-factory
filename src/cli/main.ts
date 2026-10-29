@@ -3,11 +3,12 @@ import { parseArgs } from "node:util";
 import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../commands/approve.ts";
 import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
 import type { ResolvedConfig, Role, RoleChoice } from "../config/config.ts";
-import { loadConfig } from "../config/load.ts";
+import { attemptIdleTimeoutMs, loadConfig } from "../config/load.ts";
 import { chooseRole, parseRoleFlag, ROLES } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
+import { abandonedLogs, lastChange, runAbandoned } from "../coordinator/abandoned.ts";
 import { defaultOrigin, resumeDefaults } from "../coordinator/resume.ts";
-import { latestRunLog, readRunLogs } from "../coordinator/run-history.ts";
+import { latestRunEntry, readRunEntries } from "../coordinator/run-history.ts";
 import { runIssue } from "../coordinator/run.ts";
 import { formatStats, summarizeRuns } from "../coordinator/stats.ts";
 import type { Verifier } from "../coordinator/verifier.ts";
@@ -131,7 +132,11 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     return 1;
   }
   const config = await loadConfig(repoDir);
-  const previous = await latestRunLog(join(repoDir, ".factory", "logs"), issue);
+  const latest = await latestRunEntry(join(repoDir, ".factory", "logs"), issue);
+  const previous = latest?.log ?? null;
+  if (latest !== null && runAbandoned(latest, env.clock.now(), config.limits.attemptIdleTimeoutMs)) {
+    env.out(`run ${latest.log.runId} of #${issue} was abandoned at ${clockTime(lastChange(latest))}; starting a new run`);
+  }
   const defaults = resumeDefaults(previous, config.roles);
   const flagged: Partial<Record<Role, RoleChoice>> = {};
   for (const role of ROLES) {
@@ -178,6 +183,10 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
   return 0;
 }
 
+function clockTime(at: Date): string {
+  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+}
+
 async function refine(repoDir: string, issue: number, env: CliEnv): Promise<number> {
   try {
     const workspace = await prepareRefinement({ repoDir, issue, github: env.github(repoDir) });
@@ -209,8 +218,10 @@ async function stats(args: string[], env: CliEnv): Promise<number> {
     return 2;
   }
   try {
-    const { logs, unreadable } = await readRunLogs(join(resolve(env.cwd, args[0] ?? "."), ".factory", "logs"));
-    env.out(formatStats(summarizeRuns(logs), unreadable));
+    const repoDir = resolve(env.cwd, args[0] ?? ".");
+    const { runs, unreadable } = await readRunEntries(join(repoDir, ".factory", "logs"));
+    const abandoned = abandonedLogs(runs, env.clock.now(), await attemptIdleTimeoutMs(repoDir));
+    env.out(formatStats(summarizeRuns(runs.map((entry) => entry.log), abandoned), unreadable));
     return 0;
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);
