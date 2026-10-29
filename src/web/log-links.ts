@@ -1,7 +1,7 @@
 import type { RunLog } from "../coordinator/run-log.ts";
 import { runLogSegments, runLogUrl, type LogUrl } from "./log-path.ts";
 import { resolveRunFile } from "./run-file.ts";
-import { logPathsOf } from "./run-log-paths.ts";
+import { logPathsOf } from "../coordinator/run-log-paths.ts";
 
 export async function logLinks(runId: string, runDir: string, log: RunLog): Promise<LogUrl> {
   const urls = new Map<string, string>();

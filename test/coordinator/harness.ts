@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { approveSpec } from "../../src/commands/approve.ts";
+import type { ActivityEntry } from "../../src/coordinator/ports.ts";
 import { runIssue, type RunRequest } from "../../src/coordinator/run.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
@@ -121,9 +122,10 @@ export function harness(target: Target, script: AttemptScript, faults: WorkerFau
   };
   const verifier = new FakeVerifier();
   const progress: string[] = [];
+  const activity: ActivityEntry[] = [];
   const run = () =>
-    runIssue(request, { runner, verifier, github: target.github, notifier, clock, progress: (line) => progress.push(line) });
-  return { runner, verifier, notifier, clock, progress, run };
+    runIssue(request, { runner, verifier, github: target.github, notifier, clock, progress: (line) => progress.push(line), activity: (entry) => activity.push(entry) });
+  return { runner, verifier, notifier, clock, progress, activity, run };
 }
 
 export const writesHello: AttemptScript = () => ({ files: { "src/greeting.txt": "hello\n" }, commit: "Write the greeting" });

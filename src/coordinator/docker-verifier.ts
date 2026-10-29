@@ -23,7 +23,7 @@ export function configuredVerifier(
   clock: Clock,
 ): Verifier {
   return {
-    async judge(question) {
+    async judge(question, onActivity) {
       const variable = CREDENTIAL_VARIABLES[role.agent];
       const credential = credentials[role.agent];
       if (!credential) throw new Error(`${variable} is not set; the ${role.agent} verifier needs it`);
@@ -33,14 +33,14 @@ export function configuredVerifier(
         env: { [variable]: credential },
         idleTimeoutMs: config.limits.attemptIdleTimeoutMs,
         clock,
-      }).judge(question);
+      }).judge(question, onActivity);
     },
   };
 }
 
 export function dockerVerifier(setup: VerifierSetup): Verifier {
   return {
-    async judge(question) {
+    async judge(question, onActivity) {
       const prompt = renderTemplate(await readPromptTemplate("verifier"), {
         criterion: question.criterion,
         test: question.test,
@@ -51,6 +51,7 @@ export function dockerVerifier(setup: VerifierSetup): Verifier {
         agent: { kind: setup.role.agent, model: setup.role.model },
         prompt,
         logPath: question.logPath,
+        ...(onActivity ? { onActivity } : {}),
         limits: { deadline: new Date(setup.clock.now().getTime() + QUESTION_TIMEOUT_MS), idleTimeoutMs: setup.idleTimeoutMs },
       });
       return {

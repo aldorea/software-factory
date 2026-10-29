@@ -40,9 +40,15 @@ export async function web(args: string[], env: WebEnv, usage: string): Promise<n
     env.err(usage);
     return 2;
   }
+  const repoDir = resolve(env.cwd, parsed.repoArg ?? ".");
   let server;
   try {
-    server = await startWebServer({ repoDir: resolve(env.cwd, parsed.repoArg ?? "."), port: parsed.port, clock: env.clock, err: env.err });
+    server = await startWebServer({
+      repoDir,
+      port: parsed.port,
+      clock: env.clock,
+      err: env.err,
+    });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     env.err(

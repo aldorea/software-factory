@@ -1,13 +1,16 @@
 import type { SupervisedProcess } from "./supervise.ts";
-import type { AgentKind, AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
+import type { ActivityEvent, AgentKind, AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
 
 export interface AgentCapabilities {
   readsTokenUsage: boolean;
   detectsPlanLimit: boolean;
   deniesEveryTool: boolean;
+  startsInteractiveSession: boolean;
 }
 
-export type Role = "workers" | "verifier" | "tester";
+export type RunRole = "workers" | "verifier" | "tester";
+
+export type Role = RunRole | "refinement";
 
 export type UsageReading = { ok: true; usage: TokenUsage } | { ok: false; problem: string };
 
@@ -18,10 +21,16 @@ export interface UsageProbe {
 
 export interface AgentStream {
   onLine(line: string): void;
+  activity?(line: string): ActivityEvent[];
+  finish?(outcome: AttemptOutcome): ActivityEvent[];
   usage(): TokenUsage;
   usageProbe?: UsageProbe;
   plan(): PlanStatus | undefined;
   outcome(supervised: SupervisedProcess): AttemptOutcome;
+}
+
+export interface StreamOptions {
+  cwd?: string;
 }
 
 export interface AgentAdapter {
@@ -30,7 +39,7 @@ export interface AgentAdapter {
   capabilities: AgentCapabilities;
   command(model: string): string[];
   isFinalLine?(line: string): boolean;
-  createStream(): AgentStream;
+  createStream(options?: StreamOptions): AgentStream;
 }
 
 export function emptyUsage(): TokenUsage {

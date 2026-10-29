@@ -160,6 +160,8 @@ async function gate(context: RunContext, request: GateRequest): Promise<GateDeci
         texts: criteriaText(issue.body),
         logDir: context.runDir,
         label: `${label}-attempt-${attempt}`,
+        onActivity: (criterion, event) =>
+          context.ports.activity?.({ source: `verifier ${criterion}`, at: context.ports.clock.now(), event }),
       })
     : NO_JUDGMENT;
   if (judgment.usage !== undefined) {
@@ -253,8 +255,13 @@ async function workInWorker(context: RunContext, request: WorkerRequest): Promis
       limits: { ...stopLimits(config, workers), attemptIdleTimeoutMs: config.limits.attemptIdleTimeoutMs },
       runStartedAt: context.startedAt,
       runTokens: () => agentRunTokens(context.log, workers.agent),
-      attempt: (prompt, attemptLimits) =>
-        inStage("attempt", () => worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits)),
+      attempt: (prompt, attemptLimits, hooks) =>
+        inStage("attempt", () =>
+          worker.attempt({ kind: workers.agent, model: workers.model }, prompt, attemptLimits, {
+            ...hooks,
+            onActivity: (event) => context.ports.activity?.({ source: subtask.id, at: context.ports.clock.now(), event }),
+          }),
+        ),
       gate: request.gate,
       extendScope: (requested) => extendScope(context, subtask, requested),
       save: () => context.save(),

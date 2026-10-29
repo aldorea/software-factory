@@ -1,3 +1,4 @@
+import { attemptAbandoned, runStatus } from "../coordinator/abandoned.ts";
 import type { RunEntry } from "../coordinator/run-history.ts";
 import type { AgentChangeRecord, EvidenceBranchRecord, RunBlockRecord, RunLog } from "../coordinator/run-log.ts";
 import type { RoleChoice } from "../config/config.ts";
@@ -95,18 +96,19 @@ function linksSection({ pullRequest, evidence }: RunLog): string {
 
 export function runView({ entry, now, logUrl }: RunData): string {
   const { log } = entry;
+  const status = runStatus(entry, now);
   const body = [
     `<p><a href="/">Runs</a></p>`,
     `<h1>#${escapeHtml(String(log.issue))} ${escapeHtml(log.runId)}</h1>`,
-    `<p>Resultado: ${badge(log.result)}</p>`,
+    `<p>Resultado: ${badge(status)}</p>`,
     `<p>Último cambio: ${escapeHtml(relativeTime(entry.modifiedAt, now))}</p>`,
     linksSection(log),
     pauseSection(log),
     blockSection(log, logUrl),
     agentsSection(log),
     criteriaSection(log),
-    subtasksSection(log.subtasks, logUrl),
+    subtasksSection(log.subtasks, logUrl, (attempt) => attemptAbandoned(attempt, entry, now)),
     verificationSection(log.verification, logUrl),
   ].filter(Boolean);
-  return page(`run ${log.runId}`, body.join("\n"), { reload: shouldReload([log]) });
+  return page(`run ${log.runId}`, body.join("\n"), { reload: shouldReload(status === "running" ? [log] : []) });
 }

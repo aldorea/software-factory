@@ -53,12 +53,12 @@ describe("integration branch name", () => {
 });
 
 describe("refinement launch", () => {
-  it("should start claude in the worktree with the refinement plugin of this repo and the issue as the skill argument", () => {
-    const launch = refineLaunch({ worktree: "/target/.factory/worktrees/42-x", issue: 42, factoryRoot: "/factory" });
+  it("should start claude in the worktree with the refinement plugin of this repo, the chosen model and the issue as the skill argument", () => {
+    const launch = refineLaunch({ worktree: "/target/.factory/worktrees/42-x", issue: 42, factoryRoot: "/factory", model: "sonnet" });
 
     expect(launch).toEqual({
       command: "claude",
-      args: ["--plugin-dir", "/factory/plugins/refinement", "/factory:refine 42"],
+      args: ["--plugin-dir", "/factory/plugins/refinement", "--model", "sonnet", "/factory:refine 42"],
       cwd: "/target/.factory/worktrees/42-x",
       env: { FACTORY_CLI: "/factory/src/cli/factory.ts" },
     });
@@ -66,7 +66,7 @@ describe("refinement launch", () => {
 
   it("should ship the plugin that the launch names, with a skill called refine that ends on factory validate", async () => {
     const root = join(import.meta.dirname, "..", "..");
-    const launch = refineLaunch({ worktree: "/w", issue: 1, factoryRoot: root });
+    const launch = refineLaunch({ worktree: "/w", issue: 1, factoryRoot: root, model: "sonnet" });
     const pluginDir = launch.args[1] as string;
 
     const manifest = JSON.parse(await readFile(join(pluginDir, ".claude-plugin", "plugin.json"), "utf8"));

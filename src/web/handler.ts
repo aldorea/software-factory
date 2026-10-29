@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { abandonedLogs } from "../coordinator/abandoned.ts";
 import { readRunEntries, readRunEntry } from "../coordinator/run-history.ts";
 import { summarizeRuns } from "../coordinator/stats.ts";
 import { page } from "./html.ts";
@@ -55,7 +56,10 @@ export async function handleRequest(request: WebRequest): Promise<WebResponse> {
   const route = matchRoute(request.path);
   if (route.kind === "home") {
     const { runs, unreadable } = await readRunEntries(logsDir);
-    const stats = summarizeRuns(runs.map((entry) => entry.log));
+    const stats = summarizeRuns(
+      runs.map((entry) => entry.log),
+      abandonedLogs(runs, request.now),
+    );
     return html(200, homeView({ runs, stats, unreadable, now: request.now }));
   }
   if (route.kind === "run") return (await runPage(logsDir, route.runId, request.now)) ?? refusal(404, "404 Not Found");

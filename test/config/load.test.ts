@@ -108,6 +108,15 @@ describe("loadConfig", () => {
     expect((await loadConfig(dir)).roles.tester).toEqual({ agent: "opencode", model: "opencode-go/kimi-k2" });
   });
 
+  it("should accept the default refinement of Claude Code and refuse OpenCode there, because it cannot start the refinement skill", async () => {
+    const withRefinement = (choice: string) => VALID.replace("  roles: {\n", `  roles: {\n    refinement: ${choice},\n`);
+    const accepted = await repoWithConfig(withRefinement('{ agent: "claude-code", model: "opus" }'));
+    const refused = await repoWithConfig(withRefinement('{ agent: "opencode", model: "opencode-go/kimi-k2" }'));
+
+    expect((await loadConfig(accepted)).roles.refinement).toEqual({ agent: "claude-code", model: "opus" });
+    await expect(loadConfig(refused)).rejects.toThrow("roles.refinement: opencode cannot serve the refinement");
+  });
+
   it("should load a config with no default agents, because the flags or the prompt of factory run can give them", async () => {
     const dir = await repoWithConfig(VALID.replace(/  roles: \{[\s\S]*?\n  \},\n/, ""));
 

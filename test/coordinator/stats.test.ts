@@ -46,7 +46,7 @@ describe("the summary of the run logs of a repo", () => {
   it("should count the runs by result", () => {
     const stats = summarizeRuns(history());
     expect(stats.runs).toBe(4);
-    expect(stats.results).toEqual({ ready: 2, draft: 1, paused: 1, running: 0 });
+    expect(stats.results).toEqual({ ready: 2, draft: 1, paused: 1, running: 0, abandoned: 0 });
   });
 
   it("should add up the criteria that pass, the blocked ones and the human ones", () => {
@@ -68,6 +68,20 @@ describe("the summary of the run logs of a repo", () => {
     expect(stats.cost.perSubtask.count).toBe(6);
     expect(stats.cost.perSubtask.attempts).toBeCloseTo(1);
     expect(stats.cost.perSubtask.maxCountedTokens).toBe(4000);
+  });
+
+  it("should count an attempt that has no outcome yet as an attempt that spent no tokens, without breaking the summary", () => {
+    const unfinished = { ...attemptRecord("claude-code", 0, 0), number: 2, outcome: "running" as const };
+    const { endedAt: _endedAt, ...withoutEnd } = unfinished;
+    const run = runRecord(0, [subtaskRecord("S1", { attempts: [attemptRecord("claude-code", 100, 50), withoutEnd] })], { result: "running" });
+
+    const stats = summarizeRuns([run]);
+
+    expect(stats.results.running).toBe(1);
+    expect(stats.cost.attempts).toBe(2);
+    expect(stats.cost.countedTokens).toBe(150);
+    expect(stats.perAgent["claude-code"]).toMatchObject({ attempts: 2, countedTokens: 150 });
+    expect(formatStats(stats)).toContain("Attempts: 2");
   });
 
   it("should split runs, attempts, tokens and pauses per agent to compare the subscriptions", () => {
@@ -144,6 +158,20 @@ describe("the printed summary", () => {
     expect(text).toContain("Worker-layer failures: container-start 1");
     expect(text).toContain("claude-code: 3 runs, 5 attempts, 11500 tokens, 0 pauses");
     expect(text).toContain("opencode: 1 run, 1 attempt, 150 tokens, 1 pause");
+  });
+
+  it("should count the abandoned runs apart from the running ones and the finished ones", () => {
+    const running = { ...cleanRun(4), result: "running" as const };
+    const abandoned = { ...cleanRun(5), result: "running" as const };
+    const stats = summarizeRuns([...history(), running, abandoned], new Set([abandoned]));
+
+    expect(stats.runs).toBe(6);
+    expect(stats.results).toEqual({ ready: 2, draft: 1, paused: 1, running: 1, abandoned: 1 });
+    expect(formatStats(stats)).toContain("Runs: 6 (ready 2, draft 1, paused 1, running 1, abandoned 1)");
+  });
+
+  it("should not mention abandoned runs when there are none", () => {
+    expect(formatStats(summarizeRuns(history()))).not.toContain("abandoned");
   });
 
   it("should say there were no worker-layer failures when there were none", () => {

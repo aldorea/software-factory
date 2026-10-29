@@ -6,7 +6,7 @@ import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { criteriaText } from "../spec/issue.ts";
 import { emptyUsage } from "../workers/agent-adapter.ts";
 import { inStage } from "../workers/failures.ts";
-import type { AttemptOutcome, AttemptResult } from "../workers/types.ts";
+import type { ActivityEvent, AttemptOutcome, AttemptResult } from "../workers/types.ts";
 import { inCheckContainer } from "./check-container.ts";
 import { TESTER_EVIDENCE } from "./evidence-branch.ts";
 import { filesIn, startApp } from "./evidence-collection.ts";
@@ -64,7 +64,9 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
         if (appProblem !== null) return { kind: "app-problem", problem: appProblem };
         const deadline = new Date(context.ports.clock.now().getTime() + TESTER_TIMEOUT_MS);
         const limits = { deadline, idleTimeoutMs: config.limits.attemptIdleTimeoutMs };
-        return { kind: "attempted", result: await inStage("attempt", () => worker.attempt({ kind: tester.agent, model: tester.model }, prompt, limits)) };
+        const hooks = { onActivity: (event: ActivityEvent) => context.ports.activity?.({ source: "tester", at: context.ports.clock.now(), event }) };
+        const agent = { kind: tester.agent, model: tester.model };
+        return { kind: "attempted", result: await inStage("attempt", () => worker.attempt(agent, prompt, limits, hooks)) };
       },
     );
     if (attempted === null) return tested(tester, { error: "A failure of the worker layer stopped the acceptance tester." });

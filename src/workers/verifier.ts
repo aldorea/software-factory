@@ -17,7 +17,7 @@ import {
 import { exec, execOk } from "./sh.ts";
 import { supervise, type SupervisedProcess } from "./supervise.ts";
 import { readUsage } from "./usage.ts";
-import type { AgentSpec, AttemptLimits, AttemptOutcome, AttemptResult, ExecResult } from "./types.ts";
+import type { ActivityEvent, ActivitySink, AgentKind, AgentSpec, AttemptLimits, AttemptOutcome, AttemptResult, ExecResult } from "./types.ts";
 
 const WORKDIR = "/home/agent/verifier";
 const CONFIG_FILE = "opencode.jsonc";
@@ -40,6 +40,7 @@ export interface VerifierRequest {
   prompt: string;
   logPath: string;
   limits: AttemptLimits;
+  onActivity?: ActivitySink;
 }
 
 export interface VerifierResult extends AttemptResult {
@@ -79,11 +80,28 @@ function verifierSession(agent: AgentSpec): VerifierSession {
   };
 }
 
+export interface VerifierActivity {
+  onLine(line: string): ActivityEvent[];
+  finish(outcome: AttemptOutcome): ActivityEvent[];
+}
+
+export function verifierActivity(kind: AgentKind): VerifierActivity {
+  const stream = adapterFor(kind).createStream();
+  return {
+    onLine: (line) => {
+      stream.onLine(line);
+      return stream.activity?.(line) ?? [];
+    },
+    finish: (outcome) => stream.finish?.(outcome) ?? [],
+  };
+}
+
 export async function askVerifier(request: VerifierRequest): Promise<VerifierResult> {
   const container = `factory-verifier-${randomUUID()}`;
   const secretsDir = await mkdtemp(join(tmpdir(), "factory-"));
   const startedAt = new Date();
   const session = verifierSession(request.agent);
+  const activity = verifierActivity(request.agent.kind);
   try {
     const envFile = join(secretsDir, "env");
     await writeFile(envFile, toEnvFile(request.env), { mode: 0o600 });
@@ -101,7 +119,12 @@ export async function askVerifier(request: VerifierRequest): Promise<VerifierRes
       logPath: request.logPath,
       deadline: request.limits.deadline,
       idleTimeoutMs: request.limits.idleTimeoutMs,
-      onLine: session.onLine,
+      onLine: (line) => {
+        session.onLine(line);
+        const { onActivity } = request;
+        if (onActivity === undefined) return;
+        for (const event of activity.onLine(line)) onActivity(event);
+      },
       terminate: async () => {
         await exec("docker", ["exec", container, "pkill", "-KILL", "-f", adapterFor(request.agent.kind).processName]);
       },
@@ -110,6 +133,7 @@ export async function askVerifier(request: VerifierRequest): Promise<VerifierRes
     const listing = await execOk("docker", ["exec", container, "ls", "-A", WORKDIR]);
 
     const outcome = session.outcome(supervised, listing);
+    for (const event of activity.finish(outcome)) request.onActivity?.(event);
     const reading = await session.usage(outcome, (command) =>
       exec("docker", ["exec", "-w", WORKDIR, "-e", `PWD=${WORKDIR}`, container, ...command]),
     );

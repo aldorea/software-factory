@@ -1,3 +1,4 @@
+import { runStatus } from "../coordinator/abandoned.ts";
 import type { RunEntry } from "../coordinator/run-history.ts";
 import { anchor, badge, escapeHtml, link, page, titledList } from "./html.ts";
 import { relativeTime } from "./relative-time.ts";
@@ -30,7 +31,7 @@ function runRow(entry: RunEntry, now: Date): string {
     "<tr>",
     `<td>#${escapeHtml(String(log.issue))}</td>`,
     `<td>${runIdCell(entry)}</td>`,
-    `<td>${badge(log.result)}</td>`,
+    `<td>${badge(runStatus(entry, now))}</td>`,
     `<td>${escapeHtml(relativeTime(entry.modifiedAt, now))}</td>`,
     `<td>${pullRequestCell(entry)}</td>`,
     "</tr>",
@@ -60,6 +61,6 @@ export function homeView({ runs, stats, unreadable, now }: HomeData): string {
   return page(
     "factory web",
     [statistics, "<h1>Runs</h1>", runsTable(newestFirst, now), unreadableList(unreadable)].filter(Boolean).join("\n"),
-    { reload: shouldReload(runs.map((entry) => entry.log)) },
+    { reload: shouldReload(runs.filter((entry) => runStatus(entry, now) === "running").map((entry) => entry.log)) },
   );
 }

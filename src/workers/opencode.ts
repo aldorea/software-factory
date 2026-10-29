@@ -1,6 +1,7 @@
-import { emptyUsage, type AgentAdapter, type UsageProbe, type UsageReading } from "./agent-adapter.ts";
+import { firstLine, toolTarget } from "./activity.ts";
+import { emptyUsage, type AgentAdapter, type StreamOptions, type UsageProbe, type UsageReading } from "./agent-adapter.ts";
 import type { SupervisedProcess } from "./supervise.ts";
-import type { AttemptOutcome } from "./types.ts";
+import type { ActivityEvent, AttemptOutcome } from "./types.ts";
 
 export const SUBSCRIPTION_PROVIDER = "opencode-go";
 
@@ -66,6 +67,29 @@ export function applyOpenCodeLine(state: OpenCodeStreamState, line: string): Ope
   }
 
   return state;
+}
+
+export function openCodeActivity(line: string, cwd?: string): ActivityEvent[] {
+  let event: unknown;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return [];
+  }
+  if (!isRecord(event) || !isRecord(event.part)) return [];
+  if (event.type === "text" && typeof event.part.text === "string") {
+    const text = firstLine(event.part.text);
+    return text === undefined ? [] : [{ kind: "message", text }];
+  }
+  if (event.type === "tool_use" && typeof event.part.tool === "string") {
+    const target = isRecord(event.part.state) ? toolTarget(event.part.state.input, cwd) : undefined;
+    return [{ kind: "tool", tool: event.part.tool, ...(target !== undefined ? { target } : {}) }];
+  }
+  return [];
+}
+
+export function openCodeFinish(outcome: AttemptOutcome): ActivityEvent[] {
+  return [{ kind: "end", outcome: outcome.kind === "completed" ? "completed" : "failed" }];
 }
 
 function sessionIdOf(event: object): string | undefined {
@@ -166,14 +190,16 @@ export function openCodeUsageProbe(sessionId: () => string | undefined): UsagePr
 export const openCodeAdapter: AgentAdapter = {
   kind: "opencode",
   processName: "opencode",
-  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: true },
+  capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: true, startsInteractiveSession: false },
   command: (model) => openCodeArgs(model),
-  createStream() {
+  createStream(options) {
     let state = initialOpenCodeState();
     return {
       onLine(line) {
         state = applyOpenCodeLine(state, line);
       },
+      activity: (line) => openCodeActivity(line, options?.cwd),
+      finish: openCodeFinish,
       usage: emptyUsage,
       usageProbe: openCodeUsageProbe(() => state.sessionId),
       plan: () => undefined,

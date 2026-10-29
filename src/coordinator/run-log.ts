@@ -18,13 +18,13 @@ export type BlockType = (typeof BLOCK_TYPES)[number];
 export interface AttemptRecord {
   number: number;
   agent: RoleChoice;
-  outcome: AttemptOutcome["kind"];
+  outcome: AttemptOutcome["kind"] | "running";
   detail?: string;
   failure?: { signature: string; description: string; output?: string };
   usage: TokenUsage;
   logPath: string;
   startedAt: string;
-  endedAt: string;
+  endedAt?: string;
 }
 
 export interface CheckRecord {
@@ -218,6 +218,7 @@ export interface RunLog {
   resetsAt?: string;
   pauses?: PauseRecord[];
   maxParallel?: number;
+  attemptIdleTimeoutMs?: number;
   agents: AgentsRecord;
   criteria: CriteriaRecord;
   cost: CostRecord;

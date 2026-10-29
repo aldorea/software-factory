@@ -7,9 +7,11 @@ import { macosNotifier } from "../notify/macos.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import { DockerWorkerRunner } from "../workers/docker-runner.ts";
 import { dockerProblem } from "../workers/docker.ts";
-import { askRoleInTerminal } from "./ask-role.ts";
+import { askRolesInTerminal } from "./ask-role.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
+import { CLEAR_LINE } from "./terminal-render.ts";
+import { terminalFeatures } from "./tty.ts";
 
 const clock = { now: () => new Date() };
 
@@ -17,6 +19,18 @@ const stop = new AbortController();
 if (process.argv[2] === "web") {
   process.once("SIGINT", () => stop.abort());
   process.once("SIGTERM", () => stop.abort());
+}
+
+const features = terminalFeatures({ stdout: Boolean(process.stdout.isTTY), stdin: Boolean(process.stdin.isTTY) });
+const terminal =
+  features.screen
+    ? { columns: () => process.stdout.columns || 80, write: (text: string) => void process.stdout.write(text) }
+    : undefined;
+if (process.argv[2] === "run" && terminal) {
+  process.once("SIGINT", () => {
+    terminal.write(CLEAR_LINE);
+    process.exit(130);
+  });
 }
 
 const credentials = Object.fromEntries(
@@ -37,7 +51,8 @@ process.exitCode = await main(process.argv.slice(2), {
   credentials,
   docker: () => dockerProblem(),
   gh: () => ghProblem(),
-  ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: askRoleInTerminal } : {}),
+  ...(features.menu ? { ask: askRolesInTerminal } : {}),
+  ...(terminal ? { terminal } : {}),
   launch: launchInteractive,
   signal: stop.signal,
   out: (text) => process.stdout.write(`${text}\n`),

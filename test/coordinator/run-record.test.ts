@@ -47,8 +47,86 @@ describe("the run record written by factory run", () => {
     await run();
 
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ result: "running", subtasks: [{ id: "S1", state: "working", attempts: [] }] });
+    expect(seen[0]).toMatchObject({
+      result: "running",
+      subtasks: [{ id: "S1", state: "working", attempts: [{ number: 1, outcome: "running" }] }],
+    });
     expect((await readRunLog(runJsonPath(target.repoDir))).result).toBe("ready");
+  });
+
+  it("should record the attempt as running with the path of its raw log before the attempt ends, so that the log can be read while it grows", async () => {
+    const target = await targetRepo();
+    const seen: RunLog[] = [];
+    const { run } = harness(target, (call) => {
+      seen.push(JSON.parse(readFileSync(join(call.spec.logDir, "run.json"), "utf8")) as RunLog);
+      return writesHello(call);
+    });
+
+    await run();
+
+    expect(seen).toHaveLength(1);
+    const logPath = join(target.repoDir, ".factory", "logs", RUN_ID, "42-S1-attempt-1.jsonl");
+    expect(seen[0]?.subtasks[0]?.attempts).toEqual([
+      {
+        number: 1,
+        agent: { agent: "claude-code", model: "sonnet" },
+        outcome: "running",
+        usage: { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0 },
+        logPath,
+        startedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("should give the outcome to the record of the running attempt, so that the run log holds no duplicate of the attempt", async () => {
+    const target = await targetRepo();
+    const { run } = harness(target, () => ({
+      files: { "src/greeting.txt": "hello\n" },
+      usage: { inputTokens: 7, outputTokens: 3 },
+    }));
+
+    await run();
+
+    const attempts = (await readRunLog(runJsonPath(target.repoDir))).subtasks[0]?.attempts;
+    expect(attempts).toEqual([
+      {
+        number: 1,
+        agent: { agent: "claude-code", model: "sonnet" },
+        outcome: "completed",
+        detail: "done",
+        usage: { inputTokens: 7, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 3 },
+        logPath: join(target.repoDir, ".factory", "logs", RUN_ID, "42-S1-attempt-1.jsonl"),
+        startedAt: expect.any(String),
+        endedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("should not announce a running attempt in the progress lines, and announce it once when it ends", async () => {
+    const target = await targetRepo();
+    let whileWorking: string[] = [];
+    const { run, progress } = harness(target, (call) => {
+      whileWorking = [...progress];
+      return writesHello(call);
+    });
+
+    await run();
+
+    expect(whileWorking.filter((line) => line.includes("attempt"))).toEqual([]);
+    expect(progress.filter((line) => line.includes("attempt"))).toEqual(["S1: attempt 1 completed"]);
+  });
+
+  it("should drop the running record of an attempt that fails in the worker layer, so that no attempt stays running for ever", async () => {
+    const target = await targetRepo();
+    const { run } = harness(target, writesHello, {
+      attempt: () => new WorkerLayerError("usage-unreadable", "attempt", "the usage cannot be read"),
+    });
+
+    await run();
+
+    const log = await readRunLog(runJsonPath(target.repoDir));
+    expect(log.subtasks[0]?.attempts).toEqual([]);
+    expect(log.workerLayerFailures).toHaveLength(1);
   });
 
   it("should record the finished attempt before the gate starts, so that a run interrupted at the gate keeps what the worker spent", async () => {

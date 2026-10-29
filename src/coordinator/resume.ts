@@ -1,10 +1,10 @@
-import type { Role, RoleChoice } from "../config/config.ts";
+import type { Role, RoleChoice, RunRole } from "../config/config.ts";
 import type { AgentChangeRecord, RunLog, SubtaskRecord } from "./run-log.ts";
 
 export function resumeDefaults(
   previous: RunLog | null,
-  configured: Partial<Record<Role, RoleChoice>>,
-): Partial<Record<Role, RoleChoice>> {
+  configured: Partial<Record<RunRole, RoleChoice>>,
+): Partial<Record<RunRole, RoleChoice>> {
   if (previous === null || previous.result !== "paused") return configured;
   const verifier = previous.agents.verifier ?? configured.verifier;
   const tester = previous.agents.tester ?? configured.tester;
@@ -13,6 +13,11 @@ export function resumeDefaults(
     ...(verifier !== undefined ? { verifier } : {}),
     ...(tester !== undefined ? { tester } : {}),
   };
+}
+
+export function defaultOrigin(previous: RunLog | null, role: Role): "config" | "paused run" {
+  if (previous === null || previous.result !== "paused") return "config";
+  return role === "workers" || (role !== "refinement" && previous.agents[role] !== undefined) ? "paused run" : "config";
 }
 
 export interface ResumeInput {
@@ -45,6 +50,9 @@ export function resumedLog({ fresh, previous, merged, now }: ResumeInput): RunLo
   return {
     ...kept,
     result: "running",
+    ...(kept.attemptIdleTimeoutMs === undefined && fresh.attemptIdleTimeoutMs !== undefined
+      ? { attemptIdleTimeoutMs: fresh.attemptIdleTimeoutMs }
+      : {}),
     agents: {
       workers: fresh.agents.workers,
       ...(fresh.agents.verifier !== undefined ? { verifier: fresh.agents.verifier } : {}),
@@ -66,8 +74,9 @@ function continued(fresh: SubtaskRecord, earlier: SubtaskRecord | undefined, mer
     conflictFiles: _conflictFiles,
     ...kept
   } = earlier;
-  if (merged) return { ...kept, criteria: fresh.criteria, branch: fresh.branch, state: "merged" };
-  return { ...kept, criteria: fresh.criteria, branch: fresh.branch, state: "pending" };
+  const attempts = kept.attempts.filter((attempt) => attempt.outcome !== "running");
+  if (merged) return { ...kept, attempts, criteria: fresh.criteria, branch: fresh.branch, state: "merged" };
+  return { ...kept, attempts, criteria: fresh.criteria, branch: fresh.branch, state: "pending" };
 }
 
 function agentChanges(previous: RunLog, fresh: RunLog, now: Date): AgentChangeRecord[] {
