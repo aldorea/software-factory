@@ -3,7 +3,8 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
-import { main, type CliEnv, type RoleQuestion } from "../../src/cli/main.ts";
+import { main, type CliEnv } from "../../src/cli/main.ts";
+import type { RoleEntry } from "../../src/cli/role-menu.ts";
 import type { RoleChoice } from "../../src/config/config.ts";
 import { parseRunLog } from "../../src/coordinator/run-log.ts";
 import type { GitHub } from "../../src/github/github.ts";
@@ -169,23 +170,55 @@ describe("factory run: the choice of the agent of each role", () => {
     expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, tester: KIMI, changes: [] });
   });
 
-  it("should ask in a terminal for each role with no flag, offering every agent and preselecting the config default", async () => {
+  it("should ask once in a terminal with every role, its default and where each value comes from, a flag marking its role as fixed", async () => {
     const repoDir = await runnableRepo();
     const { env } = cli(repoDir);
     expect(await main(["approve", "42"], env)).toBe(0);
-    const questions: RoleQuestion[] = [];
-    env.ask = async (question) => {
-      questions.push(question);
-      return GLM;
+    const asked: RoleEntry[][] = [];
+    env.ask = async (entries) => {
+      asked.push(entries);
+      return { verifier: GLM, tester: GLM };
     };
 
     expect(await main(["run", "42", "--worker-agent", "claude-code:opus"], env)).toBe(0);
 
-    expect(questions).toEqual([
-      { role: "verifier", offered: ["claude-code", "opencode"], preselected: KIMI },
-      { role: "tester", offered: ["claude-code", "opencode"], preselected: SONNET },
+    expect(asked).toEqual([
+      [
+        { role: "workers", offered: ["claude-code", "opencode"], choice: OPUS, origin: "flag" },
+        { role: "verifier", offered: ["claude-code", "opencode"], choice: KIMI, origin: "config" },
+        { role: "tester", offered: ["claude-code", "opencode"], choice: SONNET, origin: "config" },
+      ],
     ]);
     expect((await lastRunLog(repoDir)).agents).toEqual({ workers: OPUS, verifier: GLM, tester: GLM, changes: [] });
+  });
+
+  it("should reject before it asks and before any worker starts a flag that is not an agent and a model", async () => {
+    const repoDir = await runnableRepo();
+    const { env, err, runner } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+    let asked = false;
+    env.ask = async () => {
+      asked = true;
+      return {};
+    };
+
+    expect(await main(["run", "42", "--tester-agent", "gemini:pro"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("gemini is not an agent");
+    expect(asked).toBe(false);
+    expect(runner.workers).toEqual([]);
+  });
+
+  it("should refuse before any worker starts an OpenCode model outside opencode-go/ that the terminal gave", async () => {
+    const repoDir = await runnableRepo();
+    const { env, err, runner } = cli(repoDir);
+    expect(await main(["approve", "42"], env)).toBe(0);
+    env.ask = async () => ({ verifier: { agent: "opencode", model: "opencode/kimi-k2" } });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("the verifier model must be an opencode-go/ model");
+    expect(runner.workers).toEqual([]);
   });
 
   it("should take the config default with no flag outside a terminal", async () => {
@@ -244,7 +277,7 @@ describe("factory run: the choice of the agent of each role", () => {
     expect(runner.workers).toEqual([]);
   });
 
-  it("should ask again on resume with the previous choice preselected, and record the change", async () => {
+  it("should ask again on resume with the previous choice as the default and the paused run as its origin, and record the change", async () => {
     const repoDir = await runnableRepo();
     const paused = cli(repoDir, undefined, () => ({ outcome: { kind: "plan-limit", message: "limit" } }));
     expect(await main(["approve", "42"], paused.env)).toBe(0);
@@ -252,17 +285,17 @@ describe("factory run: the choice of the agent of each role", () => {
     expect((await lastRunLog(repoDir)).result).toBe("paused");
 
     const resumed = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
-    const questions: RoleQuestion[] = [];
-    resumed.env.ask = async (question) => {
-      questions.push(question);
-      return question.role === "workers" ? SONNET : (question.preselected as RoleChoice);
+    const asked: RoleEntry[] = [];
+    resumed.env.ask = async (entries) => {
+      asked.push(...entries);
+      return { workers: SONNET };
     };
     expect(await main(["run", "42"], resumed.env)).toBe(0);
 
-    expect(questions.map((question) => [question.role, question.preselected])).toEqual([
-      ["workers", OPUS],
-      ["verifier", KIMI],
-      ["tester", SONNET],
+    expect(asked.map((entry) => [entry.role, entry.choice, entry.origin])).toEqual([
+      ["workers", OPUS, "paused run"],
+      ["verifier", KIMI, "paused run"],
+      ["tester", SONNET, "paused run"],
     ]);
     expect((await lastRunLog(repoDir)).agents.changes).toEqual([
       { role: "workers", from: OPUS, to: SONNET, at: "2026-10-24T08:00:00.000Z" },
@@ -370,10 +403,10 @@ describe("factory CLI", () => {
   it("should exit non-zero before it loads the config, asks any role or starts a worker when gh reports a problem", async () => {
     const repoDir = await temp.make("cli-no-gh-");
     const { env, err, runner } = cli(repoDir);
-    const questions: RoleQuestion[] = [];
-    env.ask = async (question) => {
-      questions.push(question);
-      return GLM;
+    const questions: RoleEntry[][] = [];
+    env.ask = async (entries) => {
+      questions.push(entries);
+      return {};
     };
 
     const code = await main(["run", "42"], { ...env, gh: async () => "gh is not signed in: run gh auth login" });
@@ -388,14 +421,14 @@ describe("factory CLI", () => {
   it("should exit non-zero before any role question and any worker when gh is not ready, because the pull request needs it", async () => {
     const repoDir = await runnableRepo();
     const { env, err, runner } = cli(repoDir);
-    const questions: RoleQuestion[] = [];
+    const questions: RoleEntry[][] = [];
     expect(await main(["approve", "42"], env)).toBe(0);
 
     const code = await main(["run", "42"], {
       ...env,
       gh: () => ghProblem("factory-test-no-such-gh"),
-      ask: async (question) => {
-        questions.push(question);
+      ask: async (entries) => {
+        questions.push(entries);
         throw new Error("no role question is expected");
       },
     });

@@ -15,6 +15,11 @@ export function resumeDefaults(
   };
 }
 
+export function defaultOrigin(previous: RunLog | null, role: Role): "config" | "paused run" {
+  if (previous === null || previous.result !== "paused") return "config";
+  return role === "workers" || previous.agents[role] !== undefined ? "paused run" : "config";
+}
+
 export interface ResumeInput {
   fresh: RunLog;
   previous: RunLog | null;

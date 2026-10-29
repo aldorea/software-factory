@@ -7,7 +7,7 @@ import { macosNotifier } from "../notify/macos.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import { DockerWorkerRunner } from "../workers/docker-runner.ts";
 import { dockerProblem } from "../workers/docker.ts";
-import { askRoleInTerminal } from "./ask-role.ts";
+import { askRolesInTerminal } from "./ask-role.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
 
@@ -37,7 +37,7 @@ process.exitCode = await main(process.argv.slice(2), {
   credentials,
   docker: () => dockerProblem(),
   gh: () => ghProblem(),
-  ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: askRoleInTerminal } : {}),
+  ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: askRolesInTerminal } : {}),
   launch: launchInteractive,
   signal: stop.signal,
   out: (text) => process.stdout.write(`${text}\n`),

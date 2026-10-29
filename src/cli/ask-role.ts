@@ -1,72 +1,65 @@
 import { emitKeypressEvents } from "node:readline";
-import { createInterface } from "node:readline/promises";
-import type { RoleChoice } from "../config/config.ts";
-import { choiceProblems } from "../config/roles.ts";
-import type { Role } from "../workers/agent-adapter.ts";
-import type { AgentKind } from "../workers/types.ts";
-import type { RoleQuestion } from "./main.ts";
-import { moveSelection, roleMenu, SUGGESTED_MODELS, type MenuOption } from "./role-menu.ts";
+import type { Role, RoleChoice } from "../config/config.ts";
+import { initialMenu, menuChoices, reduceMenu, renderMenu, SUGGESTED_MODELS, type MenuKey, type RoleEntry } from "./role-menu.ts";
 
-const ROLE_NAMES = { workers: "the workers", verifier: "the independent verifier", tester: "the acceptance tester" } as const;
-
-export async function askRoleInTerminal(question: RoleQuestion): Promise<RoleChoice> {
-  const menu = roleMenu(question, SUGGESTED_MODELS);
-  process.stdout.write(`Agent and model of ${ROLE_NAMES[question.role]} (↑/↓, Enter):\n`);
-  const picked = await pick(menu.options, menu.selected);
-  if (picked.model !== undefined) return { agent: picked.agent, model: picked.model };
-  return { agent: picked.agent, model: await typeModel(question.role, picked.agent) };
+interface Keypress {
+  name?: string;
+  ctrl?: boolean;
+  sequence?: string;
 }
 
-function pick(options: MenuOption[], initial: number): Promise<MenuOption> {
+const KEY_NAMES: Record<string, MenuKey> = {
+  up: "up",
+  down: "down",
+  left: "left",
+  right: "right",
+  return: "enter",
+  enter: "enter",
+  escape: "escape",
+  backspace: "backspace",
+};
+
+export function menuKey(text: string | undefined, key: Keypress): MenuKey | null {
+  if (key.ctrl === true && key.name === "c") return "ctrl-c";
+  const named = key.name === undefined ? undefined : KEY_NAMES[key.name];
+  if (named !== undefined) return named;
+  if (text !== undefined && text.length === 1 && text >= " " && text !== "\x7f") return { char: text };
+  return null;
+}
+
+export function askRolesInTerminal(entries: RoleEntry[]): Promise<Partial<Record<Role, RoleChoice>>> {
   const { stdin, stdout } = process;
-  let selected = initial;
-  const draw = (first: boolean) => {
-    if (!first) stdout.write(`\x1b[${options.length}A`);
-    options.forEach((option, index) => {
-      const marker = index === selected ? "\x1b[36m❯" : " ";
-      stdout.write(`\x1b[2K${marker} ${option.agent.padEnd(12)} ${option.model ?? "other model…"}\x1b[0m\n`);
-    });
+  let state = initialMenu(entries, SUGGESTED_MODELS);
+  let drawn = 0;
+  const draw = () => {
+    if (drawn > 0) stdout.write(`\x1b[${drawn}A\r\x1b[J`);
+    const lines = renderMenu(state);
+    for (const line of lines) stdout.write(`${line.startsWith("❯") ? `\x1b[36m${line}\x1b[0m` : line}\n`);
+    drawn = lines.length;
   };
   emitKeypressEvents(stdin);
   stdin.setRawMode(true);
   stdin.resume();
-  draw(true);
+  draw();
   return new Promise((resolve) => {
     const done = () => {
       stdin.off("keypress", onKey);
       stdin.setRawMode(false);
       stdin.pause();
     };
-    const onKey = (_text: string, key: { name?: string; ctrl?: boolean }) => {
-      if (key.ctrl === true && key.name === "c") {
+    const onKey = (text: string | undefined, key: Keypress) => {
+      const pressed = menuKey(text, key);
+      if (pressed === null) return;
+      state = reduceMenu(state, pressed);
+      draw();
+      if (state.outcome === "started") {
+        done();
+        resolve(menuChoices(state));
+      } else if (state.outcome === "cancelled") {
         done();
         process.kill(process.pid, "SIGINT");
-        return;
-      }
-      if (key.name === "up" || key.name === "down") {
-        selected = moveSelection(selected, options.length, key.name);
-        draw(false);
-      } else if (key.name === "return") {
-        done();
-        resolve(options[selected] as MenuOption);
       }
     };
     stdin.on("keypress", onKey);
   });
-}
-
-async function typeModel(role: Role, agent: AgentKind): Promise<string> {
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const hint = agent === "opencode" ? " (opencode-go/…)" : "";
-    for (;;) {
-      const model = (await terminal.question(`Model of ${agent}${hint}: `)).trim();
-      if (model === "") continue;
-      const problems = choiceProblems(role, { agent, model });
-      if (problems.length === 0) return model;
-      for (const problem of problems) process.stdout.write(`${problem}\n`);
-    }
-  } finally {
-    terminal.close();
-  }
 }

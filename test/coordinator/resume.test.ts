@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MERGED_EARLIER, resumedLog } from "../../src/coordinator/resume.ts";
+import { defaultOrigin, MERGED_EARLIER, resumedLog } from "../../src/coordinator/resume.ts";
 import { runRecord, subtaskRecord } from "./run-log-fixtures.ts";
 
 const NOW = new Date("2026-10-02T12:00:00.000Z");
@@ -34,5 +34,25 @@ describe("resumedLog", () => {
 
     expect(log.subtasks.map((record) => record.state)).toEqual(["pending", "merged", "pending"]);
     expect(log.subtasks[1]?.reason).toBe(MERGED_EARLIER);
+  });
+});
+
+describe("defaultOrigin", () => {
+  const paused = (agents: Partial<Record<"verifier" | "tester", { agent: "claude-code"; model: string }>>) => {
+    const log = runRecord(0, [], { result: "paused" });
+    return { ...log, agents: { workers: log.agents.workers, ...agents, changes: [] } };
+  };
+
+  it("should name the config when no run is paused", () => {
+    expect(defaultOrigin(null, "workers")).toBe("config");
+    expect(defaultOrigin(runRecord(0, [], { result: "draft" }), "workers")).toBe("config");
+  });
+
+  it("should name the paused run for the roles it recorded and the config for the role it did not", () => {
+    const previous = paused({ verifier: { agent: "claude-code", model: "opus" } });
+
+    expect(defaultOrigin(previous, "workers")).toBe("paused run");
+    expect(defaultOrigin(previous, "verifier")).toBe("paused run");
+    expect(defaultOrigin(previous, "tester")).toBe("config");
   });
 });

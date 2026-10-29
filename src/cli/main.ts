@@ -4,9 +4,9 @@ import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../com
 import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
 import type { ResolvedConfig, Role, RoleChoice } from "../config/config.ts";
 import { loadConfig } from "../config/load.ts";
-import { chooseRole, parseRoleFlag, ROLES, type ChosenRole } from "../config/roles.ts";
+import { chooseRole, parseRoleFlag, ROLES } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
-import { resumeDefaults } from "../coordinator/resume.ts";
+import { defaultOrigin, resumeDefaults } from "../coordinator/resume.ts";
 import { latestRunLog, readRunLogs } from "../coordinator/run-history.ts";
 import { runIssue } from "../coordinator/run.ts";
 import { formatStats, summarizeRuns } from "../coordinator/stats.ts";
@@ -15,16 +15,10 @@ import type { GitHub } from "../github/github.ts";
 import { initRepo } from "../init/init.ts";
 import { WEB_HOST } from "../web/host.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
-import { agentsForRole } from "../workers/agents.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import type { InteractiveLaunch } from "./launch.ts";
+import { menuEntries, type RoleEntry } from "./role-menu.ts";
 import { web, WEB_USAGE } from "./web.ts";
-
-export interface RoleQuestion {
-  role: Role;
-  offered: AgentKind[];
-  preselected?: RoleChoice;
-}
 
 export interface CliEnv {
   cwd: string;
@@ -37,7 +31,7 @@ export interface CliEnv {
   credentials: Partial<Record<AgentKind, string>>;
   docker(): Promise<string | null>;
   gh(): Promise<string | null>;
-  ask?: (question: RoleQuestion) => Promise<RoleChoice>;
+  ask?: (entries: RoleEntry[]) => Promise<Partial<Record<Role, RoleChoice>>>;
   launch(launch: InteractiveLaunch): Promise<number>;
   signal: AbortSignal;
   out(text: string): void;
@@ -136,10 +130,31 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     return 1;
   }
   const config = await loadConfig(repoDir);
-  const defaults = resumeDefaults(await latestRunLog(join(repoDir, ".factory", "logs"), issue), config.roles);
+  const previous = await latestRunLog(join(repoDir, ".factory", "logs"), issue);
+  const defaults = resumeDefaults(previous, config.roles);
+  const flagged: Partial<Record<Role, RoleChoice>> = {};
+  for (const role of ROLES) {
+    const flag = flags[role];
+    if (flag === undefined) continue;
+    const parsed = parseRoleFlag(role, flag, defaults[role]);
+    if (!parsed.ok) {
+      env.err(`factory: ${parsed.problem}`);
+      return 1;
+    }
+    flagged[role] = parsed.choice;
+  }
+  const prompted =
+    env.ask === undefined
+      ? {}
+      : await env.ask(menuEntries({ roles: ROLES, flagged, defaults, defaultOrigin: (role) => defaultOrigin(previous, role) }));
   const roles: Partial<Record<Role, RoleChoice>> = {};
   for (const role of ROLES) {
-    const chosen = await roleChoice(role, flags[role], defaults[role], env);
+    const chosen = chooseRole({
+      role,
+      ...(flagged[role] ? { flag: flagged[role] } : {}),
+      ...(prompted[role] ? { prompted: prompted[role] } : {}),
+      ...(defaults[role] ? { fallback: defaults[role] } : {}),
+    });
     if (!chosen.ok) {
       env.err(`factory: ${chosen.problem}`);
       return 1;
@@ -160,13 +175,6 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
   );
   env.out(`Run ${report.log.runId}: ${report.result}, ${report.pullRequest.url}`);
   return 0;
-}
-
-async function roleChoice(role: Role, flag: string | undefined, fallback: RoleChoice | undefined, env: CliEnv): Promise<ChosenRole> {
-  if (flag !== undefined) return parseRoleFlag(role, flag, fallback);
-  if (env.ask === undefined) return chooseRole({ role, ...(fallback ? { fallback } : {}) });
-  const prompted = await env.ask({ role, offered: agentsForRole(role), ...(fallback ? { preselected: fallback } : {}) });
-  return chooseRole({ role, prompted });
 }
 
 async function refine(repoDir: string, issue: number, env: CliEnv): Promise<number> {
