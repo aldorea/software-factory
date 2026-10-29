@@ -15,7 +15,7 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 
 | Command | What it does |
 |---|---|
-| `factory refine <n>` | Interactive refinement of issue `<n>` |
+| `factory refine <n> [--refinement-agent <agent>:<model>]` | Interactive refinement of issue `<n>` |
 | `factory validate <n>` | Checks `specs/<n>.md` on the integration branch against the issue and the config, and changes nothing |
 | `factory approve <n>` | Validates the spec and approves it with a hash |
 | `factory run <n>` | Implements, verifies and opens the PR |
@@ -25,11 +25,23 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 
 The target repo is the current directory, or the last argument. The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker is not running, or when `gh` is missing or not signed in (`gh auth status`). It reports every such problem before it loads the config or asks for the agent of any role. To set a repo up, see the [onboarding guide](onboarding.md).
 
-Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from an arrow-key menu of agent and model pairs, with the default of `.factory/config.ts` already selected and an entry per agent to type another model; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. The refinement stays on Claude Code for now. See [ADR 0003](adr/0003-interchangeable-agents.md).
+Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from a menu; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. See [ADR 0003](adr/0003-interchangeable-agents.md).
+
+The menu opens on a summary with the choice of every role, by its name in the glossary, each with its origin: `.factory/config.ts`, the paused run that resumes, or a flag. Enter starts. ↑/↓ selects a role that no flag fixed and → opens its step, which lists agent and model pairs with the current choice selected and an entry per agent to type another model; ← or Esc goes back to the summary and keeps the choice. Ctrl-C cancels and starts nothing. When the paused run reached the plan limit of an agent that the summary still holds and `now` is before its `resetsAt`, the summary warns that the run will pause again:
+
+```
+❯ workers:               claude-code opus (paused run)
+  ⚠ claude-code plan limit until 14:00: the run will pause again
+  independent verifier:  opencode opencode-go/glm-5.3 (config)
+  acceptance tester:     claude-code sonnet (flag)
+Enter to start · → to change a role
+```
+
+Before `factory refine` starts, the developer chooses the agent and the model of the refinement the same way: from `--refinement-agent`, else in a terminal from the same menu with one role, else from `roles.refinement` of `.factory/config.ts`. Only Claude Code is offered until the refinement skill works on another agent ([ADR 0003](adr/0003-interchangeable-agents.md)).
 
 ## Flow
 
-1. **Refine.** `claude` runs in an interactive session in the terminal, on the host, in the worktree of the issue. A refinement skill reads the issue and the code, writes the technical part, and asks only the open decisions (product, ambiguities, doubtful criteria), in rounds, each with a recommended answer. At the end it:
+1. **Refine.** The agent of the refinement runs with the chosen model in an interactive session in the terminal, on the host, in the worktree of the issue. A refinement skill reads the issue and the code, writes the technical part, and asks only the open decisions (product, ambiguities, doubtful criteria), in rounds, each with a recommended answer. At the end it:
    - rewrites the criteria of the issue with IDs `A1`, `A2`…;
    - writes `specs/<n>.md` on the integration branch;
    - posts a comment on the issue with the decisions and their reasons.
@@ -168,7 +180,14 @@ The coordinator never asks me during a run. It records each block in the PR and 
 | Patience, a limit or the environment (for example, the app does not become ready) | `blocked`, with the reason. |
 | A check of the repo fails in the integrated verification while every criterion passes | No subtask owns it, so the coordinator sends no follow-up task and guesses no owner: such a failure is usually a gap in the refinement. The run ends with a draft PR and an `integration-check` block in `run.json` and in the PR, with the check, the SHA of the integration branch and the end of its output. When criteria fail too, their follow-up tasks carry the failed checks instead. |
 
-A macOS notification links to the PR when a run ends, pauses or blocks. While the run works, `factory run` prints one line to the terminal for each change of `run.json` that a developer watches: a subtask that changes state, a finished attempt, the integrated verification, a pause, the result and the PR. Before the run starts, it prints the URL of `factory web`.
+A macOS notification links to the PR when a run ends, pauses or blocks. Before the run starts, `factory run` prints the URL of `factory web`, and a notice when the last run of the issue is abandoned (see [Web view](#web-view)). While the run works, it prints two kinds of line to the terminal, each with the time (`hh:mm:ss`):
+
+- **Progress:** one line for each change of `run.json` that a developer watches: a subtask that changes state, a finished attempt, the integrated verification, a pause, the result and the PR. Its colour follows the result: green for merged, red for blocked, yellow for paused.
+- **Activity:** one line for each event of the activity of an attempt, of an independent verifier question or of the acceptance tester, with its prefix in a colour of its own and the rest dimmed. The prefix is the subtask (`S2`), `verifier` and the criterion (`verifier A3`) for the independent verifier, or `tester` for the acceptance tester: the short key of the role in the flags and the config, not its name in the glossary, so that the lines stay aligned. An event is a message of the agent (its first line, cut to about 100 characters), a tool with its target (`Edit src/api/users.ts`, `Bash pnpm test`) or the end of the attempt. The CLI filters none of them; the raw log keeps everything.
+
+In a terminal, one last line stays at the bottom and is redrawn every second: each attempt in progress, its duration and the time since its last activity, so that an agent that thinks for minutes does not look dead. When the output is not a terminal, the same lines go out with no colour and no bottom line. The run ends with a short summary: the result, the subtasks merged and blocked, the wall clock, the tokens and the URL of the PR.
+
+The activity is only shown: nobody talks to an agent during an attempt, and it never changes the run.
 
 ### Output of a run
 
@@ -234,7 +253,8 @@ The issue, `specs/<n>.md` and the PR are the records. A new session starts again
   - collect its commits;
   - ask the independent verifier and get its answer, or an error if it used a tool or gave no answer;
   - start the acceptance tester on the integrated app and get its verdict per criterion with the paths of its evidence, or an error if it gave no usable report.
-- Each agent has an adapter in the layer. An agent can serve as the workers only if its adapter reads its token usage and detects its plan limit, as the acceptance tester only if its adapter reads its token usage, and as the independent verifier only if every tool can be denied to it with a fail-closed check. An agent that misses one is not offered for that role.
+- Each agent has an adapter in the layer. An agent can serve as the workers only if its adapter reads its token usage and detects its plan limit, as the acceptance tester only if its adapter reads its token usage, as the independent verifier only if every tool can be denied to it with a fail-closed check, and as the refinement only if its adapter starts the refinement skill in an interactive session on the host. An agent that misses one is not offered for that role.
+- Each adapter turns the lines of its agent's stream into the common events of the activity: a message, a tool with its target, the end. It gives only what its stream holds: the `--format json` stream of OpenCode 2.0.16 has no tool events, so OpenCode shows messages and the end.
 - Sandcastle (`mattpocock/sandcastle`) is a design reference only: see [ADR 0002](adr/0002-own-worker-layer.md).
 - A toy repo with trivial tasks tests the layer before `askwell`.
 
@@ -249,7 +269,7 @@ Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-onl
 
 | Role | Agents it can use |
 |---|---|
-| Refinement | Claude Code, interactive, on the host |
+| Refinement | Claude Code (the only agent offered), interactive, on the host, with the chosen model |
 | Base subtask and workers | Claude Code or OpenCode Go, in Docker |
 | Independent verifier | Claude Code or OpenCode Go, in Docker, with every tool denied by a fail-closed check |
 | Acceptance tester | Claude Code or OpenCode Go, in Docker |
@@ -300,10 +320,10 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
   - a process hangs;
   - commits or cleanup fail;
   - the token usage cannot be read.
-- **Logs:** the path to the raw log of each attempt. For each check and criterion that failed, the end of its output, and the path to its whole output in `output/` of the run log.
+- **Logs:** the path to the raw log of each attempt. An attempt enters `run.json` when it starts, as `running` with the path to its raw log, and gets its outcome when it ends, so the raw log can be read while it grows. For each check and criterion that failed, the end of its output, and the path to its whole output in `output/` of the run log.
 - **Quality, after the merge:** changes I made at review, and escapes (bugs that the verification did not find). An escape is an issue with the label `escaped-defect` in the target repo, linked to the PR of the factory that brought it; it is counted with `gh issue list --label escaped-defect`, not by `factory stats`.
 
-`factory stats` summarizes these files for a repo, per agent as well, to compare the subscriptions.
+`factory stats` summarizes these files for a repo, per agent as well, to compare the subscriptions. It counts abandoned runs apart from the ones in progress and the finished ones.
 
 ## Web view
 
@@ -313,7 +333,7 @@ It is a view over files that already exist, and it keeps to these limits:
 
 - **Read-only.** It starts, approves and changes nothing. `factory run` and `factory approve` stay in the terminal, where they are one line, and a server that could start them would hold push permissions on the host.
 - **Only the run log.** It reads `.factory/logs/` of the target repo. It does not read the spec, and it uses neither git nor `gh`, so opening it touches nothing outside the run log and needs no credential.
-- **No state of its own.** `run.json` stays the only source. The last change is the modification time of `run.json`; the web does not guess whether the process of a run is alive.
+- **No state of its own.** `run.json` stays the only source. The last change is the modification time of `run.json`. The web does not ask whether the process of a run is alive; it derives it from the files and `now`. An attempt still `running` is **abandoned** when its raw log has not changed for longer than `attemptIdleTimeoutMs`, because the worker layer stops any agent silent for that long. A run still `running` is abandoned when neither its `run.json` nor any of its raw logs has changed for that long. Example: `factory run` killed at 10:00 shows as abandoned from 10:11 with the default of 10 minutes. The page of a run links the raw log of an attempt in progress, which grows while it is read.
 - **Only the folder of the run.** The page of a run links to the raw log of each attempt, of each independent verifier verdict and of the acceptance tester, and to the full output of each check or criterion that failed, as `text/plain`. The paths in `run.json` are not uniform: attempt and verifier paths are absolute inside the run folder, and check, criterion and tester paths are relative to it. A file is linked and served only when its real path, after the symlinks, lies inside the real path of `.factory/logs/<run-id>/` and it is a regular file. Anything else gets 404: `..`, an encoded traversal, an absolute path, a NUL byte, a directory, a symlink that points outside, a run ID that is not the format of a run ID or has no folder. A log can hold HTML, so the web sends it with `x-content-type-options: nosniff`.
 - **Only `127.0.0.1`.** The run log can hold the output of the checks of a private repo. A `Host` header other than `127.0.0.1:<port>` or `localhost:<port>` gets 403, so that a web page in the browser cannot read the logs through DNS rebinding.
 

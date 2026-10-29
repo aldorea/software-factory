@@ -50,6 +50,10 @@ The part of the factory that starts, supervises and stops workers, the independe
 **Attempt**:
 One invocation of the agent inside a worker, from its start to its report or its stop.
 
+**Activity**:
+What an agent does during an attempt, as its stream reports it: its messages and the tools it uses. The developer watches it live; it never changes the attempt.
+_Avoid_: session, transcript
+
 **Subtask**:
 A group of criteria with its scope paths, implemented by one worker.
 _Avoid_: task, job
