@@ -6,6 +6,7 @@ import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv, type RoleQuestion } from "../../src/cli/main.ts";
 import type { RoleChoice } from "../../src/config/config.ts";
 import { parseRunLog } from "../../src/coordinator/run-log.ts";
+import { countedTokens } from "../../src/coordinator/stop-rules.ts";
 import type { GitHub } from "../../src/github/github.ts";
 import { ghGitHub, ghProblem } from "../../src/github/gh.ts";
 import { readApproval } from "../../src/spec/approval.ts";
@@ -209,7 +210,7 @@ describe("factory run: the choice of the agent of each role", () => {
 
     expect(out[0]).toBe("Preparing run #42; factory web shows it at http://127.0.0.1:7433/");
     expect(out).toContain("S1: working");
-    expect(out.at(-1)).toMatch(/^Run 42-.*: (ready|draft), /);
+    expect(out.some((line) => /^Run 42-.*: (ready|draft)$/.test(line))).toBe(true);
   });
 
   it("should print a line for each activity event of an attempt, in order, with the time and the prefix of the subtask, between the progress lines", async () => {
@@ -335,6 +336,88 @@ describe("factory run: the choice of the agent of each role", () => {
   });
 });
 
+function summaryOf(out: string[]): string[] {
+  return out.slice(out.findLastIndex((line) => line.startsWith("Run ")));
+}
+
+describe("factory run: the summary at the end", () => {
+  it("should print the result, the merged subtasks, the wall clock, the tokens and the pull request of a ready run", async () => {
+    const repoDir = await runnableRepo();
+    const { env, out } = cli(repoDir, undefined, () => ({
+      files: { "src/a.txt": "a\n" },
+      usage: { inputTokens: 100, outputTokens: 50 },
+    }));
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    const log = await lastRunLog(repoDir);
+    expect(log.result).toBe("ready");
+    expect(countedTokens(log.cost.usage)).toBeGreaterThan(0);
+    expect(summaryOf(out)).toEqual([
+      `Run ${log.runId}: ready`,
+      "Merged: S1",
+      "Blocked: none",
+      "Wall clock: 0 s",
+      `Tokens: ${countedTokens(log.cost.usage)}`,
+      "Pull request: https://github.test/pull/100",
+    ]);
+  });
+
+  it("should list each blocked subtask with its type of block in a draft run", async () => {
+    const repoDir = await runnableRepo();
+    const { env, out } = cli(repoDir, undefined, () => ({
+      outcome: { kind: "completed", summary: "FACTORY-DESIGN-QUESTION: Which greeting?" },
+    }));
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    const log = await lastRunLog(repoDir);
+    expect(log.result).toBe("draft");
+    const summary = summaryOf(out);
+    expect(summary[0]).toBe(`Run ${log.runId}: draft`);
+    expect(summary).toContain("Merged: none");
+    expect(summary).toContain("Blocked: S1 (design-question)");
+    expect(summary.at(-1)).toBe("Pull request: https://github.test/pull/100");
+  });
+
+  it("should say when the plan limit resets in a paused run and list the subtasks that did not finish", async () => {
+    const repoDir = await runnableRepo();
+    const resetsAt = new Date("2026-10-24T13:00:00.000Z");
+    const { env, out } = cli(repoDir, undefined, () => ({ outcome: { kind: "plan-limit", message: "limit", resetsAt } }));
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(0);
+
+    const log = await lastRunLog(repoDir);
+    expect(log.result).toBe("paused");
+    const summary = summaryOf(out);
+    expect(summary[0]).toBe(`Run ${log.runId}: paused until the plan limit resets at 2026-10-24T13:00:00.000Z`);
+    expect(summary).toContain("Merged: none");
+    expect(summary).toContain("Unfinished: S1");
+  });
+
+  it("should not count the time in pause in the wall clock, as factory stats does not", async () => {
+    const repoDir = await runnableRepo();
+    const paused = cli(repoDir, undefined, () => ({ outcome: { kind: "plan-limit", message: "limit" } }));
+    expect(await main(["approve", "42"], paused.env)).toBe(0);
+    expect(await main(["run", "42"], paused.env)).toBe(0);
+    const clock = new FakeClock("2026-10-24T11:00:00.000Z");
+    const resumed = cli(repoDir, undefined, () => {
+      clock.advance(10 * 60_000);
+      return { files: { "src/a.txt": "a\n" } };
+    });
+    resumed.env.clock = clock;
+
+    expect(await main(["run", "42"], resumed.env)).toBe(0);
+
+    const log = await lastRunLog(repoDir);
+    expect(log.cost.pausedMs).toBe(3 * 3_600_000);
+    expect(summaryOf(resumed.out)).toContain("Wall clock: 10 min (3 h in pause not counted)");
+  });
+});
+
 describe("factory CLI", () => {
   it("should exit zero on a valid spec when validating, taking the target repo from the current directory", async () => {
     const repoDir = await targetRepo(await valid());
@@ -390,7 +473,7 @@ describe("factory CLI", () => {
 
     expect(await main(["run", "42"], env)).toBe(0);
 
-    expect(out.join("\n")).toContain("Run 42-2026-10-24T08-00-00-000Z: ready, https://github.test/pull/100");
+    expect(out.join("\n")).toContain("Pull request: https://github.test/pull/100");
     expect(notifier.sent).toHaveLength(1);
   });
 

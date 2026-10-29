@@ -19,6 +19,7 @@ import { agentsForRole } from "../workers/agents.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import { activityLine } from "./activity-line.ts";
 import type { InteractiveLaunch } from "./launch.ts";
+import { runSummary } from "./run-summary.ts";
 import { web, WEB_USAGE } from "./web.ts";
 
 export interface RoleQuestion {
@@ -160,7 +161,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
       activity: (entry) => env.out(activityLine(entry)),
     },
   );
-  env.out(`Run ${report.log.runId}: ${report.result}, ${report.pullRequest.url}`);
+  for (const line of runSummary(report.log)) env.out(line);
   return 0;
 }
 
