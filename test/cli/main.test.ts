@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
 import type { RoleEntry } from "../../src/cli/role-menu.ts";
-import type { RoleChoice } from "../../src/config/config.ts";
+import type { Role, RoleChoice } from "../../src/config/config.ts";
 import { parseRunLog } from "../../src/coordinator/run-log.ts";
 import type { GitHub } from "../../src/github/github.ts";
 import { ghGitHub, ghProblem } from "../../src/github/gh.ts";
@@ -300,6 +300,43 @@ describe("factory run: the choice of the agent of each role", () => {
     expect((await lastRunLog(repoDir)).agents.changes).toEqual([
       { role: "workers", from: OPUS, to: SONNET, at: "2026-10-24T08:00:00.000Z" },
     ]);
+  });
+
+  it("should warn on resume that the run will pause again when the agent that reached the plan limit is still chosen and its reset is in the future", async () => {
+    const repoDir = await runnableRepo();
+    const resetsAt = new Date("2026-10-24T14:00:00.000Z");
+    const paused = cli(repoDir, undefined, () => ({ outcome: { kind: "plan-limit", message: "limit", resetsAt } }));
+    expect(await main(["approve", "42"], paused.env)).toBe(0);
+    expect(await main(["run", "42", "--worker-agent", "claude-code:opus"], paused.env)).toBe(0);
+
+    const resumed = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
+    const notes: Partial<Record<Role, string[]>>[] = [];
+    resumed.env.ask = async (entries, annotate) => {
+      notes.push(annotate(entries));
+      return {};
+    };
+    expect(await main(["run", "42"], resumed.env)).toBe(0);
+
+    expect(notes).toEqual([
+      {
+        workers: [expect.stringMatching(/^⚠ claude-code plan limit until \d\d:\d\d: the run will pause again$/)],
+        tester: [expect.stringMatching(/^⚠ claude-code plan limit until \d\d:\d\d: the run will pause again$/)],
+      },
+    ]);
+  });
+
+  it("should not warn on a new run", async () => {
+    const repoDir = await runnableRepo();
+    const fresh = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
+    const notes: Partial<Record<Role, string[]>>[] = [];
+    fresh.env.ask = async (entries, annotate) => {
+      notes.push(annotate(entries));
+      return {};
+    };
+    expect(await main(["approve", "42"], fresh.env)).toBe(0);
+    expect(await main(["run", "42"], fresh.env)).toBe(0);
+
+    expect(notes).toEqual([{}]);
   });
 
   it("should print the usage on a flag that factory run does not know, or a role flag on another command", async () => {

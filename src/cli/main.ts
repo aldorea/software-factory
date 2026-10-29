@@ -17,7 +17,8 @@ import { WEB_HOST } from "../web/host.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import type { InteractiveLaunch } from "./launch.ts";
-import { menuEntries, type RoleEntry } from "./role-menu.ts";
+import { planLimitAnnotate } from "./plan-limit-warning.ts";
+import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
 import { web, WEB_USAGE } from "./web.ts";
 
 export interface CliEnv {
@@ -31,7 +32,7 @@ export interface CliEnv {
   credentials: Partial<Record<AgentKind, string>>;
   docker(): Promise<string | null>;
   gh(): Promise<string | null>;
-  ask?: (entries: RoleEntry[]) => Promise<Partial<Record<Role, RoleChoice>>>;
+  ask?: (entries: RoleEntry[], annotate: Annotate) => Promise<Partial<Record<Role, RoleChoice>>>;
   launch(launch: InteractiveLaunch): Promise<number>;
   signal: AbortSignal;
   out(text: string): void;
@@ -146,7 +147,10 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
   const prompted =
     env.ask === undefined
       ? {}
-      : await env.ask(menuEntries({ roles: ROLES, flagged, defaults, defaultOrigin: (role) => defaultOrigin(previous, role) }));
+      : await env.ask(
+          menuEntries({ roles: ROLES, flagged, defaults, defaultOrigin: (role) => defaultOrigin(previous, role) }),
+          planLimitAnnotate(previous, env.clock.now()),
+        );
   const roles: Partial<Record<Role, RoleChoice>> = {};
   for (const role of ROLES) {
     const chosen = chooseRole({

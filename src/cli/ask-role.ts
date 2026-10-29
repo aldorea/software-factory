@@ -1,6 +1,6 @@
 import { emitKeypressEvents } from "node:readline";
 import type { Role, RoleChoice } from "../config/config.ts";
-import { initialMenu, menuChoices, reduceMenu, renderMenu, SUGGESTED_MODELS, type MenuKey, type RoleEntry } from "./role-menu.ts";
+import { initialMenu, menuChoices, reduceMenu, renderMenu, SUGGESTED_MODELS, type Annotate, type MenuKey, type RoleEntry } from "./role-menu.ts";
 
 interface Keypress {
   name?: string;
@@ -27,9 +27,9 @@ export function menuKey(text: string | undefined, key: Keypress): MenuKey | null
   return null;
 }
 
-export function askRolesInTerminal(entries: RoleEntry[]): Promise<Partial<Record<Role, RoleChoice>>> {
+export function askRolesInTerminal(entries: RoleEntry[], annotate: Annotate): Promise<Partial<Record<Role, RoleChoice>>> {
   const { stdin, stdout } = process;
-  let state = initialMenu(entries, SUGGESTED_MODELS);
+  let state = initialMenu(entries, SUGGESTED_MODELS, annotate);
   let drawn = 0;
   const draw = () => {
     if (drawn > 0) stdout.write(`\x1b[${drawn}A\r\x1b[J`);
