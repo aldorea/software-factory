@@ -85,18 +85,24 @@ describe("agent adapters", () => {
 });
 
 describe("role requirements", () => {
-  it("should offer every agent in every role", () => {
+  it("should offer every agent in every role of a run", () => {
     expect(agentsForRole("workers")).toEqual(["claude-code", "opencode"]);
     expect(agentsForRole("verifier")).toEqual(["claude-code", "opencode"]);
     expect(agentsForRole("tester")).toEqual(["claude-code", "opencode"]);
   });
 
+  it("should offer only Claude Code as the refinement, as only its adapter starts the refinement skill in an interactive session", () => {
+    expect(agentsForRole("refinement")).toEqual(["claude-code"]);
+    expect(missingRequirements("opencode", "refinement")).toEqual(["startsInteractiveSession"]);
+  });
+
   it("should name the requirements of the role that some capabilities miss, so a future agent without them is refused", () => {
-    const capabilities = { readsTokenUsage: true, detectsPlanLimit: false, deniesEveryTool: false };
+    const capabilities = { readsTokenUsage: true, detectsPlanLimit: false, deniesEveryTool: false, startsInteractiveSession: false };
 
     expect(unmetRequirements(capabilities, "workers")).toEqual(["detectsPlanLimit"]);
     expect(unmetRequirements(capabilities, "verifier")).toEqual(["deniesEveryTool"]);
     expect(unmetRequirements(capabilities, "tester")).toEqual([]);
+    expect(unmetRequirements(capabilities, "refinement")).toEqual(["startsInteractiveSession"]);
   });
 
   it("should report no missing requirement for an agent that meets the role", () => {

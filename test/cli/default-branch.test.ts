@@ -122,7 +122,7 @@ describe("default branch of the target repo", () => {
     const remoteTrunk = await git(repoDir, "rev-parse", "origin/trunk");
     const { env, launches } = cli(repoDir);
 
-    expect(await main(["refine", "42"], env)).toBe(0);
+    expect(await main(["refine", "42", "--refinement-agent", "claude-code:sonnet"], env)).toBe(0);
 
     expect(localTrunk).not.toBe(remoteTrunk);
     expect(await git(repoDir, "rev-parse", BRANCH)).toBe(localTrunk);
@@ -134,7 +134,7 @@ describe("default branch of the target repo", () => {
     const integration = await git(repoDir, "rev-parse", BRANCH);
     const { env, err, launches } = cli(repoDir);
 
-    expect(await main(["refine", "42"], env)).toBe(0);
+    expect(await main(["refine", "42", "--refinement-agent", "claude-code:sonnet"], env)).toBe(0);
 
     expect(err).toEqual([]);
     expect(await git(repoDir, "rev-parse", BRANCH)).toBe(integration);
@@ -155,7 +155,7 @@ describe("default branch of the target repo", () => {
     const repoDir = await trunkRepo({ setHead: false, withSpec: false });
     const { env, err, launches } = cli(repoDir);
 
-    expect(await main(["refine", "42"], env)).toBe(1);
+    expect(await main(["refine", "42", "--refinement-agent", "claude-code:sonnet"], env)).toBe(1);
 
     expect(err.join("\n")).toContain("git remote set-head origin --auto");
     expect(launches).toHaveLength(0);
@@ -177,7 +177,7 @@ describe("default branch of the target repo", () => {
     const repoDir = await trunkRepo({ localCopy: false, withSpec: false });
     const { env, err, launches } = cli(repoDir);
 
-    expect(await main(["refine", "42"], env)).toBe(1);
+    expect(await main(["refine", "42", "--refinement-agent", "claude-code:sonnet"], env)).toBe(1);
 
     expect(err.join("\n")).toContain("default branch trunk has no local copy");
     expect(err.join("\n")).not.toContain("set-head");

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
 import type { RoleEntry } from "../../src/cli/role-menu.ts";
-import type { RoleChoice } from "../../src/config/config.ts";
+import type { Role, RoleChoice } from "../../src/config/config.ts";
 import { parseRunLog } from "../../src/coordinator/run-log.ts";
 import { countedTokens } from "../../src/coordinator/stop-rules.ts";
 import type { GitHub } from "../../src/github/github.ts";
@@ -155,6 +155,12 @@ const SONNET: RoleChoice = { agent: "claude-code", model: "sonnet" };
 const KIMI: RoleChoice = { agent: "opencode", model: "opencode-go/kimi-k2" };
 const GLM: RoleChoice = { agent: "opencode", model: "opencode-go/glm-4.6" };
 const NO_ROLES = CONFIG.replace(/  roles: \{[\s\S]*?\n  \},\n/, "");
+const CLAUDE_REFINEMENT = ["--refinement-agent", "claude-code:sonnet"];
+const WITH_REFINEMENT = CONFIG.replace(
+  "  roles: {\n",
+  '  roles: {\n    refinement: { agent: "claude-code", model: "opus" },\n',
+);
+const modelOf = (launch: InteractiveLaunch | undefined) => launch?.args[(launch?.args.indexOf("--model") ?? -2) + 1];
 const NO_TESTER = CONFIG.replace(/    tester: .*\n/, "");
 
 describe("factory run: the choice of the agent of each role", () => {
@@ -358,6 +364,43 @@ describe("factory run: the choice of the agent of each role", () => {
     expect((await lastRunLog(repoDir)).agents.changes).toEqual([
       { role: "workers", from: OPUS, to: SONNET, at: "2026-10-24T08:00:00.000Z" },
     ]);
+  });
+
+  it("should warn on resume that the run will pause again when the agent that reached the plan limit is still chosen and its reset is in the future", async () => {
+    const repoDir = await runnableRepo();
+    const resetsAt = new Date("2026-10-24T14:00:00.000Z");
+    const paused = cli(repoDir, undefined, () => ({ outcome: { kind: "plan-limit", message: "limit", resetsAt } }));
+    expect(await main(["approve", "42"], paused.env)).toBe(0);
+    expect(await main(["run", "42", "--worker-agent", "claude-code:opus"], paused.env)).toBe(0);
+
+    const resumed = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
+    const notes: Partial<Record<Role, string[]>>[] = [];
+    resumed.env.ask = async (entries, annotate) => {
+      notes.push(annotate(entries));
+      return {};
+    };
+    expect(await main(["run", "42"], resumed.env)).toBe(0);
+
+    expect(notes).toEqual([
+      {
+        workers: [expect.stringMatching(/^⚠ claude-code plan limit until \d\d:\d\d: the run will pause again$/)],
+        tester: [expect.stringMatching(/^⚠ claude-code plan limit until \d\d:\d\d: the run will pause again$/)],
+      },
+    ]);
+  });
+
+  it("should not warn on a new run", async () => {
+    const repoDir = await runnableRepo();
+    const fresh = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
+    const notes: Partial<Record<Role, string[]>>[] = [];
+    fresh.env.ask = async (entries, annotate) => {
+      notes.push(annotate(entries));
+      return {};
+    };
+    expect(await main(["approve", "42"], fresh.env)).toBe(0);
+    expect(await main(["run", "42"], fresh.env)).toBe(0);
+
+    expect(notes).toEqual([{}]);
   });
 
   it("should print the usage on a flag that factory run does not know, or a role flag on another command", async () => {
@@ -614,19 +657,134 @@ describe("factory CLI", () => {
       return 7;
     };
 
-    expect(await main(["refine", "42"], env)).toBe(7);
+    expect(await main(["refine", "42", ...CLAUDE_REFINEMENT], env)).toBe(7);
     expect(launches).toHaveLength(1);
     expect(launches[0]?.cwd).toBe(join(repoDir, ".factory", "worktrees", "42-saved-searches"));
     expect(launches[0]?.args).toContain("/factory:refine 42");
     expect(out.join("\n")).toContain("Created factory/42-saved-searches");
   });
 
+  it("should launch the refinement with the model of --refinement-agent, over the config", async () => {
+    const repoDir = await mainRepo();
+    await mkdir(join(repoDir, ".factory"));
+    await writeFile(join(repoDir, ".factory", "config.ts"), WITH_REFINEMENT);
+    const { env, launches } = cli(repoDir, new FakeGitHub([{ number: 42, title: "Saved searches", body: "" }]));
+
+    expect(await main(["refine", "42", "--refinement-agent", "claude-code:haiku"], env)).toBe(0);
+
+    expect(launches[0]?.command).toBe("claude");
+    expect(modelOf(launches[0])).toBe("haiku");
+  });
+
+  it("should launch the refinement with the model of the flag when the config does not exist", async () => {
+    const { env, launches } = cli(await mainRepo(), new FakeGitHub([{ number: 42, title: "x", body: "" }]));
+
+    expect(await main(["refine", "42", ...CLAUDE_REFINEMENT], env)).toBe(0);
+
+    expect(modelOf(launches[0])).toBe("sonnet");
+  });
+
+  it("should take the model of the refinement from roles.refinement of the config with no flag and no terminal", async () => {
+    const repoDir = await mainRepo();
+    await mkdir(join(repoDir, ".factory"));
+    await writeFile(join(repoDir, ".factory", "config.ts"), WITH_REFINEMENT);
+    const { env, launches } = cli(repoDir, new FakeGitHub([{ number: 42, title: "Saved searches", body: "" }]));
+
+    expect(await main(["refine", "42"], env)).toBe(0);
+
+    expect(modelOf(launches[0])).toBe("opus");
+  });
+
+  it("should refuse to start, naming the flag and the config key, when neither gives the refinement an agent", async () => {
+    const withoutKey = await mainRepo();
+    await mkdir(join(withoutKey, ".factory"));
+    await writeFile(join(withoutKey, ".factory", "config.ts"), CONFIG);
+    const bare = await mainRepo();
+    const first = cli(withoutKey);
+    const second = cli(bare);
+
+    expect(await main(["refine", "42"], first.env)).toBe(1);
+    expect(await main(["refine", "42"], second.env)).toBe(1);
+
+    for (const { err, launches } of [first, second]) {
+      expect(err.join("\n")).toContain("--refinement-agent");
+      expect(err.join("\n")).toContain("roles.refinement");
+      expect(launches).toHaveLength(0);
+    }
+    expect(existsSync(join(withoutKey, ".factory", "worktrees"))).toBe(false);
+  });
+
+  it("should reject an OpenCode refinement, which cannot start the refinement skill, before any worktree or launch", async () => {
+    const repoDir = await mainRepo();
+    const { env, err, launches } = cli(repoDir);
+
+    expect(await main(["refine", "42", "--refinement-agent", "opencode:opencode-go/kimi-k3"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("opencode cannot serve the refinement");
+    expect(launches).toHaveLength(0);
+    expect(existsSync(join(repoDir, ".factory", "worktrees"))).toBe(false);
+  });
+
+  it("should reject an OpenCode refinement that the config names, as it does for the other roles", async () => {
+    const repoDir = await mainRepo();
+    await mkdir(join(repoDir, ".factory"));
+    await writeFile(join(repoDir, ".factory", "config.ts"), WITH_REFINEMENT.replace('agent: "claude-code", model: "opus"', 'agent: "opencode", model: "opencode-go/kimi-k3"'));
+    const { env, err, launches } = cli(repoDir);
+
+    expect(await main(["refine", "42"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("roles.refinement: opencode cannot serve the refinement");
+    expect(launches).toHaveLength(0);
+  });
+
+  it("should ask in a terminal with a menu of the refinement alone that offers only Claude Code, and launch with the model it gives", async () => {
+    const repoDir = await mainRepo();
+    await mkdir(join(repoDir, ".factory"));
+    await writeFile(join(repoDir, ".factory", "config.ts"), WITH_REFINEMENT);
+    const { env, launches } = cli(repoDir, new FakeGitHub([{ number: 42, title: "Saved searches", body: "" }]));
+    const asked: RoleEntry[][] = [];
+    env.ask = async (entries) => {
+      asked.push(entries);
+      return { refinement: { agent: "claude-code", model: "haiku" } };
+    };
+
+    expect(await main(["refine", "42"], env)).toBe(0);
+
+    expect(asked).toEqual([
+      [{ role: "refinement", offered: ["claude-code"], choice: { agent: "claude-code", model: "opus" }, origin: "config" }],
+    ]);
+    expect(modelOf(launches[0])).toBe("haiku");
+  });
+
+  it("should not ask when --refinement-agent fixes the refinement", async () => {
+    const { env, launches } = cli(await mainRepo(), new FakeGitHub([{ number: 42, title: "x", body: "" }]));
+    env.ask = async () => {
+      throw new Error("no question is expected");
+    };
+
+    expect(await main(["refine", "42", ...CLAUDE_REFINEMENT], env)).toBe(0);
+    expect(launches).toHaveLength(1);
+  });
+
+  it("should refuse the role flags of a run in refine and --refinement-agent in run and approve, with the usage", async () => {
+    const { env, err, launches, runner } = cli(await mainRepo());
+
+    expect(await main(["refine", "42", "--worker-agent", "claude-code:opus"], env)).toBe(2);
+    expect(await main(["refine", "42", "--tester-agent", "claude-code:opus"], env)).toBe(2);
+    expect(await main(["run", "42", ...CLAUDE_REFINEMENT], env)).toBe(2);
+    expect(await main(["approve", "42", ...CLAUDE_REFINEMENT], env)).toBe(2);
+
+    expect(err.every((line) => line.includes("usage: factory"))).toBe(true);
+    expect(launches).toHaveLength(0);
+    expect(runner.workers).toHaveLength(0);
+  });
+
   it("should say that it reuses the branch and launch again when the worktree already exists", async () => {
     const repoDir = await mainRepo();
     const { env, out, launches } = cli(repoDir, new FakeGitHub([{ number: 42, title: "Saved searches", body: "" }]));
 
-    expect(await main(["refine", "42"], env)).toBe(0);
-    expect(await main(["refine", "42"], env)).toBe(0);
+    expect(await main(["refine", "42", ...CLAUDE_REFINEMENT], env)).toBe(0);
+    expect(await main(["refine", "42", ...CLAUDE_REFINEMENT], env)).toBe(0);
     expect(launches).toHaveLength(2);
     expect(out.join("\n")).toContain("Reusing factory/42-saved-searches");
   });
@@ -634,7 +792,7 @@ describe("factory CLI", () => {
   it("should not launch when the issue cannot be read", async () => {
     const { env, err, launches } = cli(await mainRepo(), new FakeGitHub([]));
 
-    expect(await main(["refine", "42"], env)).toBe(1);
+    expect(await main(["refine", "42", ...CLAUDE_REFINEMENT], env)).toBe(1);
     expect(launches).toHaveLength(0);
     expect(err.join("\n")).toContain("issue #42 does not exist");
   });
@@ -659,7 +817,7 @@ describe("factory CLI: the default branch of the target repo", () => {
     await git(repoDir, "commit", "-q", "--allow-empty", "-m", "Only on the local trunk");
     const { env } = cli(repoDir, saved());
 
-    expect(await main(["refine", "42"], env)).toBe(0);
+    expect(await main(["refine", "42", ...CLAUDE_REFINEMENT], env)).toBe(0);
 
     const worktree = join(repoDir, ".factory", "worktrees", "42-saved-searches");
     expect(await git(worktree, "rev-parse", "HEAD")).toBe(await git(repoDir, "rev-parse", "trunk"));
@@ -691,7 +849,7 @@ describe("factory CLI: the default branch of the target repo", () => {
     const running = cli(runRepo);
     expect(await main(["approve", "42"], running.env)).toBe(0);
 
-    expect(await main(["refine", "42"], refining.env)).toBe(1);
+    expect(await main(["refine", "42", ...CLAUDE_REFINEMENT], refining.env)).toBe(1);
     expect(await main(["run", "42"], running.env)).toBe(1);
 
     expect(refining.err.join("\n")).toContain("origin/HEAD is not set");
@@ -710,7 +868,7 @@ describe("factory CLI: the default branch of the target repo", () => {
     const running = cli(runRepo);
     expect(await main(["approve", "42"], running.env)).toBe(0);
 
-    expect(await main(["refine", "42"], refining.env)).toBe(1);
+    expect(await main(["refine", "42", ...CLAUDE_REFINEMENT], refining.env)).toBe(1);
     expect(await main(["run", "42"], running.env)).toBe(1);
 
     expect(refining.err.join("\n")).toContain("the default branch trunk has no local copy");
