@@ -16,6 +16,7 @@ import { initRepo } from "../init/init.ts";
 import { WEB_HOST } from "../web/host.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
+import { activityLine } from "./activity-line.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { menuEntries, type RoleEntry } from "./role-menu.ts";
 import { runSummary } from "./run-summary.ts";
@@ -172,6 +173,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
       notifier: env.notifier,
       clock: env.clock,
       progress: env.out,
+      activity: (entry) => env.out(activityLine(entry)),
     },
   );
   for (const line of runSummary(report.log)) env.out(line);

@@ -29,7 +29,12 @@ export async function performAttempt(request: AttemptRequest): Promise<AttemptRe
     logPath: request.logPath,
     deadline: request.limits.deadline,
     idleTimeoutMs: request.limits.idleTimeoutMs,
-    onLine: (line) => stream.onLine(line),
+    onLine: (line) => {
+      stream.onLine(line);
+      const onActivity = request.hooks?.onActivity;
+      if (onActivity === undefined) return;
+      for (const event of stream.activity?.(line) ?? []) onActivity(event);
+    },
     ...(adapter.isFinalLine ? { isFinalLine: adapter.isFinalLine } : {}),
     terminate: () => request.stop(adapter.processName),
   });

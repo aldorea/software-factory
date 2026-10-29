@@ -15,6 +15,7 @@ import {
 } from "../../src/workers/git.ts";
 import { exec, execOk } from "../../src/workers/sh.ts";
 import type {
+  ActivityEvent,
   AgentSpec,
   AttemptHooks,
   AttemptLimits,
@@ -30,6 +31,7 @@ import type {
 } from "../../src/workers/types.ts";
 
 export interface ScriptedAttempt {
+  activity?: ActivityEvent[];
   files?: Record<string, string>;
   commit?: string;
   outcome?: AttemptOutcome;
@@ -157,6 +159,7 @@ class FakeWorker implements Worker {
     if (attemptFault) throw attemptFault;
     if (this.spec.outputDir !== undefined) return this.test(call, this.spec.outputDir, startedAt, logPath);
     const scripted = await this.script(call);
+    for (const event of scripted.activity ?? []) hooks?.onActivity?.(event);
     for (const [path, content] of Object.entries(scripted.files ?? {})) {
       await mkdir(dirname(join(this.worktreePath, path)), { recursive: true });
       await writeFile(join(this.worktreePath, path), content);

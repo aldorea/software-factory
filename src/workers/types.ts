@@ -30,6 +30,7 @@ export interface AttemptStart {
 
 export interface AttemptHooks {
   onStart?: (start: AttemptStart) => void | Promise<void>;
+  onActivity?: ActivitySink;
 }
 
 export interface TokenUsage {
@@ -57,6 +58,13 @@ export type AttemptOutcome =
   | { kind: "deadline" }
   | { kind: "idle-timeout" }
   | { kind: "agent-error"; message: string; exitCode: number | null };
+
+export type ActivityEvent =
+  | { kind: "message"; text: string }
+  | { kind: "tool"; tool: string; target?: string }
+  | { kind: "end"; outcome: "completed" | "failed" };
+
+export type ActivitySink = (event: ActivityEvent) => void;
 
 export interface AttemptResult {
   outcome: AttemptOutcome;
