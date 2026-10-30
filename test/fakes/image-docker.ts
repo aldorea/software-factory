@@ -29,7 +29,7 @@ export class FakeImageDocker implements ImageDocker {
 
   async id(reference: string): Promise<string | null> {
     if (reference === BASE_IMAGE_TAG) return this.baseImageId;
-    return this.worker.present === false ? null : "sha256:fedcba9876543210fedcba9876543210";
+    return this.baseImageId === null || this.worker.present === false ? null : "sha256:fedcba9876543210fedcba9876543210";
   }
 
   async label(): Promise<string | null> {

@@ -280,6 +280,7 @@ describe("factory init", () => {
     const images = {
       user: { uid: 501, gid: 20 },
       build: async () => 0,
+      label: async () => null,
       id: async (reference: string) => {
         asked.push(reference);
         return null;
@@ -298,6 +299,7 @@ describe("factory init", () => {
     const images = {
       user: { uid: 501, gid: 20 },
       build: async () => 0,
+      label: async () => null,
       id: async () => {
         throw new Error("docker is not installed or not on the PATH");
       },
