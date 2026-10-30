@@ -39,17 +39,18 @@ if (process.argv[2] === "run" && terminal) {
 
 const credentialsPath = credentialsFilePath(process.env, homedir());
 const color = colorEnabled({ stdout: features.screen, noColor: process.env.NO_COLOR });
+const command = process.argv[2];
 const loaded =
-  process.argv[2] === "run"
+  command === "run" || command === "init"
     ? await loadCredentials(credentialsPath, process.env)
     : { ok: true as const, credentials: resolveCredentials(process.env, {}) };
-if (!loaded.ok) {
+if (!loaded.ok && command !== "init") {
   for (const line of renderSetup([{ kind: "fail", text: `factory: ${loaded.problem}` }], color)) {
     process.stderr.write(`${line}\n`);
   }
   process.exit(1);
 }
-const credentials = loaded.credentials;
+const credentials = loaded.ok ? loaded.credentials : resolveCredentials(process.env, {});
 
 process.exitCode = await main(process.argv.slice(2), {
   cwd: process.cwd(),
