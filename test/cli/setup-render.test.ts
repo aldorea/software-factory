@@ -55,6 +55,12 @@ describe("setup rendering", () => {
     ]);
   });
 
+  it("should print the note of a text line after its command, in plain text", () => {
+    expect(renderSetup([{ kind: "text", text: "  2. ", command: "factory auth", note: "   set it" }], true)).toEqual([
+      `  2. ${bold(96, "factory auth")}   set it`,
+    ]);
+  });
+
   it("should print a title in bold", () => {
     expect(renderSetup([{ kind: "title", text: "Next:" }], true)).toEqual([`${ESC}[1mNext:${RESET}`]);
   });

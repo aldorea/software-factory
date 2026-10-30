@@ -96,6 +96,25 @@ describe("the generated .factory/config.ts", () => {
     expect(() => environment(worker(0))).toThrow("FACTORY_E2E_DATABASE_URL_0");
   });
 
+  it("should write the default roles: Claude Code everywhere, opus for the refinement and the verifier, sonnet for the workers and the tester", async () => {
+    const dir = await repoWith(INPUT, filledExample());
+
+    expect((await loadConfig(dir)).roles).toEqual({
+      workers: { agent: "claude-code", model: "sonnet" },
+      verifier: { agent: "claude-code", model: "opus" },
+      tester: { agent: "claude-code", model: "sonnet" },
+      refinement: { agent: "claude-code", model: "opus" },
+    });
+  });
+
+  it("should give the verifier a model that differs from the workers, so its independence does not rest only on a clean context", async () => {
+    const dir = await repoWith(INPUT, filledExample());
+
+    const { roles } = await loadConfig(dir);
+
+    expect(roles.verifier?.model).not.toBe(roles.workers?.model);
+  });
+
   it("should import nothing from the factory, so it loads when the two repos live in different folders", () => {
     const imports = renderConfig(INPUT).match(/^import .*$/gm) ?? [];
 

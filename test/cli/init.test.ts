@@ -33,7 +33,7 @@ function cli(cwd: string) {
     claudeSession: async () => null,
     originHead: async () => null,
     launch: async () => 0,
-    images: new FakeImageDocker(),
+    images: new FakeImageDocker([], null),
     signal: new AbortController().signal,
     out: (text) => out.push(text),
     err: (text) => err.push(text),
@@ -102,7 +102,7 @@ describe("factory init", () => {
     expect(await main(["init"], env)).toBe(0);
 
     expect(err).toEqual([]);
-    expect(out).toEqual([
+    expect(out.slice(0, 5)).toEqual([
       "✓ wrote .factory/config.ts",
       "✓ wrote .factory/Dockerfile",
       "✓ wrote .factory/.env.example",
@@ -167,7 +167,7 @@ describe("factory init", () => {
 
     expect(await main(["init"], env)).toBe(0);
 
-    expect(out).toEqual([
+    expect(out.slice(0, 5)).toEqual([
       "✓ wrote .factory/config.ts",
       "✓ skipped .factory/Dockerfile (already exists)",
       "✓ wrote .factory/.env.example",
@@ -178,8 +178,7 @@ describe("factory init", () => {
 
     const second = cli(dir);
     expect(await main(["init"], second.env)).toBe(0);
-    expect(second.out.every((line) => line.startsWith("✓ skipped "))).toBe(true);
-    expect(second.out).toHaveLength(5);
+    expect(second.out.slice(0, 5).every((line) => line.startsWith("✓ skipped "))).toBe(true);
   });
 
   it("should leave package.json of the target repo byte for byte unchanged", async () => {
@@ -236,6 +235,112 @@ describe("factory init", () => {
     expect(await main(["init"], { ...env, color: false })).toBe(0);
 
     expect(out.join("\n")).not.toMatch(/\u001b\[/);
+  });
+
+  it("should end with the Next: list of a fresh repo, naming the variables of .env.example and the worker image", async () => {
+    const dir = await targetRepo({ name: "toy", files: { "pnpm-lock.yaml": "" } });
+    const { env, out } = cli(dir);
+
+    expect(await main(["init"], env)).toBe(0);
+
+    expect(out.slice(5)).toEqual([
+      "Next:",
+      "  1. fill .factory/.env (copy of .env.example: FACTORY_E2E_DATABASE_URL_0, FACTORY_E2E_DATABASE_URL_1)",
+      "  2. factory auth          set the credential of each agent, once for every repo",
+      "  3. factory image         build the base image and toy-factory-worker:dev",
+      "  4. factory doctor        check that everything is ready",
+      "  5. factory refine <n>",
+    ]);
+  });
+
+  it("should mark the credential step with a tick when the credential of the default roles is already saved", async () => {
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "" } });
+    const { env, out } = cli(dir);
+
+    expect(await main(["init"], { ...env, credentials: { "claude-code": "sk-ant-oat01-saved" } })).toBe(0);
+
+    expect(out).toContain("✓ 2. factory auth          set the credential of each agent, once for every repo");
+  });
+
+  it("should mark the image step with a tick when the worker image exists", async () => {
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "" } });
+    const { env, out } = cli(dir);
+
+    expect(await main(["init"], { ...env, images: new FakeImageDocker() })).toBe(0);
+
+    expect(out.some((line) => line.startsWith("✓ 3. factory image"))).toBe(true);
+  });
+
+  it("should ask the image probe for the image name of the config, not a guessed one", async () => {
+    const config =
+      'export default { image: "custom:1", checks: [{ name: "t", command: "t" }], environment: () => ({}), protectedPaths: [] };\n';
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "", ".factory/config.ts": config } });
+    const asked: string[] = [];
+    const { env, out } = cli(dir);
+    const images = {
+      user: { uid: 501, gid: 20 },
+      build: async () => 0,
+      id: async (reference: string) => {
+        asked.push(reference);
+        return null;
+      },
+    };
+
+    expect(await main(["init"], { ...env, images })).toBe(0);
+
+    expect(asked).toEqual(["custom:1"]);
+    expect(out.join("\n")).toContain("build the base image and custom:1");
+  });
+
+  it("should still succeed and show the image step as not done when Docker cannot be asked", async () => {
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "" } });
+    const { env, out } = cli(dir);
+    const images = {
+      user: { uid: 501, gid: 20 },
+      build: async () => 0,
+      id: async () => {
+        throw new Error("docker is not installed or not on the PATH");
+      },
+    };
+
+    expect(await main(["init"], { ...env, images })).toBe(0);
+
+    expect(out.some((line) => line.startsWith("  3. factory image"))).toBe(true);
+  });
+
+  it("should mark the .env step with a tick when .factory/.env already gives a value to every variable", async () => {
+    const dir = await targetRepo({
+      files: {
+        "pnpm-lock.yaml": "",
+        ".factory/.env.example": "FACTORY_E2E_DATABASE_URL_0=\nFACTORY_E2E_DATABASE_URL_1=\n",
+        ".factory/.env": "FACTORY_E2E_DATABASE_URL_0=a\nFACTORY_E2E_DATABASE_URL_1=b\n",
+      },
+    });
+    const { env, out } = cli(dir);
+
+    expect(await main(["init"], env)).toBe(0);
+
+    expect(out.some((line) => line.startsWith("✓ 1. fill .factory/.env"))).toBe(true);
+  });
+
+  it("should still print the list with the defaults when the existing config does not load", async () => {
+    const dir = await targetRepo({ name: "toy", files: { "pnpm-lock.yaml": "", ".factory/config.ts": "export default {" } });
+    const { env, out, err } = cli(dir);
+
+    expect(await main(["init"], env)).toBe(0);
+
+    expect(err).toEqual([]);
+    expect(out.join("\n")).toContain("build the base image and toy-factory-worker:dev");
+  });
+
+  it("should leave an existing config with its own roles untouched, so the defaults never overwrite a choice", async () => {
+    const config = 'export default { roles: { workers: { agent: "opencode", model: "opencode-go/kimi" } } };\n';
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "", ".factory/config.ts": config } });
+    const { env } = cli(dir);
+
+    expect(await main(["init"], env)).toBe(0);
+
+    expect(await readFile(join(dir, ".factory", "config.ts"), "utf8")).toBe(config);
   });
 
   it("should print the usage when init gets more than a repo", async () => {

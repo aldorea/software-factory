@@ -1,4 +1,4 @@
-import { DEFAULT_LIMITS, type Check } from "../config/config.ts";
+import { DEFAULT_LIMITS, type Check, type Role, type RoleChoice } from "../config/config.ts";
 import { BASE_IMAGE_TAG } from "../workers/images.ts";
 
 export type PackageManager = "pnpm" | "npm";
@@ -13,6 +13,13 @@ export interface FactoryFile {
   path: string;
   content: string;
 }
+
+export const DEFAULT_ROLES: Record<Role, RoleChoice> = {
+  workers: { agent: "claude-code", model: "sonnet" },
+  verifier: { agent: "claude-code", model: "opus" },
+  tester: { agent: "claude-code", model: "sonnet" },
+  refinement: { agent: "claude-code", model: "opus" },
+};
 
 const BASE_IMAGE = BASE_IMAGE_TAG;
 const PNPM_VERSION = "10.19.0";
@@ -52,7 +59,8 @@ function slotValues(slot: number): Record<string, string> {
 }
 `;
 
-const CONFIG_TAIL = `  environment: ({ slot }: { slot: number }) => ({
+const CONFIG_TAIL = `  roles: ${JSON.stringify(DEFAULT_ROLES, null, 2).replace(/\n/g, "\n  ")},
+  environment: ({ slot }: { slot: number }) => ({
     E2E_PORT: String(BASE_PORT + slot),
     ...slotValues(slot),
   }),

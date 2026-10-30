@@ -23,6 +23,7 @@ import { activityLine } from "./activity-line.ts";
 import { auth, AUTH_USAGE, type AuthInput } from "./auth.ts";
 import { clockMinutes } from "./clock-time.ts";
 import { image } from "./image.ts";
+import { nextStepsOf } from "./init-next.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
 import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
@@ -318,10 +319,11 @@ async function init(args: string[], env: CliEnv): Promise<number> {
   if (await refused(repoDir, env)) return 1;
   try {
     const written = await initRepo(repoDir);
-    for (const line of renderSetup(
-      written.map((text): SetupLine => ({ kind: "ok", text })),
-      env.color === true,
-    )) {
+    const lines: SetupLine[] = [
+      ...written.map((text): SetupLine => ({ kind: "ok", text })),
+      ...(await nextStepsOf(repoDir, env)),
+    ];
+    for (const line of renderSetup(lines, env.color === true)) {
       env.out(line);
     }
     return 0;
