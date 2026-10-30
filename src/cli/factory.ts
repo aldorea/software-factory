@@ -44,10 +44,10 @@ const credentialsPath = credentialsFilePath(process.env, homedir());
 const color = colorEnabled({ stdout: features.screen, noColor: process.env.NO_COLOR });
 const command = process.argv[2];
 const loaded =
-  command === "run" || command === "init"
+  command === "run" || command === "init" || command === "doctor"
     ? await loadCredentials(credentialsPath, process.env)
     : { ok: true as const, credentials: resolveCredentials(process.env, {}) };
-if (!loaded.ok && command !== "init") {
+if (!loaded.ok && command !== "init" && command !== "doctor") {
   for (const line of renderSetup([{ kind: "fail", text: `factory: ${loaded.problem}` }], color)) {
     process.stderr.write(`${line}\n`);
   }
@@ -64,6 +64,7 @@ process.exitCode = await main(process.argv.slice(2), {
   verifier: (config, role) => configuredVerifier(config, role, credentials, clock),
   notifier: macosNotifier(),
   credentials,
+  ...(!loaded.ok && command === "doctor" ? { credentialsProblem: loaded.problem } : {}),
   docker: () => dockerProblem(),
   gh: () => ghProblem(),
   claudeSession: () => claudeSessionProblem(),

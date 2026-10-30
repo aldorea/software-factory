@@ -3,6 +3,7 @@ import {
   gatherProbes,
   neededProbes,
   readiness,
+  readinessLines,
   readinessProblems,
   type Probes,
   type ReadinessCommand,
@@ -170,11 +171,14 @@ describe("probes a command needs", () => {
     claudeSession: async () => "claude",
     originHead: async () => "origin",
     workerImage: async () => "image",
+    node: async () => "node",
+    config: async () => "config",
   };
 
   it("should list only the probes of the checks of that command", () => {
     expect(neededProbes("refine").sort()).toEqual(["claudeSession", "gh", "originHead"]);
     expect(neededProbes("run").sort()).toEqual(["docker", "gh", "workerImage"]);
+    expect(neededProbes("doctor").sort()).toEqual(["claudeSession", "config", "docker", "gh", "node", "originHead", "workerImage"]);
   });
 
   it("should run only those probes", async () => {

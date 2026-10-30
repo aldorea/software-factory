@@ -10,7 +10,7 @@ import type { CliEnv } from "./main.ts";
 import { nextSteps } from "./next-steps.ts";
 import type { SetupLine } from "./setup-render.ts";
 
-async function readEnvFile(file: string): Promise<Record<string, string | undefined> | null> {
+export async function readEnvFile(file: string): Promise<Record<string, string | undefined> | null> {
   try {
     return parseEnv(await readFile(file, "utf8"));
   } catch {

@@ -127,6 +127,21 @@ describe("factory bin", () => {
     expect(result.stderr).toContain("line 2");
   });
 
+  it("should list the chmod fix as a failed check of factory doctor, and not stop, when the credentials file can be read by others", async () => {
+    const config = await temp.make("bin-xdg-");
+    const file = join(config, "software-factory", "credentials");
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(file, "OPENCODE_API_KEY=saved\n");
+    await chmod(file, 0o644);
+
+    const result = await factory(["doctor", config], { config });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("Docker");
+    expect(result.stdout).toContain(`✗ ${file} can be read by other users (mode 644) → chmod 600 ${file}`);
+    expect(result.stderr).toBe("");
+  });
+
   it("should stop factory web on Ctrl-C with exit code 0", async () => {
     const dir = await temp.make("bin-web-");
     const child = spawn(process.execPath, [BIN, "web", dir, "--port", "0"], { stdio: ["ignore", "pipe", "pipe"] });

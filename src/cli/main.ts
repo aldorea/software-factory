@@ -28,9 +28,10 @@ import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
 import { menuCredentials } from "./menu-credentials.ts";
 import { menuEntries, type Annotate, type MenuCredentials, type RoleEntry } from "./role-menu.ts";
-import { gatherProbes, readiness, readinessProblems, type Probes } from "./readiness.ts";
+import { gatherProbes, readiness, readinessProblems } from "./readiness.ts";
 import { renderSetup, type SetupLine } from "./setup-render.ts";
-import { workerImageProblem } from "./worker-image-probe.ts";
+import { doctor } from "./doctor.ts";
+import { envProbes } from "./env-probes.ts";
 import { runSummary } from "./run-summary.ts";
 import { RunView } from "./run-view.ts";
 import { refused } from "./target-repo.ts";
@@ -46,6 +47,7 @@ export interface CliEnv {
   verifier(config: ResolvedConfig, role: RoleChoice): Verifier;
   notifier: Notifier;
   credentials: Partial<Record<AgentKind, string>>;
+  credentialsProblem?: string;
   docker(): Promise<string | null>;
   gh(): Promise<string | null>;
   claudeSession(): Promise<string | null>;
@@ -73,8 +75,9 @@ const USAGE = [
   "       factory stats [target-repo]",
   `       ${WEB_USAGE}`,
   "       factory init [target-repo]",
-  `       ${AUTH_USAGE}`,
-  "       factory image [target-repo]",
+  `       ${AUTH_USAGE}   save the credential of an agent, once for every repo`,
+  "       factory image [target-repo]   build the base image and the worker image",
+  "       factory doctor [target-repo]   check that the host and the repo are ready, and change nothing",
 ].join("\n");
 
 type RoleFlags = Partial<Record<RunRole, string>>;
@@ -88,7 +91,12 @@ interface Command {
 }
 
 export async function main(args: string[], env: CliEnv): Promise<number> {
+  if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
+    env.out(USAGE);
+    return 0;
+  }
   if (args[0] === "stats") return stats(args.slice(1), env);
+  if (args[0] === "doctor") return doctor(args.slice(1), env, USAGE);
   if (args[0] === "init") return init(args.slice(1), env);
   if (args[0] === "image") return image(args.slice(1), env, USAGE);
   if (args[0] === "web") return web(args.slice(1), env, USAGE);
@@ -173,16 +181,6 @@ function parseCommand(args: string[]): Command | null {
 function reportProblems(lines: SetupLine[], env: CliEnv): boolean {
   for (const line of renderSetup(lines, env.color === true)) env.err(line);
   return lines.length > 0;
-}
-
-function envProbes(repoDir: string, env: CliEnv, image: string | null = null): Probes {
-  return {
-    docker: () => env.docker(),
-    gh: () => env.gh(),
-    claudeSession: () => env.claudeSession(),
-    originHead: () => env.originHead(repoDir),
-    workerImage: () => workerImageProblem(image, env.images),
-  };
 }
 
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
