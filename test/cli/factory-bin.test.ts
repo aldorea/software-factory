@@ -47,6 +47,37 @@ describe("factory bin", () => {
     expect(result.stdout).not.toContain(String.fromCharCode(27));
   });
 
+  it("should end the output of init with the Next: list and mark the credential step when the credential is saved in the XDG folder", async () => {
+    const config = await temp.make("bin-xdg-");
+    const dir = await temp.make("bin-init-");
+    await exec("git", ["init", "-q", "-b", "main", dir]);
+    await exec("git", ["-C", dir, "remote", "add", "origin", "https://example.invalid/toy.git"]);
+    await factory(["auth", "claude-code"], { config, stdin: "sk-ant-oat01-saved\n" });
+
+    const result = await factory(["init", dir], { config });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Next:");
+    expect(result.stdout).toContain("✓ 2. factory auth");
+    expect(result.stdout).toContain("  1. fill .factory/.env");
+  });
+
+  it("should leave the credential step of init undone, and still succeed, when the credentials file has a line it does not understand", async () => {
+    const config = await temp.make("bin-xdg-");
+    const file = join(config, "software-factory", "credentials");
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(file, "broken\n", { mode: 0o600 });
+    const dir = await temp.make("bin-init-");
+    await exec("git", ["init", "-q", "-b", "main", dir]);
+    await exec("git", ["-C", dir, "remote", "add", "origin", "https://example.invalid/toy.git"]);
+
+    const result = await factory(["init", dir], { config });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("  2. factory auth");
+    expect(result.stderr).toBe("");
+  });
+
   it("should save the credential piped to factory auth in the XDG folder, with mode 0600, and never print it", async () => {
     const config = await temp.make("bin-xdg-");
 
