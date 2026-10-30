@@ -1,4 +1,5 @@
 import { DEFAULT_LIMITS, type Check } from "../config/config.ts";
+import { BASE_IMAGE_TAG } from "../workers/images.ts";
 
 export type PackageManager = "pnpm" | "npm";
 
@@ -13,7 +14,7 @@ export interface FactoryFile {
   content: string;
 }
 
-const BASE_IMAGE = "software-factory/worker:dev";
+const BASE_IMAGE = BASE_IMAGE_TAG;
 const PNPM_VERSION = "10.19.0";
 const BASE_PORT = 3100;
 const SLOT_COUNT = Math.max(...Object.values(DEFAULT_LIMITS.agents).map((limits) => limits.maxParallelCeiling));
