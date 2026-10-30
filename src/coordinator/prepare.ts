@@ -4,6 +4,7 @@ import { chooseRole, choiceProblems, credentialProblem, ROLES } from "../config/
 import { defaultBranch, integrationBranch, showFile } from "../git/repo.ts";
 import { issueCriteria } from "../spec/issue.ts";
 import { parseSpec, validateSpec } from "../spec/spec.ts";
+import { credentialNeeds, type CredentialNeeds } from "./credential-needs.ts";
 import { approvalProblem } from "./decisions.ts";
 import { evidenceProblems } from "./evidence.ts";
 import type { RunPorts } from "./ports.ts";
@@ -35,9 +36,7 @@ export async function prepare(request: RunRequest, ports: RunPorts): Promise<Pre
     .map(([id]) => id);
   const plan = schedule(parsed.spec);
 
-  const asksVerifier = Object.values(parsed.spec.criteria).some((criterion) => criterion.evidence === "playwright");
-  const testsApp = Object.values(parsed.spec.criteria).some((criterion) => criterion.evidence !== "human");
-  const { workers, verifier, tester } = chosenRoles(request, config, { workers: true, verifier: asksVerifier, tester: testsApp });
+  const { workers, verifier, tester } = chosenRoles(request, config, credentialNeeds(parsed.spec));
   const credential = request.credentials[workers.agent] as string;
   const limits = config.agents[workers.agent];
   const parallelism = { start: limits.maxParallel, ceiling: limits.maxParallelCeiling };
@@ -47,7 +46,7 @@ export async function prepare(request: RunRequest, ports: RunPorts): Promise<Pre
 function chosenRoles(
   request: RunRequest,
   config: ResolvedConfig,
-  needsCredential: Record<RunRole, boolean>,
+  needsCredential: CredentialNeeds,
 ): Record<RunRole, RoleChoice> {
   const problems: string[] = [];
   const roles: Partial<Record<RunRole, RoleChoice>> = {};

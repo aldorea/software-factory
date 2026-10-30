@@ -6,6 +6,7 @@ import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
 import type { RoleEntry } from "../../src/cli/role-menu.ts";
 import type { Role, RoleChoice } from "../../src/config/config.ts";
+import { loadCredentials } from "../../src/config/credentials-store.ts";
 import { parseRunLog } from "../../src/coordinator/run-log.ts";
 import { countedTokens } from "../../src/coordinator/stop-rules.ts";
 import type { GitHub } from "../../src/github/github.ts";
@@ -17,6 +18,7 @@ import { execOk } from "../../src/workers/sh.ts";
 import { writeRunningRun } from "../coordinator/running-run.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
+import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner, type AttemptScript } from "../fakes/worker-runner.ts";
@@ -119,10 +121,13 @@ function cli(
     credentials: { "claude-code": "token", opencode: "key" },
     docker: async () => null,
     gh: async () => null,
+    claudeSession: async () => null,
+    originHead: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
     },
+    images: new FakeImageDocker(),
     signal: new AbortController().signal,
     out: (text) => out.push(text),
     err: (text) => err.push(text),
@@ -640,7 +645,7 @@ describe("factory CLI", () => {
     const code = await main(["run", "42"], { ...env, docker: () => dockerProblem("factory-test-no-such-docker") });
 
     expect(code).toBe(1);
-    expect(err.join("\n")).toContain("factory: Docker is not available");
+    expect(err.join("\n")).toContain("✗ Docker is not available");
     expect(runner.workers).toHaveLength(0);
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
   });
@@ -654,10 +659,10 @@ describe("factory CLI", () => {
       return {};
     };
 
-    const code = await main(["run", "42"], { ...env, gh: async () => "gh is not signed in: run gh auth login" });
+    const code = await main(["run", "42"], { ...env, gh: async () => "gh is not signed in" });
 
     expect(code).toBe(1);
-    expect(err).toEqual(["factory: gh is not signed in: run gh auth login"]);
+    expect(err).toEqual(["✗ gh is not signed in → gh auth login"]);
     expect(questions).toEqual([]);
     expect(runner.workers).toHaveLength(0);
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
@@ -679,7 +684,7 @@ describe("factory CLI", () => {
     });
 
     expect(code).toBe(1);
-    expect(err.join("\n")).toContain("factory: gh is not available");
+    expect(err.join("\n")).toContain("✗ gh is not available");
     expect(questions).toHaveLength(0);
     expect(runner.workers).toHaveLength(0);
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
@@ -692,7 +697,17 @@ describe("factory CLI", () => {
     const code = await main(["run", "42"], { ...env, docker: async () => "Docker is not running", gh: async () => "gh is not available" });
 
     expect(code).toBe(1);
-    expect(err).toEqual(["factory: Docker is not running", "factory: gh is not available"]);
+    expect(err).toEqual(["✗ Docker is not running", "✗ gh is not available → gh auth login"]);
+  });
+
+  it("should paint the tool problems in red when the environment says colour is on", async () => {
+    const repoDir = await temp.make("cli-no-tools-color-");
+    const { env, err } = cli(repoDir);
+
+    const code = await main(["run", "42"], { ...env, color: false, errColor: true, docker: async () => "Docker is not running", gh: async () => null });
+
+    expect(code).toBe(1);
+    expect(err).toEqual([`\u001b[1;91m✗\u001b[0m Docker is not running`]);
   });
 
   it("should exit non-zero with a clear message when gh is missing", async () => {
@@ -1010,5 +1025,32 @@ describe("factory run: the notice of an abandoned run", () => {
     expect(await main(["run", "42"], env)).toBe(0);
 
     expect(out.some((line) => line.includes("was abandoned"))).toBe(false);
+  });
+});
+
+describe("factory auth then factory run", () => {
+  it("should hand the credential saved by factory auth to the worker of a later run that has no environment variable", async () => {
+    const repoDir = await runnableRepo();
+    const credentialsPath = join(await temp.make("auth-run-"), "software-factory", "credentials");
+    const saving = cli(repoDir);
+    const secrets = ["sk-ant-oat01-saved", "opencode-saved"];
+    saving.env.auth = {
+      credentialsPath,
+      environment: {},
+      terminal: false,
+      readSecret: async () => secrets.shift() ?? null,
+      confirm: async () => false,
+    };
+    expect(await main(["auth", "claude-code"], saving.env)).toBe(0);
+    expect(await main(["auth", "opencode"], saving.env)).toBe(0);
+
+    const later = cli(repoDir);
+    const loaded = await loadCredentials(credentialsPath, {});
+    if (!loaded.ok) throw new Error(loaded.problem);
+    later.env.credentials = loaded.credentials;
+    expect(await main(["approve", "42"], later.env)).toBe(0);
+    expect(await main(["run", "42"], later.env)).toBe(0);
+
+    expect(later.runner.workers[0]?.spec.env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-saved");
   });
 });

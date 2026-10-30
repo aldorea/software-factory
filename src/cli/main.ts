@@ -4,10 +4,12 @@ import { parseArgs } from "node:util";
 import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../commands/approve.ts";
 import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
 import type { ResolvedConfig, Role, RoleChoice, RunRole } from "../config/config.ts";
+import { problemOf, type CredentialsProblem } from "../config/credentials.ts";
 import { configPath, loadConfig } from "../config/load.ts";
 import { choiceProblems, chooseRole, parseRoleFlag, ROLES, type ChosenRole } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
 import { abandonedLogs, lastChange, runAbandoned } from "../coordinator/abandoned.ts";
+import { onlyNeeded } from "../coordinator/credential-needs.ts";
 import { defaultOrigin, resumeDefaults } from "../coordinator/resume.ts";
 import { latestRunEntry, readRunEntries } from "../coordinator/run-history.ts";
 import { runIssue } from "../coordinator/run.ts";
@@ -17,14 +19,26 @@ import type { GitHub } from "../github/github.ts";
 import { initRepo } from "../init/init.ts";
 import { WEB_HOST } from "../web/host.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
+import type { ImageDocker } from "../workers/images.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import { activityLine } from "./activity-line.ts";
+import { auth, AUTH_USAGE, type AuthInput } from "./auth.ts";
 import { clockMinutes } from "./clock-time.ts";
+import { image } from "./image.ts";
+import { nextStepsOf } from "./init-next.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
-import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
+import { menuCredentials } from "./menu-credentials.ts";
+import { menuEntries, type Annotate, type MenuCredentials, type RoleEntry } from "./role-menu.ts";
+import { gatherProbes, readiness, readinessProblems } from "./readiness.ts";
+import { reportErr, reportOut } from "./report.ts";
+import type { SetupLine } from "./setup-render.ts";
+import { doctor } from "./doctor.ts";
+import { envProbes } from "./env-probes.ts";
+import { specCredentialNeeds } from "./spec-needs.ts";
 import { runSummary } from "./run-summary.ts";
 import { RunView } from "./run-view.ts";
+import { refused } from "./target-repo.ts";
 import { renderProgress } from "./terminal-render.ts";
 import { web, WEB_USAGE } from "./web.ts";
 
@@ -37,12 +51,23 @@ export interface CliEnv {
   verifier(config: ResolvedConfig, role: RoleChoice): Verifier;
   notifier: Notifier;
   credentials: Partial<Record<AgentKind, string>>;
+  credentialsProblem?: CredentialsProblem;
   docker(): Promise<string | null>;
   gh(): Promise<string | null>;
-  ask?: (entries: RoleEntry[], annotate: Annotate) => Promise<Partial<Record<Role, RoleChoice>>>;
+  claudeSession(): Promise<string | null>;
+  originHead(repoDir: string): Promise<string | null>;
+  ask?: (
+    entries: RoleEntry[],
+    annotate: Annotate,
+    credentials?: MenuCredentials,
+  ) => Promise<Partial<Record<Role, RoleChoice>>>;
   terminal?: { columns(): number; write(text: string): void };
   launch(launch: InteractiveLaunch): Promise<number>;
+  images: ImageDocker;
   signal: AbortSignal;
+  auth?: AuthInput;
+  color?: boolean;
+  errColor?: boolean;
   out(text: string): void;
   err(text: string): void;
 }
@@ -55,6 +80,9 @@ const USAGE = [
   "       factory stats [target-repo]",
   `       ${WEB_USAGE}`,
   "       factory init [target-repo]",
+  `       ${AUTH_USAGE}   save the credential of an agent, once for every repo`,
+  "       factory image [target-repo]   build the base image and the worker image",
+  "       factory doctor [target-repo]   check that the host and the repo are ready, and change nothing",
 ].join("\n");
 
 type RoleFlags = Partial<Record<RunRole, string>>;
@@ -68,9 +96,16 @@ interface Command {
 }
 
 export async function main(args: string[], env: CliEnv): Promise<number> {
+  if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
+    env.out(USAGE);
+    return 0;
+  }
   if (args[0] === "stats") return stats(args.slice(1), env);
+  if (args[0] === "doctor") return doctor(args.slice(1), env, USAGE);
   if (args[0] === "init") return init(args.slice(1), env);
+  if (args[0] === "image") return image(args.slice(1), env, USAGE);
   if (args[0] === "web") return web(args.slice(1), env, USAGE);
+  if (args[0] === "auth") return auth(args.slice(1), env);
   const parsed = parseCommand(args);
   if (parsed === null) {
     env.err(USAGE);
@@ -78,6 +113,7 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
   }
   const { command, issue, repoArg, flags, refinementFlag } = parsed;
   const repoDir = resolve(env.cwd, repoArg ?? ".");
+  if (await refused(repoDir, env)) return 1;
   if (command === "refine") return refine(repoDir, issue, refinementFlag, env);
   try {
     if (command === "run") return await run(repoDir, issue, flags, env);
@@ -148,28 +184,35 @@ function parseCommand(args: string[]): Command | null {
 }
 
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
-  const toolProblems = [await env.docker(), await env.gh()].filter((problem) => problem !== null);
-  if (toolProblems.length > 0) {
-    for (const problem of toolProblems) env.err(`factory: ${problem}`);
-    return 1;
-  }
-  const config = await loadConfig(repoDir);
+  const loaded = await loadConfig(repoDir).then(
+    (config) => ({ ok: true as const, config }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  const probes = await gatherProbes("run", envProbes(repoDir, env, loaded.ok ? loaded.config.image : null));
   const latest = await latestRunEntry(join(repoDir, ".factory", "logs"), issue);
   const previous = latest?.log ?? null;
-  if (latest !== null && runAbandoned(latest, env.clock.now())) {
-    env.out(`run ${latest.log.runId} of #${issue} was abandoned at ${clockMinutes(lastChange(latest))}; starting a new run`);
-  }
-  const defaults = resumeDefaults(previous, config.roles);
+  const defaults = loaded.ok ? resumeDefaults(previous, loaded.config.roles) : {};
   const flagged: Partial<Record<RunRole, RoleChoice>> = {};
+  const flagProblems: SetupLine[] = [];
   for (const role of ROLES) {
     const flag = flags[role];
     if (flag === undefined) continue;
     const parsed = parseRoleFlag(role, flag, defaults[role]);
-    if (!parsed.ok) {
-      env.err(`factory: ${parsed.problem}`);
-      return 1;
-    }
-    flagged[role] = parsed.choice;
+    if (parsed.ok) flagged[role] = parsed.choice;
+    else flagProblems.push({ kind: "fail", text: parsed.problem });
+  }
+  const needs = await specCredentialNeeds(repoDir, issue);
+  const menuWillOpen = env.ask !== undefined;
+  const beforeMenu = readiness("run", {
+    probes,
+    roles: onlyNeeded(menuWillOpen ? flagged : { ...defaults, ...flagged }, needs),
+    credentials: env.credentials,
+  });
+  if (reportErr([...readinessProblems(beforeMenu), ...flagProblems], env)) return 1;
+  if (!loaded.ok) throw loaded.error;
+  const config = loaded.config;
+  if (latest !== null && runAbandoned(latest, env.clock.now())) {
+    env.out(`run ${latest.log.runId} of #${issue} was abandoned at ${clockMinutes(lastChange(latest))}; starting a new run`);
   }
   const prompted =
     env.ask === undefined
@@ -177,6 +220,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
       : await env.ask(
           menuEntries({ roles: ROLES, flagged, defaults, defaultOrigin: (role) => defaultOrigin(previous, role) }),
           planLimitAnnotate(previous, env.clock.now()),
+          menuCredentials(env),
         );
   const roles: Partial<Record<RunRole, RoleChoice>> = {};
   for (const role of ROLES) {
@@ -192,6 +236,8 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     }
     roles[role] = chosen.choice;
   }
+  const afterMenu = readiness("run", { probes, roles: onlyNeeded(roles, needs), credentials: env.credentials });
+  if (reportErr(readinessProblems(afterMenu), env)) return 1;
   env.out(`Preparing run #${issue}; factory web shows it at http://${WEB_HOST}:${DEFAULT_WEB_PORT}/`);
   const view = env.terminal ? new RunView({ now: () => env.clock.now(), ...env.terminal }) : null;
   const ticker = view ? setInterval(() => view.tick(), 1000) : null;
@@ -220,6 +266,9 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
 
 async function refine(repoDir: string, issue: number, flag: string | undefined, env: CliEnv): Promise<number> {
   try {
+    const probes = await gatherProbes("refine", envProbes(repoDir, env));
+    const ready = readiness("refine", { probes, roles: {}, credentials: env.credentials });
+    if (reportErr(readinessProblems(ready), env)) return 1;
     const chosen = await refinementChoice(repoDir, flag, env);
     if (!chosen.ok) {
       env.err(`factory: ${chosen.problem}`);
@@ -273,13 +322,26 @@ async function configuredRefinement(repoDir: string): Promise<RoleChoice | undef
   return present ? (await loadConfig(repoDir)).roles.refinement : undefined;
 }
 
+function credentialsWarning(failure: CredentialsProblem): SetupLine {
+  const { problem, fix } = problemOf(failure);
+  return { kind: "warn", text: problem, ...(fix !== undefined ? { command: fix } : {}) };
+}
+
 async function init(args: string[], env: CliEnv): Promise<number> {
   if (args.length > 1) {
     env.err(USAGE);
     return 2;
   }
+  const repoDir = resolve(env.cwd, args[0] ?? ".");
+  if (await refused(repoDir, env)) return 1;
   try {
-    for (const line of await initRepo(resolve(env.cwd, args[0] ?? "."))) env.out(line);
+    const written = await initRepo(repoDir);
+    const lines: SetupLine[] = [
+      ...written.map((text): SetupLine => ({ kind: "ok", text })),
+      ...(env.credentialsProblem === undefined ? [] : [credentialsWarning(env.credentialsProblem)]),
+      ...(await nextStepsOf(repoDir, env)),
+    ];
+    reportOut(lines, env);
     return 0;
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);
@@ -292,8 +354,9 @@ async function stats(args: string[], env: CliEnv): Promise<number> {
     env.err(USAGE);
     return 2;
   }
+  const repoDir = resolve(env.cwd, args[0] ?? ".");
+  if (await refused(repoDir, env)) return 1;
   try {
-    const repoDir = resolve(env.cwd, args[0] ?? ".");
     const { runs, unreadable } = await readRunEntries(join(repoDir, ".factory", "logs"));
     const abandoned = abandonedLogs(runs, env.clock.now());
     env.out(formatStats(summarizeRuns(runs.map((entry) => entry.log), abandoned), unreadable));

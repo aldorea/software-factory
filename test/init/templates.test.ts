@@ -8,10 +8,12 @@ import {
   factoryFiles,
   renderConfig,
   renderDockerfile,
+  renderDockerignore,
   renderEnvExample,
   renderPackageJson,
   type FactoryTemplateInput,
 } from "../../src/init/templates.ts";
+import { dockerignoreProblem } from "../../src/workers/dockerignore.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
@@ -96,6 +98,25 @@ describe("the generated .factory/config.ts", () => {
     expect(() => environment(worker(0))).toThrow("FACTORY_E2E_DATABASE_URL_0");
   });
 
+  it("should write the default roles: Claude Code everywhere, opus for the refinement and the verifier, sonnet for the workers and the tester", async () => {
+    const dir = await repoWith(INPUT, filledExample());
+
+    expect((await loadConfig(dir)).roles).toEqual({
+      workers: { agent: "claude-code", model: "sonnet" },
+      verifier: { agent: "claude-code", model: "opus" },
+      tester: { agent: "claude-code", model: "sonnet" },
+      refinement: { agent: "claude-code", model: "opus" },
+    });
+  });
+
+  it("should give the verifier a model that differs from the workers, so its independence does not rest only on a clean context", async () => {
+    const dir = await repoWith(INPUT, filledExample());
+
+    const { roles } = await loadConfig(dir);
+
+    expect(roles.verifier?.model).not.toBe(roles.workers?.model);
+  });
+
   it("should import nothing from the factory, so it loads when the two repos live in different folders", () => {
     const imports = renderConfig(INPUT).match(/^import .*$/gm) ?? [];
 
@@ -160,6 +181,12 @@ describe("the generated .factory/package.json", () => {
   });
 });
 
+describe("the generated .dockerignore", () => {
+  it("should exclude .env, because .factory/ is the build context of the worker image and .env holds secrets", () => {
+    expect(dockerignoreProblem(renderDockerignore())).toBeNull();
+  });
+});
+
 describe("the generated .env.example", () => {
   it("should list a variable for each slot, empty, so a copy fails closed until it is filled in", () => {
     expect(parseEnv(renderEnvExample())).toEqual({
@@ -185,10 +212,11 @@ describe("the slots of the generated config and .env.example", () => {
 });
 
 describe("factoryFiles", () => {
-  it("should list the four files of .factory/ by their path from the root of the target repo", () => {
+  it("should list the five files of .factory/ by their path from the root of the target repo", () => {
     expect(factoryFiles(INPUT).map((file) => file.path)).toEqual([
       ".factory/config.ts",
       ".factory/Dockerfile",
+      ".factory/.dockerignore",
       ".factory/.env.example",
       ".factory/package.json",
     ]);

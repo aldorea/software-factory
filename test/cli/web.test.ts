@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { main, type CliEnv } from "../../src/cli/main.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
+import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
@@ -42,7 +43,10 @@ function cli(cwd: string) {
     credentials: {},
     docker: async () => null,
     gh: async () => null,
+    claudeSession: async () => null,
+    originHead: async () => null,
     launch: async () => 0,
+    images: new FakeImageDocker(),
     signal: stop.signal,
     out: (text) => {
       out.push(text);

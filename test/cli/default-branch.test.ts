@@ -3,9 +3,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
+import { originHeadProblem } from "../../src/git/repo.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
+import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
@@ -104,10 +106,13 @@ function cli(cwd: string) {
     credentials: { "claude-code": "token", opencode: "key" },
     docker: async () => null,
     gh: async () => null,
+    claudeSession: async () => null,
+    originHead: (repoDir) => originHeadProblem(repoDir),
     launch: async (launch) => {
       launches.push(launch);
       return 0;
     },
+    images: new FakeImageDocker(),
     signal: new AbortController().signal,
     out: (text) => out.push(text),
     err: (text) => err.push(text),
@@ -129,16 +134,16 @@ describe("default branch of the target repo", () => {
     expect(launches).toHaveLength(1);
   });
 
-  it("should resume an existing integration branch with refine even when origin/HEAD is not set, because only creating a branch needs the default branch", async () => {
+  it("should stop refine on an existing integration branch when origin/HEAD is not set, because the readiness of refine asks for it before anything starts", async () => {
     const repoDir = await trunkRepo({ setHead: false });
     const integration = await git(repoDir, "rev-parse", BRANCH);
     const { env, err, launches } = cli(repoDir);
 
-    expect(await main(["refine", "42", "--refinement-agent", "claude-code:sonnet"], env)).toBe(0);
+    expect(await main(["refine", "42", "--refinement-agent", "claude-code:sonnet"], env)).toBe(1);
 
-    expect(err).toEqual([]);
+    expect(err).toEqual(["✗ origin/HEAD is not set → git remote set-head origin --auto"]);
     expect(await git(repoDir, "rev-parse", BRANCH)).toBe(integration);
-    expect(launches).toHaveLength(1);
+    expect(launches).toHaveLength(0);
   });
 
   it("should ask GitHub for a pull request whose base is the default branch when running", async () => {

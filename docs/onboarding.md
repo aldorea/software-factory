@@ -27,7 +27,7 @@ Each command explains what it needs and how to fix what is missing, so this page
 
 - Node 24 (`engines` in [`package.json`](../package.json) has the exact floor), pnpm, Docker and the GitHub CLI `gh`, signed in (`gh auth login`).
 - The Claude Code CLI, `claude`, signed in: the refinement runs it on the host with your session.
-- The credential of each agent that a run will use: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` and, for OpenCode Go, `OPENCODE_API_KEY`. `factory auth` saves them once, outside every repo; an environment variable of the same name wins over the saved one. See [ADR 0001](adr/0001-subscriptions-only.md) and [design.md](design.md#agents-and-authentication).
+- The credential of each agent that a run will use: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` and, for OpenCode Go, `OPENCODE_API_KEY`. `factory auth` saves them once, outside every repo; an environment variable of the same name wins over the saved one. A run asks only for the credentials of the roles its spec needs: the tester has none to set when every criterion is for a human. `factory auth` refuses a value with a space, a line break, a `#`, a quote, a backtick or a backslash, because Node's env parser would truncate or unquote it. With no terminal, `factory auth claude-code --force` saves a token that does not start with `sk-ant-oat`; in a terminal it asks you to confirm. See [ADR 0001](adr/0001-subscriptions-only.md) and [design.md](design.md#agents-and-authentication).
 
 `factory doctor` checks all of this, and `factory run` and `factory refine` check what they need before they start.
 
@@ -37,7 +37,7 @@ The factory is a local clone that you link, not a published package. From the cl
 
 ## 2. Prepare the target repo
 
-From the root of the target repo, `factory init` stops with a message when the folder is not the root of a git repo, or the repo has no `origin` remote. It writes the files of `.factory/` that are missing, adds `.factory/logs/`, `.factory/worktrees/` and `.factory/.env` to `.gitignore` when they are not there, and lists each file as written or skipped. It never overwrites a file, so you can run it again on a half-prepared repo, and it never touches the repo's `package.json`. The templates are in [`src/init/templates.ts`](../src/init/templates.ts) and the decisions in [`src/init/plan.ts`](../src/init/plan.ts).
+From the root of the target repo, `factory init` stops with a message when the folder is not the root of a git repo, or the repo has no `origin` remote. It writes the files of `.factory/` that are missing (including `.factory/.dockerignore`), adds `.factory/logs/`, `.factory/worktrees/` and `.factory/.env` to `.gitignore` when they are not there, and lists each file as written or skipped. It never overwrites a file, so you can run it again on a half-prepared repo, and it never touches the repo's `package.json`. The templates are in [`src/init/templates.ts`](../src/init/templates.ts) and the decisions in [`src/init/plan.ts`](../src/init/plan.ts).
 
 What the generated files assume, and what you may need to change:
 
@@ -55,7 +55,7 @@ A mistake in the config is reported field by field when it loads. `factory valid
 
 ## 3. Build the images
 
-Each worker runs in a container of the worker image of its repo, built `FROM` the base image, which holds the agents. From the root of the target repo, `factory image` builds both, in that order: the base image from the factory's clone with your user and group ids, so that bind-mounted worktrees stay yours, then the worker image from `.factory/Dockerfile` with the `image` name of the config. The worker image records which base image it was built from, and `factory run` refuses a worker image built by hand or from an older base image. Run `factory image` again after you pull the factory or change `.factory/Dockerfile`.
+Each worker runs in a container of the worker image of its repo, built `FROM` the base image, which holds the agents. From the root of the target repo, `factory image` builds both, in that order: the base image from the factory's clone with your user and group ids, so that bind-mounted worktrees stay yours, then the worker image with the `image` name of the config, from `.factory/Dockerfile` and with `.factory/` as the build context. `.factory/.dockerignore` keeps `.factory/.env` out of that context: `factory init` writes it with a `.env` line and never overwrites it, and `factory image` and `factory doctor` fail when it is missing or does not exclude `.env`. If you wrote your own, add the line `.env`. The worker image records which base image it was built from, and `factory run` refuses a worker image built by hand or from an older base image. Run `factory image` again after you pull the factory or change `.factory/Dockerfile`.
 
 ## 4. Where and how to run the commands
 

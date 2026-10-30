@@ -1,6 +1,19 @@
 import { emitKeypressEvents } from "node:readline";
 import type { Role, RoleChoice } from "../config/config.ts";
-import { initialMenu, menuChoices, reduceMenu, renderMenu, SUGGESTED_MODELS, type Annotate, type MenuKey, type RoleEntry } from "./role-menu.ts";
+import type { AgentKind } from "../workers/types.ts";
+import type { KeyInput } from "./tty.ts";
+import {
+  credentialPrompted,
+  initialMenu,
+  menuChoices,
+  reduceMenu,
+  renderMenu,
+  SUGGESTED_MODELS,
+  type Annotate,
+  type MenuCredentials,
+  type MenuKey,
+  type RoleEntry,
+} from "./role-menu.ts";
 
 interface Keypress {
   name?: string;
@@ -27,12 +40,27 @@ export function menuKey(text: string | undefined, key: Keypress): MenuKey | null
   return null;
 }
 
-export function askRolesInTerminal(entries: RoleEntry[], annotate: Annotate): Promise<Partial<Record<Role, RoleChoice>>> {
-  const { stdin, stdout } = process;
-  let state = initialMenu(entries, SUGGESTED_MODELS, annotate);
+export interface MenuIo {
+  stdin: KeyInput;
+  stdout: NodeJS.WritableStream;
+  stderr: NodeJS.WritableStream;
+}
+
+export function askRolesInTerminal(
+  entries: RoleEntry[],
+  annotate: Annotate,
+  credentials?: MenuCredentials,
+  io: MenuIo = process,
+): Promise<Partial<Record<Role, RoleChoice>>> {
+  const { stdin, stdout, stderr } = io;
+  let state = initialMenu(entries, SUGGESTED_MODELS, annotate, credentials?.missing);
   let drawn = 0;
-  const draw = () => {
+  const erase = () => {
     if (drawn > 0) stdout.write(`\x1b[${drawn}A\r\x1b[J`);
+    drawn = 0;
+  };
+  const draw = () => {
+    erase();
     const lines = renderMenu(state);
     for (const line of lines) stdout.write(`${line.startsWith("❯") ? `\x1b[36m${line}\x1b[0m` : line}\n`);
     drawn = lines.length;
@@ -47,10 +75,29 @@ export function askRolesInTerminal(entries: RoleEntry[], annotate: Annotate): Pr
       stdin.setRawMode(false);
       stdin.pause();
     };
+    const addCredential = async (agent: AgentKind) => {
+      stdin.off("keypress", onKey);
+      erase();
+      let saved = false;
+      try {
+        saved = credentials === undefined ? false : await credentials.add(agent);
+      } catch (error) {
+        stderr.write(`✗ factory: ${(error as Error).message}\n`);
+      }
+      state = credentialPrompted(state, saved ? "saved" : "cancelled");
+      stdin.setRawMode(true);
+      stdin.resume();
+      stdin.on("keypress", onKey);
+      draw();
+    };
     const onKey = (text: string | undefined, key: Keypress) => {
       const pressed = menuKey(text, key);
       if (pressed === null) return;
       state = reduceMenu(state, pressed);
+      if (state.view.kind === "credential") {
+        void addCredential(state.view.agent);
+        return;
+      }
       draw();
       if (state.outcome === "started") {
         done();

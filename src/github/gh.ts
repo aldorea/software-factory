@@ -25,13 +25,13 @@ export async function ghProblem(command = "gh"): Promise<string | null> {
     result = await exec(command, ["auth", "status"], { timeoutMs: 30_000 });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return `gh is not available: install the GitHub CLI (${command}) and run gh auth login before factory run`;
+      return `gh is not available: install the GitHub CLI (${command})`;
     }
     throw error;
   }
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim();
-    return `gh is not signed in, run gh auth login: ${command} auth status failed with exit code ${result.exitCode}${detail === "" ? "" : `: ${detail}`}`;
+    return `gh is not signed in: ${command} auth status failed with exit code ${result.exitCode}${detail === "" ? "" : `: ${detail}`}`;
   }
   return null;
 }

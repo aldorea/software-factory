@@ -2,6 +2,7 @@ import type { Role, RunRole } from "../workers/agent-adapter.ts";
 import { AGENT_KINDS, missingRequirements } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { RoleChoice } from "./config.ts";
+import { credentialHint, CREDENTIAL_VARIABLES } from "./credentials.ts";
 
 export const ROLES: RunRole[] = ["workers", "verifier", "tester"];
 
@@ -12,11 +13,6 @@ export const ROLE_FLAGS: Record<Role, string> = {
   verifier: "--verifier-agent",
   tester: "--tester-agent",
   refinement: "--refinement-agent",
-};
-
-export const CREDENTIAL_VARIABLES: Record<AgentKind, string> = {
-  "claude-code": "CLAUDE_CODE_OAUTH_TOKEN",
-  opencode: "OPENCODE_API_KEY",
 };
 
 export type ChosenRole = { ok: true; choice: RoleChoice } | { ok: false; problem: string };
@@ -66,5 +62,5 @@ export function credentialProblem(
   credentials: Partial<Record<AgentKind, string>>,
 ): string | null {
   if (credentials[choice.agent]) return null;
-  return `${CREDENTIAL_VARIABLES[choice.agent]} is not set; the ${choice.agent} ${role} needs it`;
+  return `${CREDENTIAL_VARIABLES[choice.agent]} is not set; the ${choice.agent} ${role} needs it: ${credentialHint(choice.agent)}`;
 }
