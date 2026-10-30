@@ -24,6 +24,7 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 | `factory init` | Prepares `.factory/` in a target repo |
 | `factory auth [agent] [--force]` | Saves the credential of an agent, once for every target repo |
 | `factory image [target-repo]` | Builds the base image, then the worker image of the target repo, with `.factory/` as its build context |
+| `factory publish <n>` | Publishes the last run of issue `<n>` again: pushes its branches and opens or updates its PR, with no agent |
 | `factory doctor [target-repo]` | Checks that the host and the target repo are ready for any issue, and changes nothing |
 
 The target repo is the current directory, or the last argument. The developer starts each command. Nothing starts on its own. Every command refuses to work on the factory itself or on a folder inside `.factory/worktrees/` of a repo, because its run log would land there. To set a repo up, see the [onboarding guide](onboarding.md).
@@ -49,7 +50,8 @@ One set of checks tells whether the host and the target repo are ready. `factory
 | Command | Checks before it starts |
 |---|---|
 | `factory refine` | `gh` signed in, the Claude session of the host (`claude auth status`), `origin/HEAD` resolved |
-| `factory run` | Docker running, `gh` signed in, the credential of the agent of each role the spec needs, the worker image present and built from the current base image |
+| `factory run` | Docker running, `gh` signed in, the credential of the agent of each role the spec needs, the worker image present and built from the current base image, push access to the GitHub repo of `origin` with the `gh` session |
+| `factory publish` | `gh` signed in, push access to the GitHub repo of `origin` with the `gh` session |
 | `factory doctor` | All of the above, Node, the config loads, `.factory/.env` has every value the config reads, `.factory/.dockerignore` excludes `.env`, and the credential of each agent the config's roles use |
 
 `factory run` asks for a credential only for the roles the spec needs: the workers always, the independent verifier only when a criterion has `playwright` evidence, and the acceptance tester only when a criterion has evidence other than `human`. This is the rule of the run itself, so a spec with no automatic criteria runs with no credential for the tester. When the spec cannot be read at that point, every role counts, and the run reports the spec problem right after. `factory doctor` has no issue, so it checks every agent that a role of the config uses.
@@ -64,6 +66,7 @@ What depends on one issue, such as a criterion whose type has no evidence comman
 ✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode
 ✗ mi-repo-factory-worker:dev built from an older base image → factory image
 ✗ origin/HEAD not set → git remote set-head origin --auto
+✗ cannot reach github.com/aldorea/askwell with the gh session → gh auth status
 ```
 
 `factory doctor` exits with 1 when it finds a problem and 0 otherwise.
@@ -138,7 +141,7 @@ The coordinator publishes these attachments on the **evidence branch** `factory-
 - The branch has no common history with the default branch and is never merged.
 - A run adds a commit on top of the branch and never rewrites the earlier ones. The PR links each human criterion to its files at the pushed commit, so the links keep working after later runs. Images render inline.
 - A run with no attachments does not create the branch.
-- A failure to publish is recorded in `run.json` (`evidence.failure`), stated in the PR, and keeps the PR a draft.
+- A failure to push it is a failure of the [publication](#publication) of the run, like a failure to push the integration branch: `factory publish <n>` pushes it again.
 
 A "human" criterion with no reason in the spec means that the refinement is not finished.
 
@@ -243,6 +246,17 @@ The activity is only shown: nobody talks to an agent during an attempt, and it n
 The PR names the agent and the model of each role, and any change on resume. When the independent verifier or the acceptance tester used the same model as the workers, the PR says so in one line: its independence then rests on its clean context alone.
 
 The issue, `specs/<n>.md` and the PR are the records. A new session starts again from them, not from a conversation.
+
+### Publication
+
+The publication is the last step of a run, ended or paused: the coordinator, on the host, pushes the integration branch and the evidence branch and opens or updates the PR. No container pushes, and no container holds a GitHub credential. See [ADR 0005](adr/0005-publish-through-gh-over-https.md).
+
+- **Transport.** Every push of the coordinator goes over HTTPS to `https://github.com/<owner>/<repo>.git`, with the `gh` session as the only credential helper. `<owner>/<repo>` comes from `gh repo view`, the same repo the PR goes to; when `origin` is not a GitHub repo, the readiness check fails closed. The remote and the git configuration of the target repo do not change.
+- **No prompt.** The push runs with `-c credential.helper=` before the helper of `gh`, so no other helper answers, and with `GIT_TERMINAL_PROMPT=0`, so a missing credential fails at once instead of asking. A run never waits for input.
+- **Readiness.** `factory run`, `factory publish` and `factory doctor` check push access before they start with `git ls-remote`, through the same transport.
+- **Retries.** A network failure (a timeout, a refused or reset connection) is retried 3 times, after 5, 15 and 45 seconds. Any other failure, such as a missing permission, fails at once.
+- **A failed publication.** When a push of either branch or the call that opens or updates the PR fails, `run.json` records a publication failure with its message, and the run keeps its result. The notification and the summary of `factory run` say `Not published: <title> → factory publish <n>`, and the command exits with 1.
+- **`factory publish <n>`.** It publishes the last run of the issue when it ended or paused: it pushes both branches and opens or updates the PR, with no agent and no plan usage. It refuses a run that is running or abandoned, and says why. It can run any number of times: an existing PR is updated.
 
 ## Architecture
 
@@ -356,6 +370,7 @@ The independent verifier and the acceptance tester do not count for this ceiling
 - The **default branch** of a target repo is the one that `origin/HEAD` points to. The integration branch is `factory/<n>-<slug>`, from its local copy, and the PR goes to the default branch. The factory never fetches: the developer updates the default branch before `factory refine`.
 - A missing `origin/HEAD` stops `refine` and `run` with the command that sets it (`git remote set-head origin --auto`). A default branch with no local copy stops them with a message of its own.
 - Each subtask has its own branch from the integration branch.
+- The coordinator pushes the integration branch and the evidence branch over HTTPS with the `gh` session (see [Publication](#publication)); nothing else of the factory pushes.
 - Before the PR is ready, the integration branch must contain the local head of the default branch. When the default branch moved during the run, the coordinator merges it and runs the integrated verification again on the result. A conflict blocks the run with a `default-branch-conflict` block in `run.json` and in the PR, and counts as a conflict at integration.
 
 ## Measurement
