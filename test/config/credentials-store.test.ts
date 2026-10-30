@@ -2,6 +2,7 @@ import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promis
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { deleteCredential, loadCredentials, readSavedCredentials, saveCredential } from "../../src/config/credentials-store.ts";
+import { exec } from "../../src/workers/sh.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
@@ -76,6 +77,58 @@ describe("saveCredential", () => {
   });
 });
 
+describe("a write that fails", () => {
+  async function failingWrite(change: (path: string) => Promise<unknown>): Promise<{ left: string[]; text: string; rejected: boolean }> {
+    const path = await credentialsPath();
+    await seed(path, "OPENCODE_API_KEY=a\n");
+    await chmod(dirname(path), 0o500);
+    let rejected = false;
+    try {
+      await change(path);
+    } catch {
+      rejected = true;
+    } finally {
+      await chmod(dirname(path), 0o700);
+    }
+    return { left: await readdir(dirname(path)), text: await readFile(path, "utf8"), rejected };
+  }
+
+  it("should leave no temporary file and the old file as it was when saving in a read-only folder fails", async () => {
+    const result = await failingWrite((path) => saveCredential(path, "opencode", "b"));
+
+    expect(result).toEqual({ left: ["credentials"], text: "OPENCODE_API_KEY=a\n", rejected: true });
+  });
+
+  it("should leave no temporary file and the old file as it was when deleting in a read-only folder fails", async () => {
+    const result = await failingWrite((path) => deleteCredential(path, "opencode"));
+
+    expect(result).toEqual({ left: ["credentials"], text: "OPENCODE_API_KEY=a\n", rejected: true });
+  });
+});
+
+describe("a rename that fails", () => {
+  it.skipIf(process.platform !== "darwin")(
+    "should remove the temporary file it wrote when the final rename is refused, as it is for a file marked immutable",
+    async () => {
+      const path = await credentialsPath();
+      await seed(path, "OPENCODE_API_KEY=a\n");
+      await exec("chflags", ["uchg", path]);
+      let rejected = false;
+      try {
+        await saveCredential(path, "opencode", "b");
+      } catch {
+        rejected = true;
+      } finally {
+        await exec("chflags", ["nouchg", path]);
+      }
+
+      expect(rejected).toBe(true);
+      expect(await readdir(dirname(path))).toEqual(["credentials"]);
+      expect(await readFile(path, "utf8")).toBe("OPENCODE_API_KEY=a\n");
+    },
+  );
+});
+
 describe("deleteCredential", () => {
   it("should remove only the line of the agent and keep the other lines as they were", async () => {
     const path = await credentialsPath();
@@ -137,7 +190,10 @@ describe("readSavedCredentials", () => {
     const result = await readSavedCredentials(path);
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.problem).toContain(`chmod 600 ${path}`);
+    if (!result.ok) {
+      expect(result.problem).toBe(`${path} can be read by other users (mode ${mode.toString(8)})`);
+      expect(result.fix).toBe(`chmod 600 ${path}`);
+    }
     expect((await stat(path)).mode & 0o777).toBe(mode);
   });
 
@@ -148,7 +204,10 @@ describe("readSavedCredentials", () => {
     const result = await readSavedCredentials(path);
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.problem).toContain("line 2");
+    if (!result.ok) {
+      expect(result.problem).toContain("line 2");
+      expect(result.fix).toBeUndefined();
+    }
   });
 });
 

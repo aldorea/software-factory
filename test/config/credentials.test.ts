@@ -149,8 +149,12 @@ describe("maskCredential", () => {
     expect(maskCredential("sk-ant-oat01-abcdef1f3a")).toBe("…1f3a");
   });
 
-  it("should show nothing of a value of 4 characters or fewer", () => {
-    expect(maskCredential("abcd")).toBe("…");
+  it("should show the last 4 characters of a value of 12 characters", () => {
+    expect(maskCredential("abcdefgh1234")).toBe("…1234");
+  });
+
+  it.each(["abcd", "abcdefg", "abcdefghijk"])("should show nothing of a value of %s, because 4 characters are too much of a short secret", (value) => {
+    expect(maskCredential(value)).toBe("…");
   });
 });
 

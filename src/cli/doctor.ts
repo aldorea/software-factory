@@ -1,16 +1,11 @@
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { loadConfig } from "../config/load.ts";
 import { envProbes } from "./env-probes.ts";
-import { readEnvFile } from "./init-next.ts";
+import { readEnvFacts } from "./env-facts.ts";
 import type { CliEnv } from "./main.ts";
-import { gatherProbes, readiness, readinessLines, type EnvFacts } from "./readiness.ts";
-import { renderSetup } from "./setup-render.ts";
+import { gatherProbes, readiness, readinessLines } from "./readiness.ts";
+import { reportOut } from "./report.ts";
 import { refused } from "./target-repo.ts";
-
-async function envFacts(repoDir: string): Promise<EnvFacts> {
-  const example = await readEnvFile(join(repoDir, ".factory", ".env.example"));
-  return { variables: Object.keys(example ?? {}), values: await readEnvFile(join(repoDir, ".factory", ".env")) };
-}
 
 export async function doctor(args: string[], env: CliEnv, usage: string): Promise<number> {
   if (args.length > 1) {
@@ -34,9 +29,9 @@ export async function doctor(args: string[], env: CliEnv, usage: string): Promis
       roles: config?.roles ?? {},
       credentials: env.credentials,
       credentialsProblem: env.credentialsProblem ?? null,
-      env: await envFacts(repoDir),
+      env: await readEnvFacts(repoDir),
     });
-    for (const line of renderSetup(readinessLines(results), env.color === true)) env.out(line);
+    reportOut(readinessLines(results), env);
     return results.some((result) => result.kind === "fail") ? 1 : 0;
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);

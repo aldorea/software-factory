@@ -1,6 +1,7 @@
 import { emitKeypressEvents } from "node:readline";
 import type { Role, RoleChoice } from "../config/config.ts";
 import type { AgentKind } from "../workers/types.ts";
+import type { KeyInput } from "./tty.ts";
 import {
   credentialPrompted,
   initialMenu,
@@ -39,12 +40,19 @@ export function menuKey(text: string | undefined, key: Keypress): MenuKey | null
   return null;
 }
 
+export interface MenuIo {
+  stdin: KeyInput;
+  stdout: NodeJS.WritableStream;
+  stderr: NodeJS.WritableStream;
+}
+
 export function askRolesInTerminal(
   entries: RoleEntry[],
   annotate: Annotate,
   credentials?: MenuCredentials,
+  io: MenuIo = process,
 ): Promise<Partial<Record<Role, RoleChoice>>> {
-  const { stdin, stdout } = process;
+  const { stdin, stdout, stderr } = io;
   let state = initialMenu(entries, SUGGESTED_MODELS, annotate, credentials?.missing);
   let drawn = 0;
   const erase = () => {
@@ -70,7 +78,12 @@ export function askRolesInTerminal(
     const addCredential = async (agent: AgentKind) => {
       stdin.off("keypress", onKey);
       erase();
-      const saved = credentials === undefined ? false : await credentials.add(agent);
+      let saved = false;
+      try {
+        saved = credentials === undefined ? false : await credentials.add(agent);
+      } catch (error) {
+        stderr.write(`✗ factory: ${(error as Error).message}\n`);
+      }
       state = credentialPrompted(state, saved ? "saved" : "cancelled");
       stdin.setRawMode(true);
       stdin.resume();

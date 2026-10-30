@@ -1,7 +1,7 @@
 import type { ResolvedConfig, RoleChoice } from "../config/config.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { credentialHint } from "../config/credentials.ts";
-import { CREDENTIAL_VARIABLES } from "../config/roles.ts";
+import { CREDENTIAL_VARIABLES } from "../config/credentials.ts";
 import type { AgentKind, AttemptOutcome } from "../workers/types.ts";
 import { askVerifier } from "../workers/verifier.ts";
 import type { Clock } from "./ports.ts";

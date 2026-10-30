@@ -7,7 +7,7 @@ import {
   initialAuthMenu,
   reduceAuthMenu,
   renderAuthMenu,
-  runAuthMenu,
+  showAuthMenu,
   type AuthMenuState,
   type MenuScreen,
 } from "../../src/cli/auth-menu.ts";
@@ -123,14 +123,14 @@ function scripted(keys: MenuKey[]) {
   return { screen, shown, log };
 }
 
-describe("runAuthMenu", () => {
+describe("showAuthMenu", () => {
   it("should draw the origins from the environment and a real file, and change nothing when Esc quits", async () => {
     const path = await credentialsPath();
     await saveCredential(path, "claude-code", "sk-ant-oat01-xxxxa1f3");
     const { screen, shown } = scripted(["escape"]);
     const prompted: string[] = [];
 
-    const result = await runAuthMenu({
+    const result = await showAuthMenu({
       credentialsPath: path,
       environment: { OPENCODE_API_KEY: "e" },
       screen,
@@ -167,7 +167,7 @@ describe("runAuthMenu", () => {
     };
     const prompted: string[] = [];
 
-    await runAuthMenu({
+    await showAuthMenu({
       credentialsPath: path,
       environment: {},
       screen: tracked,
@@ -189,7 +189,7 @@ describe("runAuthMenu", () => {
     const path = await credentialsPath();
     const { screen, shown } = scripted(["enter", "escape"]);
 
-    const result = await runAuthMenu({
+    const result = await showAuthMenu({
       credentialsPath: path,
       environment: {},
       screen,
@@ -207,7 +207,7 @@ describe("runAuthMenu", () => {
     await saveCredential(path, "opencode", "key-with-tail-9z9z");
     const { screen, shown } = scripted([{ char: "d" }, "escape"]);
 
-    await runAuthMenu({
+    await showAuthMenu({
       credentialsPath: path,
       environment: {},
       screen,
@@ -229,7 +229,7 @@ describe("runAuthMenu", () => {
     await chmod(path, 0o644);
     const { screen, shown, log } = scripted(["escape"]);
 
-    const result = await runAuthMenu({
+    const result = await showAuthMenu({
       credentialsPath: path,
       environment: {},
       screen,
@@ -238,7 +238,7 @@ describe("runAuthMenu", () => {
     });
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.problem).toContain(`chmod 600 ${path}`);
+    if (!result.ok) expect(result.fix).toBe(`chmod 600 ${path}`);
     expect(shown).toEqual([]);
     expect(log).toEqual([]);
   });
@@ -248,7 +248,7 @@ describe("runAuthMenu", () => {
     const { screen, log } = scripted(["enter"]);
 
     await expect(
-      runAuthMenu({
+      showAuthMenu({
         credentialsPath: path,
         environment: {},
         screen,

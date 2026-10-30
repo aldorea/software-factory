@@ -1,6 +1,7 @@
 import { emitKeypressEvents, createInterface } from "node:readline";
 import { menuKey } from "./ask-role.ts";
 import type { MenuKey } from "./role-menu.ts";
+import type { KeyInput } from "./tty.ts";
 
 export interface SecretState {
   value: string;
@@ -16,27 +17,35 @@ export function reduceSecret(state: SecretState, key: MenuKey): SecretState {
   return state;
 }
 
-export function readSecretInTerminal(prompt: string): Promise<string | null> {
-  const { stdin, stdout } = process;
-  stdout.write(prompt);
+export interface SecretIo {
+  stdin: KeyInput;
+  stderr: NodeJS.WritableStream;
+}
+
+export async function readSecretInTerminal(prompt: string, io: SecretIo = process): Promise<string | null> {
+  const { stdin, stderr } = io;
+  stderr.write(prompt);
   emitKeypressEvents(stdin);
-  stdin.setRawMode(true);
-  stdin.resume();
   let state: SecretState = { value: "", outcome: "open" };
-  return new Promise((resolve) => {
-    const onKey = (text: string | undefined, key: { name?: string; ctrl?: boolean; sequence?: string }) => {
-      const pressed = menuKey(text, key);
-      if (pressed === null) return;
-      state = reduceSecret(state, pressed);
-      if (state.outcome === "open") return;
-      stdin.off("keypress", onKey);
-      stdin.setRawMode(false);
-      stdin.pause();
-      stdout.write("\n");
-      resolve(state.outcome === "done" ? state.value : null);
-    };
-    stdin.on("keypress", onKey);
-  });
+  let onKey: ((text: string | undefined, key: { name?: string; ctrl?: boolean; sequence?: string }) => void) | undefined;
+  try {
+    stdin.setRawMode(true);
+    stdin.resume();
+    return await new Promise<string | null>((resolve) => {
+      onKey = (text, key) => {
+        const pressed = menuKey(text, key);
+        if (pressed === null) return;
+        state = reduceSecret(state, pressed);
+        if (state.outcome !== "open") resolve(state.outcome === "done" ? state.value : null);
+      };
+      stdin.on("keypress", onKey);
+    });
+  } finally {
+    if (onKey !== undefined) stdin.off("keypress", onKey);
+    stdin.setRawMode(false);
+    stdin.pause();
+    stderr.write("\n");
+  }
 }
 
 export async function readLineFromStdin(): Promise<string | null> {

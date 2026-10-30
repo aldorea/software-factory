@@ -9,12 +9,15 @@ import {
   replaceCredentialLine,
   resolveCredentials,
   type Credentials,
+  type CredentialsProblem,
   type SavedCredentials,
 } from "./credentials.ts";
 
-export type LoadedCredentials = { ok: true; credentials: Credentials; saved: Credentials } | { ok: false; problem: string };
+export type LoadedCredentials =
+  | { ok: true; credentials: Credentials; saved: Credentials }
+  | ({ ok: false } & CredentialsProblem);
 
-export type SaveOutcome = { ok: true; path: string } | { ok: false; problem: string };
+export type SaveOutcome = { ok: true; path: string } | ({ ok: false } & CredentialsProblem);
 
 export async function readSavedCredentials(path: string): Promise<SavedCredentials> {
   let text: string;
@@ -23,7 +26,8 @@ export async function readSavedCredentials(path: string): Promise<SavedCredentia
     if ((info.mode & 0o077) !== 0) {
       return {
         ok: false,
-        problem: `${path} can be read by other users (mode ${(info.mode & 0o777).toString(8)}); run chmod 600 ${path}`,
+        problem: `${path} can be read by other users (mode ${(info.mode & 0o777).toString(8)})`,
+        fix: `chmod 600 ${path}`,
       };
     }
     text = await readFile(path, "utf8");

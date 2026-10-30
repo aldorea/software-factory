@@ -11,10 +11,11 @@ const BIN = join(import.meta.dirname, "..", "..", "src", "cli", "factory.ts");
 const temp = tempDirs();
 afterEach(() => temp.removeAll());
 
-function factory(args: string[], options: { config: string; stdin?: string }): Promise<ExecResult> {
+async function factory(args: string[], options: { config?: string; stdin?: string } = {}): Promise<ExecResult> {
+  const config = options.config ?? (await temp.make("bin-xdg-"));
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN, ...args], {
-      env: { ...process.env, XDG_CONFIG_HOME: options.config, CLAUDE_CODE_OAUTH_TOKEN: "", OPENCODE_API_KEY: "" },
+      env: { ...process.env, XDG_CONFIG_HOME: config, CLAUDE_CODE_OAUTH_TOKEN: "", OPENCODE_API_KEY: "" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -29,7 +30,7 @@ function factory(args: string[], options: { config: string; stdin?: string }): P
 
 describe("factory bin", () => {
   it("should start under plain node, which only strips types, and print the usage", async () => {
-    const result = await exec(process.execPath, [BIN]);
+    const result = await factory([]);
     expect(result.stderr).not.toContain("ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX");
     expect(result.stderr).toContain("usage: factory");
     expect(result.exitCode).not.toBe(0);
@@ -40,7 +41,7 @@ describe("factory bin", () => {
     await exec("git", ["init", "-q", "-b", "main", dir]);
     await exec("git", ["-C", dir, "remote", "add", "origin", "https://example.invalid/toy.git"]);
 
-    const result = await exec(process.execPath, [BIN, "init", dir]);
+    const result = await factory(["init", dir]);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("✓ wrote .factory/config.ts");
@@ -75,6 +76,25 @@ describe("factory bin", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("  2. factory auth");
+    expect(result.stdout).toContain(`⚠ ${file} line 1 is not understood`);
+    expect(result.stderr).toBe("");
+  });
+
+  it("should warn in init with the chmod fix, and still succeed, when the credentials file can be read by others", async () => {
+    const config = await temp.make("bin-xdg-");
+    const file = join(config, "software-factory", "credentials");
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(file, "OPENCODE_API_KEY=saved\n");
+    await chmod(file, 0o644);
+    const dir = await temp.make("bin-init-");
+    await exec("git", ["init", "-q", "-b", "main", dir]);
+    await exec("git", ["-C", dir, "remote", "add", "origin", "https://example.invalid/toy.git"]);
+
+    const result = await factory(["init", dir], { config });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(`⚠ ${file} can be read by other users (mode 644) → chmod 600 ${file}`);
+    expect(result.stdout).toContain("Next:");
     expect(result.stderr).toBe("");
   });
 
@@ -144,7 +164,11 @@ describe("factory bin", () => {
 
   it("should stop factory web on Ctrl-C with exit code 0", async () => {
     const dir = await temp.make("bin-web-");
-    const child = spawn(process.execPath, [BIN, "web", dir, "--port", "0"], { stdio: ["ignore", "pipe", "pipe"] });
+    const config = await temp.make("bin-xdg-");
+    const child = spawn(process.execPath, [BIN, "web", dir, "--port", "0"], {
+      env: { ...process.env, XDG_CONFIG_HOME: config },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
     try {
       const url = await new Promise<string>((resolve, reject) => {

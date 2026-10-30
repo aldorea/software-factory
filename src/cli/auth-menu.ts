@@ -1,9 +1,10 @@
-import { credentialOrigin, CREDENTIAL_VARIABLES, type Credentials } from "../config/credentials.ts";
+import { credentialOrigin, CREDENTIAL_VARIABLES, type Credentials, type CredentialsProblem } from "../config/credentials.ts";
 import { deleteCredential, loadCredentials } from "../config/credentials-store.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { PromptOutcome } from "./auth.ts";
 import { moveSelection, type MenuKey } from "./role-menu.ts";
+import { failureLine } from "./report.ts";
 import { renderSetup, type SetupLine } from "./setup-render.ts";
 
 export interface AuthRow {
@@ -35,7 +36,7 @@ export interface AuthMenuOptions {
   prompt(agent: AgentKind): Promise<PromptOutcome>;
 }
 
-export type AuthMenuResult = { ok: true } | { ok: false; problem: string };
+export type AuthMenuResult = { ok: true } | ({ ok: false } & CredentialsProblem);
 
 export function authRows(environment: Record<string, string | undefined>, saved: Credentials): AuthRow[] {
   return AGENT_KINDS.map((agent) => ({
@@ -73,7 +74,7 @@ export function renderAuthMenu(state: AuthMenuState): string[] {
   return [...lines, "Enter to set · d to delete · Esc to quit"];
 }
 
-export async function runAuthMenu(options: AuthMenuOptions): Promise<AuthMenuResult> {
+export async function showAuthMenu(options: AuthMenuOptions): Promise<AuthMenuResult> {
   const { credentialsPath, environment, screen, color, prompt } = options;
   const load = async () => loadCredentials(credentialsPath, environment);
   const first = await load();
@@ -92,12 +93,12 @@ export async function runAuthMenu(options: AuthMenuOptions): Promise<AuthMenuRes
         screen.close();
         const outcome = await prompt(row.agent);
         screen.open();
-        notice = outcome.kind === "saved" || outcome.kind === "cancelled" ? [] : [{ kind: "fail", text: outcome.problem }];
+        notice = outcome.kind === "saved" || outcome.kind === "cancelled" ? [] : [failureLine(outcome, "")];
       } else {
         const deleted = await deleteCredential(credentialsPath, row.agent);
         notice = deleted.ok
           ? [{ kind: "ok", text: `deleted ${row.variable} from ${deleted.path}` }]
-          : [{ kind: "fail", text: deleted.problem }];
+          : [failureLine(deleted, "")];
       }
       const reloaded = await load();
       if (!reloaded.ok) return reloaded;

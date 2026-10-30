@@ -1,5 +1,5 @@
 import type { ResolvedConfig } from "../config/config.ts";
-import { CREDENTIAL_VARIABLES } from "../config/roles.ts";
+import { CREDENTIAL_VARIABLES } from "../config/credentials.ts";
 import { mergeBranch, moveBranch, withBranchWorktree } from "../git/repo.ts";
 import type { Issue } from "../github/github.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";

@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { approveSpec, validateSpecOnBranch, type SpecCommandInput } from "../commands/approve.ts";
 import { prepareRefinement, refineLaunch } from "../commands/refine.ts";
 import type { ResolvedConfig, Role, RoleChoice, RunRole } from "../config/config.ts";
+import { problemOf, type CredentialsProblem } from "../config/credentials.ts";
 import { configPath, loadConfig } from "../config/load.ts";
 import { choiceProblems, chooseRole, parseRoleFlag, ROLES, type ChosenRole } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
@@ -29,7 +30,8 @@ import { planLimitAnnotate } from "./plan-limit-warning.ts";
 import { menuCredentials } from "./menu-credentials.ts";
 import { menuEntries, type Annotate, type MenuCredentials, type RoleEntry } from "./role-menu.ts";
 import { gatherProbes, readiness, readinessProblems } from "./readiness.ts";
-import { renderSetup, type SetupLine } from "./setup-render.ts";
+import { reportErr, reportOut } from "./report.ts";
+import type { SetupLine } from "./setup-render.ts";
 import { doctor } from "./doctor.ts";
 import { envProbes } from "./env-probes.ts";
 import { runSummary } from "./run-summary.ts";
@@ -47,7 +49,7 @@ export interface CliEnv {
   verifier(config: ResolvedConfig, role: RoleChoice): Verifier;
   notifier: Notifier;
   credentials: Partial<Record<AgentKind, string>>;
-  credentialsProblem?: string;
+  credentialsProblem?: CredentialsProblem;
   docker(): Promise<string | null>;
   gh(): Promise<string | null>;
   claudeSession(): Promise<string | null>;
@@ -63,6 +65,7 @@ export interface CliEnv {
   signal: AbortSignal;
   auth?: AuthInput;
   color?: boolean;
+  errColor?: boolean;
   out(text: string): void;
   err(text: string): void;
 }
@@ -178,11 +181,6 @@ function parseCommand(args: string[]): Command | null {
   };
 }
 
-function reportProblems(lines: SetupLine[], env: CliEnv): boolean {
-  for (const line of renderSetup(lines, env.color === true)) env.err(line);
-  return lines.length > 0;
-}
-
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
   const loaded = await loadConfig(repoDir).then(
     (config) => ({ ok: true as const, config }),
@@ -202,7 +200,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     else flagProblems.push({ kind: "fail", text: parsed.problem });
   }
   const beforeMenu = readiness("run", { probes, roles: { ...defaults, ...flagged }, credentials: env.credentials });
-  if (reportProblems([...readinessProblems(beforeMenu), ...flagProblems], env)) return 1;
+  if (reportErr([...readinessProblems(beforeMenu), ...flagProblems], env)) return 1;
   if (!loaded.ok) throw loaded.error;
   const config = loaded.config;
   if (latest !== null && runAbandoned(latest, env.clock.now())) {
@@ -231,7 +229,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     roles[role] = chosen.choice;
   }
   const afterMenu = readiness("run", { probes, roles, credentials: env.credentials });
-  if (reportProblems(readinessProblems(afterMenu), env)) return 1;
+  if (reportErr(readinessProblems(afterMenu), env)) return 1;
   env.out(`Preparing run #${issue}; factory web shows it at http://${WEB_HOST}:${DEFAULT_WEB_PORT}/`);
   const view = env.terminal ? new RunView({ now: () => env.clock.now(), ...env.terminal }) : null;
   const ticker = view ? setInterval(() => view.tick(), 1000) : null;
@@ -262,7 +260,7 @@ async function refine(repoDir: string, issue: number, flag: string | undefined, 
   try {
     const probes = await gatherProbes("refine", envProbes(repoDir, env));
     const ready = readiness("refine", { probes, roles: {}, credentials: env.credentials });
-    if (reportProblems(readinessProblems(ready), env)) return 1;
+    if (reportErr(readinessProblems(ready), env)) return 1;
     const chosen = await refinementChoice(repoDir, flag, env);
     if (!chosen.ok) {
       env.err(`factory: ${chosen.problem}`);
@@ -316,6 +314,11 @@ async function configuredRefinement(repoDir: string): Promise<RoleChoice | undef
   return present ? (await loadConfig(repoDir)).roles.refinement : undefined;
 }
 
+function credentialsWarning(failure: CredentialsProblem): SetupLine {
+  const { problem, fix } = problemOf(failure);
+  return { kind: "warn", text: problem, ...(fix !== undefined ? { command: fix } : {}) };
+}
+
 async function init(args: string[], env: CliEnv): Promise<number> {
   if (args.length > 1) {
     env.err(USAGE);
@@ -327,11 +330,10 @@ async function init(args: string[], env: CliEnv): Promise<number> {
     const written = await initRepo(repoDir);
     const lines: SetupLine[] = [
       ...written.map((text): SetupLine => ({ kind: "ok", text })),
+      ...(env.credentialsProblem === undefined ? [] : [credentialsWarning(env.credentialsProblem)]),
       ...(await nextStepsOf(repoDir, env)),
     ];
-    for (const line of renderSetup(lines, env.color === true)) {
-      env.out(line);
-    }
+    reportOut(lines, env);
     return 0;
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);

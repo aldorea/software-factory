@@ -16,9 +16,10 @@ import { terminalMenuScreen } from "./auth-screen.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
 import { confirmInTerminal, readLineFromStdin, readSecretInTerminal } from "./secret-input.ts";
-import { colorEnabled, renderSetup } from "./setup-render.ts";
+import { reportFailure } from "./report.ts";
+import { colorEnabled } from "./setup-render.ts";
 import { CLEAR_LINE } from "./terminal-render.ts";
-import { terminalFeatures } from "./tty.ts";
+import { hidesSecret, terminalFeatures } from "./tty.ts";
 
 const clock = { now: () => new Date() };
 
@@ -28,7 +29,9 @@ if (process.argv[2] === "web") {
   process.once("SIGTERM", () => stop.abort());
 }
 
-const features = terminalFeatures({ stdout: Boolean(process.stdout.isTTY), stdin: Boolean(process.stdin.isTTY) });
+const stdoutIsTerminal = Boolean(process.stdout.isTTY);
+const stdinIsTerminal = Boolean(process.stdin.isTTY);
+const features = terminalFeatures({ stdout: stdoutIsTerminal, stdin: stdinIsTerminal });
 const terminal =
   features.screen
     ? { columns: () => process.stdout.columns || 80, write: (text: string) => void process.stdout.write(text) }
@@ -41,16 +44,20 @@ if (process.argv[2] === "run" && terminal) {
 }
 
 const credentialsPath = credentialsFilePath(process.env, homedir());
-const color = colorEnabled({ stdout: features.screen, noColor: process.env.NO_COLOR });
-const command = process.argv[2];
-const loaded =
-  command === "run" || command === "init" || command === "doctor"
-    ? await loadCredentials(credentialsPath, process.env)
-    : { ok: true as const, credentials: resolveCredentials(process.env, {}) };
-if (!loaded.ok && command !== "init" && command !== "doctor") {
-  for (const line of renderSetup([{ kind: "fail", text: `factory: ${loaded.problem}` }], color)) {
-    process.stderr.write(`${line}\n`);
-  }
+const color = colorEnabled({ tty: stdoutIsTerminal, noColor: process.env.NO_COLOR });
+const errColor = colorEnabled({ tty: Boolean(process.stderr.isTTY), noColor: process.env.NO_COLOR });
+const err = (text: string) => void process.stderr.write(`${text}\n`);
+const command = process.argv[2] ?? "";
+const CREDENTIALS_FILE = new Map([
+  ["run", "required"],
+  ["init", "tolerated"],
+  ["doctor", "tolerated"],
+]);
+const loaded = CREDENTIALS_FILE.has(command)
+  ? await loadCredentials(credentialsPath, process.env)
+  : { ok: true as const, credentials: resolveCredentials(process.env, {}) };
+if (!loaded.ok && CREDENTIALS_FILE.get(command) === "required") {
+  reportFailure(loaded, { out: () => undefined, err, errColor });
   process.exit(1);
 }
 const credentials = loaded.ok ? loaded.credentials : resolveCredentials(process.env, {});
@@ -64,7 +71,7 @@ process.exitCode = await main(process.argv.slice(2), {
   verifier: (config, role) => configuredVerifier(config, role, credentials, clock),
   notifier: macosNotifier(),
   credentials,
-  ...(!loaded.ok && command === "doctor" ? { credentialsProblem: loaded.problem } : {}),
+  ...(loaded.ok ? {} : { credentialsProblem: loaded }),
   docker: () => dockerProblem(),
   gh: () => ghProblem(),
   claudeSession: () => claudeSessionProblem(),
@@ -75,14 +82,15 @@ process.exitCode = await main(process.argv.slice(2), {
     environment: process.env,
     terminal: features.menu,
     ...(features.menu ? { screen: terminalMenuScreen() } : {}),
-    readSecret: (prompt) => (features.menu ? readSecretInTerminal(prompt) : readLineFromStdin()),
+    readSecret: (prompt) => (hidesSecret({ stdin: stdinIsTerminal }) ? readSecretInTerminal(prompt) : readLineFromStdin()),
     confirm: confirmInTerminal,
   },
   color,
+  errColor,
   ...(terminal ? { terminal } : {}),
   launch: launchInteractive,
   images: dockerImages({ user: { uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 } }),
   signal: stop.signal,
   out: (text) => process.stdout.write(`${text}\n`),
-  err: (text) => process.stderr.write(`${text}\n`),
+  err,
 });

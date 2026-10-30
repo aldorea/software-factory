@@ -1,11 +1,11 @@
+import type { EnvFacts } from "./env-facts.ts";
 import type { SetupLine } from "./setup-render.ts";
 import type { Credentials } from "../config/credentials.ts";
 import type { AgentKind } from "../workers/types.ts";
 
 export interface NextStepsFacts {
   image: string;
-  envVariables: string[];
-  envValues: Record<string, string | undefined> | null;
+  env: EnvFacts;
   agents: AgentKind[];
   credentials: Credentials;
   workerImagePresent: boolean;
@@ -25,7 +25,7 @@ function padded(command: string, description: string): string {
 }
 
 function steps(facts: NextStepsFacts): Step[] {
-  const { envVariables, envValues } = facts;
+  const { variables: envVariables, values: envValues } = facts.env;
   const envDone = envValues !== null && envVariables.every((name) => (envValues[name] ?? "") !== "");
   return [
     ...(envVariables.length === 0

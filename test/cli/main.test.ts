@@ -704,7 +704,7 @@ describe("factory CLI", () => {
     const repoDir = await temp.make("cli-no-tools-color-");
     const { env, err } = cli(repoDir);
 
-    const code = await main(["run", "42"], { ...env, color: true, docker: async () => "Docker is not running", gh: async () => null });
+    const code = await main(["run", "42"], { ...env, color: false, errColor: true, docker: async () => "Docker is not running", gh: async () => null });
 
     expect(code).toBe(1);
     expect(err).toEqual([`\u001b[1;91m✗\u001b[0m Docker is not running`]);

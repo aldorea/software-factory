@@ -3,14 +3,10 @@ import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.ts";
 import { BASE_IMAGE_TAG, buildImages, type ImageBuildOutcome } from "../workers/images.ts";
 import type { CliEnv } from "./main.ts";
-import { renderSetup, type SetupLine } from "./setup-render.ts";
+import { reportErr, reportFailure, reportOut } from "./report.ts";
 import { refused } from "./target-repo.ts";
 
 const ID_DIGITS = 12;
-
-function show(lines: SetupLine[], write: (text: string) => void, color: boolean): void {
-  for (const line of renderSetup(lines, color)) write(line);
-}
 
 function shortId(id: string): string {
   const [algorithm, digest] = id.split(":");
@@ -35,11 +31,10 @@ export async function image(args: string[], env: CliEnv, usage: string): Promise
   }
   const repoDir = resolve(env.cwd, args[0] ?? ".");
   if (await refused(repoDir, env)) return 1;
-  const color = env.color === true;
   try {
     const problem = await env.docker();
     if (problem !== null) {
-      show([{ kind: "fail", text: `factory: ${problem}` }], env.err, color);
+      reportFailure({ problem }, env);
       return 1;
     }
     const config = await loadConfig(repoDir);
@@ -49,22 +44,18 @@ export async function image(args: string[], env: CliEnv, usage: string): Promise
       () => false,
     );
     if (!present) {
-      show([{ kind: "fail", text: `${workerDockerfile} does not exist`, command: "factory init" }], env.err, color);
+      reportErr([{ kind: "fail", text: `${workerDockerfile} does not exist`, command: "factory init" }], env);
       return 1;
     }
     const outcome = await buildImages({ factoryRoot: env.factoryRoot, workerDockerfile, image: config.image }, env.images);
     if (outcome.kind === "built" || outcome.kind === "worker-failed") {
-      show(
-        [{ kind: "ok", text: `built the base image ${BASE_IMAGE_TAG} (${shortId(outcome.baseImageId)})` }],
-        env.out,
-        color,
-      );
+      reportOut([{ kind: "ok", text: `built the base image ${BASE_IMAGE_TAG} (${shortId(outcome.baseImageId)})` }], env);
     }
     if (outcome.kind !== "built") {
-      show([{ kind: "fail", text: failure(outcome, config.image) }], env.err, color);
+      reportErr([{ kind: "fail", text: failure(outcome, config.image) }], env);
       return 1;
     }
-    show([{ kind: "ok", text: `built the worker image ${config.image}` }], env.out, color);
+    reportOut([{ kind: "ok", text: `built the worker image ${config.image}` }], env);
     return 0;
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);

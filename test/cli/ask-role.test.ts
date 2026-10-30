@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { menuKey } from "../../src/cli/ask-role.ts";
+import { askRolesInTerminal, menuKey } from "../../src/cli/ask-role.ts";
+import { fakeKeyboard, textSink, until } from "../fakes/keyboard.ts";
 
 describe("menuKey", () => {
   it("should name the arrows, Enter, Esc and backspace the keyboard sends", () => {
@@ -18,5 +19,43 @@ describe("menuKey", () => {
     expect(menuKey("o", { name: "o" })).toEqual({ char: "o" });
     expect(menuKey("/", {})).toEqual({ char: "/" });
     expect(menuKey("\x1b[2~", { name: "insert" })).toBeNull();
+  });
+});
+
+describe("askRolesInTerminal", () => {
+  const MODELS_ENTRIES = [{ role: "workers" as const, offered: ["opencode" as const] }];
+  const annotate = () => ({});
+
+  it("should show the problem, keep the terminal in raw mode and keep answering keys when saving a credential throws, instead of dying with an unhandled rejection", async () => {
+    const stdin = fakeKeyboard();
+    const stdout = textSink();
+    const stderr = textSink();
+    let attempts = 0;
+    const credentials = {
+      missing: ["opencode" as const],
+      add: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("EACCES: permission denied, mkdir '/x'");
+        return true;
+      },
+    };
+
+    const asking = askRolesInTerminal(MODELS_ENTRIES, annotate, credentials, { stdin, stdout: stdout.stream, stderr: stderr.stream });
+    stdin.type("\r");
+    await until(() => stdout.text().includes("no credential"), "the step of the role");
+    stdin.type("\r");
+    await until(() => stderr.text().includes("EACCES"), "the problem");
+
+    expect(stderr.text()).toBe("✗ factory: EACCES: permission denied, mkdir '/x'\n");
+    expect(stdin.raw.at(-1)).toBe(true);
+
+    stdin.type("\r");
+    await until(() => attempts === 2, "the second attempt");
+    await until(() => stdout.text().includes("opencode-go/"), "the models of the saved agent");
+    stdin.type("\r");
+    stdin.type("\r");
+
+    expect(await asking).toEqual({ workers: { agent: "opencode", model: expect.stringContaining("opencode-go/") } });
+    expect(stdin.raw.at(-1)).toBe(false);
   });
 });

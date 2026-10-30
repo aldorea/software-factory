@@ -72,18 +72,18 @@ describe("setup rendering", () => {
 
 describe("colour decision", () => {
   it("should use colour when stdout is a terminal and NO_COLOR is not set", () => {
-    expect(colorEnabled({ stdout: true, noColor: undefined })).toBe(true);
+    expect(colorEnabled({ tty: true, noColor: undefined })).toBe(true);
   });
 
   it("should use no colour when stdout is not a terminal, so a redirected output stays plain text", () => {
-    expect(colorEnabled({ stdout: false, noColor: undefined })).toBe(false);
+    expect(colorEnabled({ tty: false, noColor: undefined })).toBe(false);
   });
 
   it("should use no colour when NO_COLOR is set to any non-empty value, even in a terminal", () => {
-    expect(colorEnabled({ stdout: true, noColor: "1" })).toBe(false);
+    expect(colorEnabled({ tty: true, noColor: "1" })).toBe(false);
   });
 
   it("should ignore an empty NO_COLOR, as no-color.org asks", () => {
-    expect(colorEnabled({ stdout: true, noColor: "" })).toBe(true);
+    expect(colorEnabled({ tty: true, noColor: "" })).toBe(true);
   });
 });

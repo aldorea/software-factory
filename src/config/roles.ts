@@ -4,8 +4,6 @@ import type { AgentKind } from "../workers/types.ts";
 import type { RoleChoice } from "./config.ts";
 import { credentialHint, CREDENTIAL_VARIABLES } from "./credentials.ts";
 
-export { CREDENTIAL_VARIABLES } from "./credentials.ts";
-
 export const ROLES: RunRole[] = ["workers", "verifier", "tester"];
 
 export const CONFIGURED_ROLES: Role[] = [...ROLES, "refinement"];

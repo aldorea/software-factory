@@ -4,8 +4,7 @@ import { nextSteps, type NextStepsFacts } from "../../src/cli/next-steps.ts";
 
 const FRESH: NextStepsFacts = {
   image: "toy-factory-worker:dev",
-  envVariables: ["FACTORY_E2E_DATABASE_URL_0", "FACTORY_E2E_DATABASE_URL_1"],
-  envValues: null,
+  env: { variables: ["FACTORY_E2E_DATABASE_URL_0", "FACTORY_E2E_DATABASE_URL_1"], values: null },
   agents: ["claude-code"],
   credentials: {},
   workerImagePresent: false,
@@ -47,15 +46,15 @@ describe("nextSteps", () => {
   it("should mark the .env step with a tick once .factory/.env gives a value to every variable", () => {
     const lines = plain({
       ...FRESH,
-      envValues: { FACTORY_E2E_DATABASE_URL_0: "postgres://a", FACTORY_E2E_DATABASE_URL_1: "postgres://b" },
+      env: { ...FRESH.env, values: { FACTORY_E2E_DATABASE_URL_0: "postgres://a", FACTORY_E2E_DATABASE_URL_1: "postgres://b" } },
     });
 
     expect(lines[1]?.startsWith("✓ 1. fill .factory/.env")).toBe(true);
   });
 
   it("should leave the .env step pending when a variable is empty or missing, as a copy of .env.example ships it", () => {
-    const empty = plain({ ...FRESH, envValues: { FACTORY_E2E_DATABASE_URL_0: "x", FACTORY_E2E_DATABASE_URL_1: "" } });
-    const missing = plain({ ...FRESH, envValues: { FACTORY_E2E_DATABASE_URL_0: "x" } });
+    const empty = plain({ ...FRESH, env: { ...FRESH.env, values: { FACTORY_E2E_DATABASE_URL_0: "x", FACTORY_E2E_DATABASE_URL_1: "" } } });
+    const missing = plain({ ...FRESH, env: { ...FRESH.env, values: { FACTORY_E2E_DATABASE_URL_0: "x" } } });
 
     expect(empty[1]?.startsWith("  1. ")).toBe(true);
     expect(missing[1]?.startsWith("  1. ")).toBe(true);
@@ -70,7 +69,7 @@ describe("nextSteps", () => {
   it("should never mark doctor and refine as done, because nothing on the host says they ran", () => {
     const lines = plain({
       ...FRESH,
-      envValues: { FACTORY_E2E_DATABASE_URL_0: "a", FACTORY_E2E_DATABASE_URL_1: "b" },
+      env: { ...FRESH.env, values: { FACTORY_E2E_DATABASE_URL_0: "a", FACTORY_E2E_DATABASE_URL_1: "b" } },
       credentials: { "claude-code": "x" },
       workerImagePresent: true,
     });
@@ -79,7 +78,7 @@ describe("nextSteps", () => {
   });
 
   it("should drop the .env step and renumber when .env.example lists no variable", () => {
-    expect(plain({ ...FRESH, envVariables: [] })).toEqual([
+    expect(plain({ ...FRESH, env: { variables: [], values: null } })).toEqual([
       "Next:",
       "  1. factory auth          set the credential of each agent, once for every repo",
       "  2. factory image         build the base image and toy-factory-worker:dev",

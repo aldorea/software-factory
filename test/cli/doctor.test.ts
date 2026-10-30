@@ -203,7 +203,7 @@ describe("factory doctor", () => {
     const dir = await repo();
     const { env, out } = await cli(dir, {
       credentials: {},
-      credentialsProblem: "/c/credentials can be read by other users (mode 644); run chmod 600 /c/credentials",
+      credentialsProblem: { problem: "/c/credentials can be read by other users (mode 644)", fix: "chmod 600 /c/credentials" },
     });
 
     expect(await main(["doctor"], env)).toBe(1);

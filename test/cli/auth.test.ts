@@ -86,7 +86,7 @@ describe("factory auth", () => {
     expect(await readFile(credentialsPath, "utf8")).toBe("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc\n");
     expect((await stat(credentialsPath)).mode & 0o777).toBe(0o600);
     expect((await stat(dirname(credentialsPath))).mode & 0o777).toBe(0o700);
-    expect(asked).toEqual([""]);
+    expect(asked).toEqual(["Paste the credential (it is not shown): "]);
     expect(out).toEqual([expect.stringContaining("saved CLAUDE_CODE_OAUTH_TOKEN")]);
     expect(err).toEqual([]);
   });
@@ -108,7 +108,7 @@ describe("factory auth", () => {
   });
 
   it("should name the OpenCode Go key with Extra Usage off for opencode", async () => {
-    const { env, out } = await session({ terminal: true, secret: "key-1" });
+    const { env, out } = await session({ terminal: true, secret: "opencode-key-9z9z" });
 
     expect(await main(["auth", "opencode"], env)).toBe(0);
 
@@ -165,7 +165,7 @@ describe("factory auth", () => {
   });
 
   it("should stop with the chmod fix when the saved file can be read by others, and not change it", async () => {
-    const { env, err, credentialsPath } = await session({ secret: "key-1" });
+    const { env, err, credentialsPath } = await session({ secret: "opencode-key-9z9z" });
     await mkdir(dirname(credentialsPath), { recursive: true, mode: 0o700 });
     await writeFile(credentialsPath, "OPENCODE_API_KEY=old\n");
     await chmod(credentialsPath, 0o644);
@@ -187,14 +187,14 @@ describe("factory auth", () => {
   });
 
   it("should open the menu with a terminal and no agent, and open the prompt of the selected agent on Enter", async () => {
-    const { env, shown, asked, credentialsPath } = await session({ terminal: true, keys: ["down", "enter", "escape"], secret: "key-1" });
+    const { env, shown, asked, credentialsPath } = await session({ terminal: true, keys: ["down", "enter", "escape"], secret: "opencode-key-9z9z" });
 
     expect(await main(["auth"], env)).toBe(0);
 
     expect(shown[0]?.[0]).toBe("❯ claude-code  CLAUDE_CODE_OAUTH_TOKEN  not set");
     expect(asked).toEqual(["Paste the credential (it is not shown): "]);
-    expect(await readFile(credentialsPath, "utf8")).toBe("OPENCODE_API_KEY=key-1\n");
-    expect(shown.at(-1)?.[1]).toBe("❯ opencode     OPENCODE_API_KEY         saved (…ey-1)");
+    expect(await readFile(credentialsPath, "utf8")).toBe("OPENCODE_API_KEY=opencode-key-9z9z\n");
+    expect(shown.at(-1)?.[1]).toBe("❯ opencode     OPENCODE_API_KEY         saved (…9z9z)");
   });
 
   it("should leave the file untouched when Esc quits the menu", async () => {

@@ -116,7 +116,7 @@ describe("readiness of factory doctor", () => {
     const file = "/home/me/.config/software-factory/credentials";
     const given = facts({
       credentials: {},
-      credentialsProblem: `${file} can be read by other users (mode 644); run chmod 600 ${file}`,
+      credentialsProblem: { problem: `${file} can be read by other users (mode 644)`, fix: `chmod 600 ${file}` },
     });
 
     expect(failures(given)).toEqual([
@@ -125,7 +125,7 @@ describe("readiness of factory doctor", () => {
   });
 
   it("should keep the text of a credentials file problem that has no command to fix it", () => {
-    const given = facts({ credentials: {}, credentialsProblem: "/c line 2 is not understood: fix the line or delete it" });
+    const given = facts({ credentials: {}, credentialsProblem: { problem: "/c line 2 is not understood: fix the line or delete it" } });
 
     expect(failures(given)).toEqual([{ kind: "fail", text: "/c line 2 is not understood: fix the line or delete it" }]);
   });

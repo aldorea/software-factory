@@ -20,6 +20,7 @@ const HOW_TO_GET: Record<AgentKind, string> = {
 };
 
 const CLAUDE_CODE_TOKEN_PREFIX = "sk-ant-oat";
+const MIN_MASKED_LENGTH = 12;
 
 export function credentialsFilePath(environment: { XDG_CONFIG_HOME?: string | undefined }, home: string): string {
   const configured = environment.XDG_CONFIG_HOME;
@@ -39,7 +40,16 @@ export function credentialHint(agent: AgentKind): string {
   return `${HOW_TO_GET[agent]}, then save it once for every target repo with \`factory auth ${agent}\`; ${CREDENTIAL_VARIABLES[agent]} in the environment wins over the saved one`;
 }
 
-export type SavedCredentials = { ok: true; values: Credentials } | { ok: false; problem: string };
+export interface CredentialsProblem {
+  problem: string;
+  fix?: string;
+}
+
+export type SavedCredentials = { ok: true; values: Credentials } | ({ ok: false } & CredentialsProblem);
+
+export function problemOf({ problem, fix }: CredentialsProblem): CredentialsProblem {
+  return fix === undefined ? { problem } : { problem, fix };
+}
 
 export function parseCredentialsFile(text: string, path: string): SavedCredentials {
   const known = new Map(AGENT_KINDS.map((kind) => [CREDENTIAL_VARIABLES[kind], kind]));
@@ -140,7 +150,7 @@ export function removeCredentialLine(text: string, variable: string): string {
 }
 
 export function maskCredential(value: string): string {
-  return value.length > 4 ? `…${value.slice(-4)}` : "…";
+  return value.length >= MIN_MASKED_LENGTH ? `…${value.slice(-4)}` : "…";
 }
 
 export function credentialOrigin(

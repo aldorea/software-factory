@@ -1,7 +1,9 @@
 import type { Role, RoleChoice } from "../config/config.ts";
-import { CREDENTIAL_VARIABLES, ROLES } from "../config/roles.ts";
+import { CREDENTIAL_VARIABLES, type CredentialsProblem } from "../config/credentials.ts";
+import { ROLES } from "../config/roles.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
+import type { EnvFacts } from "./env-facts.ts";
 import type { SetupLine } from "./setup-render.ts";
 
 export type ReadinessCommand = "refine" | "run" | "doctor";
@@ -14,13 +16,8 @@ export interface ReadinessFacts {
   probes: Partial<Record<ProbeName, string | null>>;
   roles: Partial<Record<Role, RoleChoice>>;
   credentials: Partial<Record<AgentKind, string>>;
-  credentialsProblem?: string | null;
+  credentialsProblem?: CredentialsProblem | null;
   env?: EnvFacts;
-}
-
-export interface EnvFacts {
-  variables: string[];
-  values: Record<string, string | undefined> | null;
 }
 
 export interface CheckResult {
@@ -63,11 +60,8 @@ function roleList(roles: Role[]): string {
   return names.length === 1 ? `${names[0]} uses` : `${names.slice(0, -1).join(", ")} and ${names.at(-1)} use`;
 }
 
-const CHMOD_FIX = /^(.*); run (chmod 600 .+)$/s;
-
-function credentialsFileFailure(problem: string): CheckResult {
-  const split = CHMOD_FIX.exec(problem);
-  return split === null ? { kind: "fail", text: problem } : { kind: "fail", text: split[1] as string, command: split[2] as string };
+function credentialsFileFailure({ problem, fix }: CredentialsProblem): CheckResult {
+  return { kind: "fail", text: problem, ...(fix !== undefined ? { command: fix } : {}) };
 }
 
 const credentialCheck: Check = {
@@ -169,9 +163,5 @@ export function readinessLines(results: CheckResult[]): SetupLine[] {
 }
 
 export function readinessProblems(results: CheckResult[]): SetupLine[] {
-  return results.flatMap((result): SetupLine[] =>
-    result.kind === "fail"
-      ? [{ kind: "fail", text: result.text, ...(result.command !== undefined ? { command: result.command } : {}) }]
-      : [],
-  );
+  return readinessLines(results.filter((result) => result.kind === "fail"));
 }

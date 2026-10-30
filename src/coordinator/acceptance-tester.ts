@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { AppStart, RoleChoice } from "../config/config.ts";
-import { CREDENTIAL_VARIABLES } from "../config/roles.ts";
+import { CREDENTIAL_VARIABLES } from "../config/credentials.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { criteriaText } from "../spec/issue.ts";
 import { emptyUsage } from "../workers/agent-adapter.ts";

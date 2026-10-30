@@ -9,8 +9,8 @@ export type SetupLine =
 const MARKS = { ok: { mark: "✓", code: 92 }, fail: { mark: "✗", code: 91 }, warn: { mark: "⚠", code: 93 } } as const;
 const CYAN = 96;
 
-export function colorEnabled({ stdout, noColor }: { stdout: boolean; noColor: string | undefined }): boolean {
-  return stdout && (noColor === undefined || noColor === "");
+export function colorEnabled({ tty, noColor }: { tty: boolean; noColor: string | undefined }): boolean {
+  return tty && (noColor === undefined || noColor === "");
 }
 
 function strong(code: number, text: string, color: boolean): string {
