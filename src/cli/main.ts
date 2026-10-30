@@ -17,9 +17,11 @@ import type { GitHub } from "../github/github.ts";
 import { initRepo } from "../init/init.ts";
 import { WEB_HOST } from "../web/host.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
+import type { ImageDocker } from "../workers/images.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import { activityLine } from "./activity-line.ts";
 import { clockMinutes } from "./clock-time.ts";
+import { image } from "./image.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
 import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
@@ -47,6 +49,7 @@ export interface CliEnv {
   ask?: (entries: RoleEntry[], annotate: Annotate) => Promise<Partial<Record<Role, RoleChoice>>>;
   terminal?: { columns(): number; write(text: string): void };
   launch(launch: InteractiveLaunch): Promise<number>;
+  images: ImageDocker;
   signal: AbortSignal;
   color?: boolean;
   out(text: string): void;
@@ -61,6 +64,7 @@ const USAGE = [
   "       factory stats [target-repo]",
   `       ${WEB_USAGE}`,
   "       factory init [target-repo]",
+  "       factory image [target-repo]",
 ].join("\n");
 
 type RoleFlags = Partial<Record<RunRole, string>>;
@@ -76,6 +80,7 @@ interface Command {
 export async function main(args: string[], env: CliEnv): Promise<number> {
   if (args[0] === "stats") return stats(args.slice(1), env);
   if (args[0] === "init") return init(args.slice(1), env);
+  if (args[0] === "image") return image(args.slice(1), env, USAGE);
   if (args[0] === "web") return web(args.slice(1), env, USAGE);
   const parsed = parseCommand(args);
   if (parsed === null) {

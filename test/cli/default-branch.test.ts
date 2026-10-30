@@ -7,6 +7,7 @@ import { originHeadProblem } from "../../src/git/repo.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
+import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
@@ -111,6 +112,7 @@ function cli(cwd: string) {
       launches.push(launch);
       return 0;
     },
+    images: new FakeImageDocker(),
     signal: new AbortController().signal,
     out: (text) => out.push(text),
     err: (text) => err.push(text),

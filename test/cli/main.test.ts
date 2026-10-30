@@ -17,6 +17,7 @@ import { execOk } from "../../src/workers/sh.ts";
 import { writeRunningRun } from "../coordinator/running-run.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
+import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner, type AttemptScript } from "../fakes/worker-runner.ts";
@@ -125,6 +126,7 @@ function cli(
       launches.push(launch);
       return 0;
     },
+    images: new FakeImageDocker(),
     signal: new AbortController().signal,
     out: (text) => out.push(text),
     err: (text) => err.push(text),
