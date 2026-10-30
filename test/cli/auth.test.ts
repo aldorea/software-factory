@@ -6,6 +6,7 @@ import { main, type CliEnv } from "../../src/cli/main.ts";
 import { reduceSecret, type SecretState } from "../../src/cli/secret-input.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
+import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
@@ -50,6 +51,7 @@ async function session(options: Session = {}) {
     credentials: {},
     docker: async () => null,
     gh: async () => null,
+    images: new FakeImageDocker(),
     launch: async () => 0,
     signal: new AbortController().signal,
     auth,
