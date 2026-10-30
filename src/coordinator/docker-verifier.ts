@@ -1,5 +1,6 @@
 import type { ResolvedConfig, RoleChoice } from "../config/config.ts";
 import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
+import { credentialHint } from "../config/credentials.ts";
 import { CREDENTIAL_VARIABLES } from "../config/roles.ts";
 import type { AgentKind, AttemptOutcome } from "../workers/types.ts";
 import { askVerifier } from "../workers/verifier.ts";
@@ -26,7 +27,7 @@ export function configuredVerifier(
     async judge(question, onActivity) {
       const variable = CREDENTIAL_VARIABLES[role.agent];
       const credential = credentials[role.agent];
-      if (!credential) throw new Error(`${variable} is not set; the ${role.agent} verifier needs it`);
+      if (!credential) throw new Error(`${variable} is not set; the ${role.agent} verifier needs it: ${credentialHint(role.agent)}`);
       return dockerVerifier({
         image: config.image,
         role,

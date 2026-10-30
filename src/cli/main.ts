@@ -19,6 +19,7 @@ import { WEB_HOST } from "../web/host.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
 import { activityLine } from "./activity-line.ts";
+import { auth, AUTH_USAGE, type AuthInput } from "./auth.ts";
 import { clockMinutes } from "./clock-time.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
@@ -45,6 +46,7 @@ export interface CliEnv {
   terminal?: { columns(): number; write(text: string): void };
   launch(launch: InteractiveLaunch): Promise<number>;
   signal: AbortSignal;
+  auth?: AuthInput;
   color?: boolean;
   out(text: string): void;
   err(text: string): void;
@@ -58,6 +60,7 @@ const USAGE = [
   "       factory stats [target-repo]",
   `       ${WEB_USAGE}`,
   "       factory init [target-repo]",
+  `       ${AUTH_USAGE}`,
 ].join("\n");
 
 type RoleFlags = Partial<Record<RunRole, string>>;
@@ -74,6 +77,7 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
   if (args[0] === "stats") return stats(args.slice(1), env);
   if (args[0] === "init") return init(args.slice(1), env);
   if (args[0] === "web") return web(args.slice(1), env, USAGE);
+  if (args[0] === "auth") return auth(args.slice(1), env);
   const parsed = parseCommand(args);
   if (parsed === null) {
     env.err(USAGE);

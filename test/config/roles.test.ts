@@ -67,8 +67,15 @@ describe("the requirements of a role", () => {
     expect(choiceProblems("verifier", KIMI)).toEqual([]);
   });
 
+  it("should say in the same line how to get the credential and that factory auth saves it", () => {
+    const problem = credentialProblem("verifier", KIMI, {});
+    expect(problem).not.toContain("\n");
+    expect(problem).toContain("factory auth opencode");
+    expect(problem).toContain("Extra Usage");
+  });
+
   it("should name the variable of a missing credential", () => {
-    expect(credentialProblem("verifier", KIMI, { "claude-code": "token" })).toBe(
+    expect(credentialProblem("verifier", KIMI, { "claude-code": "token" })).toContain(
       "OPENCODE_API_KEY is not set; the opencode verifier needs it",
     );
     expect(credentialProblem("workers", SONNET, { "claude-code": "token" })).toBeNull();

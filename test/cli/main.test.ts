@@ -6,6 +6,7 @@ import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
 import type { RoleEntry } from "../../src/cli/role-menu.ts";
 import type { Role, RoleChoice } from "../../src/config/config.ts";
+import { loadCredentials } from "../../src/config/credentials-store.ts";
 import { parseRunLog } from "../../src/coordinator/run-log.ts";
 import { countedTokens } from "../../src/coordinator/stop-rules.ts";
 import type { GitHub } from "../../src/github/github.ts";
@@ -1020,5 +1021,32 @@ describe("factory run: the notice of an abandoned run", () => {
     expect(await main(["run", "42"], env)).toBe(0);
 
     expect(out.some((line) => line.includes("was abandoned"))).toBe(false);
+  });
+});
+
+describe("factory auth then factory run", () => {
+  it("should hand the credential saved by factory auth to the worker of a later run that has no environment variable", async () => {
+    const repoDir = await runnableRepo();
+    const credentialsPath = join(await temp.make("auth-run-"), "software-factory", "credentials");
+    const saving = cli(repoDir);
+    const secrets = ["sk-ant-oat01-saved", "opencode-saved"];
+    saving.env.auth = {
+      credentialsPath,
+      environment: {},
+      terminal: false,
+      readSecret: async () => secrets.shift() ?? null,
+      confirm: async () => false,
+    };
+    expect(await main(["auth", "claude-code"], saving.env)).toBe(0);
+    expect(await main(["auth", "opencode"], saving.env)).toBe(0);
+
+    const later = cli(repoDir);
+    const loaded = await loadCredentials(credentialsPath, {});
+    if (!loaded.ok) throw new Error(loaded.problem);
+    later.env.credentials = loaded.credentials;
+    expect(await main(["approve", "42"], later.env)).toBe(0);
+    expect(await main(["run", "42"], later.env)).toBe(0);
+
+    expect(later.runner.workers[0]?.spec.env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-saved");
   });
 });

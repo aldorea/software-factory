@@ -1,16 +1,18 @@
 #!/usr/bin/env node
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { CREDENTIAL_VARIABLES } from "../config/roles.ts";
+import { credentialsFilePath, resolveCredentials } from "../config/credentials.ts";
+import { loadCredentials } from "../config/credentials-store.ts";
 import { configuredVerifier } from "../coordinator/docker-verifier.ts";
 import { ghGitHub, ghProblem } from "../github/gh.ts";
 import { macosNotifier } from "../notify/macos.ts";
-import { AGENT_KINDS } from "../workers/agents.ts";
 import { DockerWorkerRunner } from "../workers/docker-runner.ts";
 import { dockerProblem } from "../workers/docker.ts";
 import { askRolesInTerminal } from "./ask-role.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
-import { colorEnabled } from "./setup-render.ts";
+import { confirmInTerminal, readLineFromStdin, readSecretInTerminal } from "./secret-input.ts";
+import { colorEnabled, renderSetup } from "./setup-render.ts";
 import { CLEAR_LINE } from "./terminal-render.ts";
 import { terminalFeatures } from "./tty.ts";
 
@@ -34,12 +36,19 @@ if (process.argv[2] === "run" && terminal) {
   });
 }
 
-const credentials = Object.fromEntries(
-  AGENT_KINDS.flatMap((kind) => {
-    const value = process.env[CREDENTIAL_VARIABLES[kind]];
-    return value ? [[kind, value]] : [];
-  }),
-);
+const credentialsPath = credentialsFilePath(process.env, homedir());
+const color = colorEnabled({ stdout: features.screen, noColor: process.env.NO_COLOR });
+const loaded =
+  process.argv[2] === "run"
+    ? await loadCredentials(credentialsPath, process.env)
+    : { ok: true as const, credentials: resolveCredentials(process.env, {}) };
+if (!loaded.ok) {
+  for (const line of renderSetup([{ kind: "fail", text: `factory: ${loaded.problem}` }], color)) {
+    process.stderr.write(`${line}\n`);
+  }
+  process.exit(1);
+}
+const credentials = loaded.credentials;
 
 process.exitCode = await main(process.argv.slice(2), {
   cwd: process.cwd(),
@@ -53,7 +62,14 @@ process.exitCode = await main(process.argv.slice(2), {
   docker: () => dockerProblem(),
   gh: () => ghProblem(),
   ...(features.menu ? { ask: askRolesInTerminal } : {}),
-  color: colorEnabled({ stdout: features.screen, noColor: process.env.NO_COLOR }),
+  auth: {
+    credentialsPath,
+    environment: process.env,
+    terminal: features.menu,
+    readSecret: (prompt) => (features.menu ? readSecretInTerminal(prompt) : readLineFromStdin()),
+    confirm: confirmInTerminal,
+  },
+  color,
   ...(terminal ? { terminal } : {}),
   launch: launchInteractive,
   signal: stop.signal,
