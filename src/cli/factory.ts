@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { credentialsFilePath, resolveCredentials } from "../config/credentials.ts";
 import { loadCredentials } from "../config/credentials-store.ts";
 import { configuredVerifier } from "../coordinator/docker-verifier.ts";
+import { originHeadProblem } from "../git/repo.ts";
 import { ghGitHub, ghProblem } from "../github/gh.ts";
 import { macosNotifier } from "../notify/macos.ts";
+import { claudeSessionProblem } from "../workers/claude-session.ts";
 import { DockerWorkerRunner } from "../workers/docker-runner.ts";
 import { dockerProblem } from "../workers/docker.ts";
 import { dockerImages } from "../workers/docker-images.ts";
@@ -63,6 +65,8 @@ process.exitCode = await main(process.argv.slice(2), {
   credentials,
   docker: () => dockerProblem(),
   gh: () => ghProblem(),
+  claudeSession: () => claudeSessionProblem(),
+  originHead: (repoDir) => originHeadProblem(repoDir),
   ...(features.menu ? { ask: askRolesInTerminal } : {}),
   auth: {
     credentialsPath,

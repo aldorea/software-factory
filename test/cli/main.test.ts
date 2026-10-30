@@ -121,6 +121,8 @@ function cli(
     credentials: { "claude-code": "token", opencode: "key" },
     docker: async () => null,
     gh: async () => null,
+    claudeSession: async () => null,
+    originHead: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
@@ -643,7 +645,7 @@ describe("factory CLI", () => {
     const code = await main(["run", "42"], { ...env, docker: () => dockerProblem("factory-test-no-such-docker") });
 
     expect(code).toBe(1);
-    expect(err.join("\n")).toContain("factory: Docker is not available");
+    expect(err.join("\n")).toContain("✗ Docker is not available");
     expect(runner.workers).toHaveLength(0);
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
   });
@@ -657,10 +659,10 @@ describe("factory CLI", () => {
       return {};
     };
 
-    const code = await main(["run", "42"], { ...env, gh: async () => "gh is not signed in: run gh auth login" });
+    const code = await main(["run", "42"], { ...env, gh: async () => "gh is not signed in" });
 
     expect(code).toBe(1);
-    expect(err).toEqual(["✗ factory: gh is not signed in: run gh auth login"]);
+    expect(err).toEqual(["✗ gh is not signed in → gh auth login"]);
     expect(questions).toEqual([]);
     expect(runner.workers).toHaveLength(0);
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
@@ -682,7 +684,7 @@ describe("factory CLI", () => {
     });
 
     expect(code).toBe(1);
-    expect(err.join("\n")).toContain("factory: gh is not available");
+    expect(err.join("\n")).toContain("✗ gh is not available");
     expect(questions).toHaveLength(0);
     expect(runner.workers).toHaveLength(0);
     expect(existsSync(join(repoDir, ".factory", "logs"))).toBe(false);
@@ -695,7 +697,7 @@ describe("factory CLI", () => {
     const code = await main(["run", "42"], { ...env, docker: async () => "Docker is not running", gh: async () => "gh is not available" });
 
     expect(code).toBe(1);
-    expect(err).toEqual(["✗ factory: Docker is not running", "✗ factory: gh is not available"]);
+    expect(err).toEqual(["✗ Docker is not running", "✗ gh is not available → gh auth login"]);
   });
 
   it("should paint the tool problems in red when the environment says colour is on", async () => {
@@ -705,7 +707,7 @@ describe("factory CLI", () => {
     const code = await main(["run", "42"], { ...env, color: true, docker: async () => "Docker is not running", gh: async () => null });
 
     expect(code).toBe(1);
-    expect(err).toEqual([`\u001b[1;91m✗\u001b[0m factory: Docker is not running`]);
+    expect(err).toEqual([`\u001b[1;91m✗\u001b[0m Docker is not running`]);
   });
 
   it("should exit non-zero with a clear message when gh is missing", async () => {
