@@ -25,7 +25,8 @@ import { clockMinutes } from "./clock-time.ts";
 import { image } from "./image.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
-import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
+import { menuCredentials } from "./menu-credentials.ts";
+import { menuEntries, type Annotate, type MenuCredentials, type RoleEntry } from "./role-menu.ts";
 import { gatherProbes, readiness, readinessProblems, type Probes } from "./readiness.ts";
 import { renderSetup, type SetupLine } from "./setup-render.ts";
 import { runSummary } from "./run-summary.ts";
@@ -47,7 +48,11 @@ export interface CliEnv {
   gh(): Promise<string | null>;
   claudeSession(): Promise<string | null>;
   originHead(repoDir: string): Promise<string | null>;
-  ask?: (entries: RoleEntry[], annotate: Annotate) => Promise<Partial<Record<Role, RoleChoice>>>;
+  ask?: (
+    entries: RoleEntry[],
+    annotate: Annotate,
+    credentials?: MenuCredentials,
+  ) => Promise<Partial<Record<Role, RoleChoice>>>;
   terminal?: { columns(): number; write(text: string): void };
   launch(launch: InteractiveLaunch): Promise<number>;
   images: ImageDocker;
@@ -208,6 +213,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
       : await env.ask(
           menuEntries({ roles: ROLES, flagged, defaults, defaultOrigin: (role) => defaultOrigin(previous, role) }),
           planLimitAnnotate(previous, env.clock.now()),
+          menuCredentials(env),
         );
   const roles: Partial<Record<RunRole, RoleChoice>> = {};
   for (const role of ROLES) {

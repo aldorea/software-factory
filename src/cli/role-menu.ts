@@ -32,9 +32,15 @@ export interface RoleEntry {
 
 export type Annotate = (entries: RoleEntry[]) => Partial<Record<Role, string[]>>;
 
+export interface MenuCredentials {
+  missing: AgentKind[];
+  add(agent: AgentKind): Promise<boolean>;
+}
+
 export interface MenuOption {
   agent: AgentKind;
   model?: string;
+  noCredential?: true;
 }
 
 export interface RoleMenu {
@@ -48,14 +54,21 @@ export interface RoleStepQuestion {
   preselected?: RoleChoice;
 }
 
-export function roleMenu(question: RoleStepQuestion, models: Record<AgentKind, string[]>): RoleMenu {
+export function roleMenu(
+  question: RoleStepQuestion,
+  models: Record<AgentKind, string[]>,
+  missing: AgentKind[] = [],
+): RoleMenu {
   const { offered, preselected } = question;
   const options = offered.flatMap((agent): MenuOption[] => {
+    if (missing.includes(agent)) return [{ agent, noCredential: true }];
     const known = models[agent];
     const extra = preselected?.agent === agent && !known.includes(preselected.model) ? [preselected.model] : [];
     return [...[...extra, ...known].map((model) => ({ agent, model })), { agent }];
   });
-  const index = options.findIndex((option) => option.agent === preselected?.agent && option.model === preselected?.model);
+  const index = options.findIndex(
+    (option) => option.agent === preselected?.agent && (option.noCredential === true || option.model === preselected?.model),
+  );
   return { options, selected: Math.max(index, 0) };
 }
 
@@ -95,12 +108,14 @@ export type MenuKey =
 export type MenuView =
   | { kind: "summary" }
   | { kind: "step"; options: MenuOption[]; cursor: number }
+  | { kind: "credential"; agent: AgentKind; options: MenuOption[]; cursor: number }
   | { kind: "typing"; agent: AgentKind; text: string; problems: string[] };
 
 export interface MenuState {
   entries: RoleEntry[];
   models: Record<AgentKind, string[]>;
   annotate: Annotate;
+  missing: AgentKind[];
   selected: number;
   view: MenuView;
   outcome: "open" | "started" | "cancelled";
@@ -112,8 +127,9 @@ export function initialMenu(
   entries: RoleEntry[],
   models: Record<AgentKind, string[]>,
   annotate: Annotate = NO_NOTES,
+  missing: AgentKind[] = [],
 ): MenuState {
-  return { entries, models, annotate, selected: editable(entries).at(0) ?? -1, view: { kind: "summary" }, outcome: "open" };
+  return { entries, models, annotate, missing, selected: editable(entries).at(0) ?? -1, view: { kind: "summary" }, outcome: "open" };
 }
 
 export function menuChoices(state: MenuState): Partial<Record<Role, RoleChoice>> {
@@ -125,6 +141,7 @@ export function reduceMenu(state: MenuState, key: MenuKey): MenuState {
   if (key === "ctrl-c") return { ...state, outcome: "cancelled" };
   if (state.view.kind === "summary") return reduceSummary(state, key);
   if (state.view.kind === "step") return reduceStep(state, state.view, key);
+  if (state.view.kind === "credential") return state;
   return reduceTyping(state, state.view, key);
 }
 
@@ -152,6 +169,7 @@ function openStep(state: MenuState, index: number): MenuState {
   const menu = roleMenu(
     { role: entry.role, offered: entry.offered, ...(entry.choice ? { preselected: entry.choice } : {}) },
     state.models,
+    state.missing,
   );
   return { ...state, selected: index, view: { kind: "step", options: menu.options, cursor: menu.selected } };
 }
@@ -161,12 +179,29 @@ function reduceStep(state: MenuState, view: Extract<MenuView, { kind: "step" }>,
   if (key === "up" || key === "down") {
     return { ...state, view: { ...view, cursor: moveSelection(view.cursor, view.options.length, key) } };
   }
+  const option = view.options[view.cursor] as MenuOption;
+  if (option.noCredential === true && (key === "enter" || key === "right")) {
+    return { ...state, view: { kind: "credential", agent: option.agent, options: view.options, cursor: view.cursor } };
+  }
   if (key === "enter") {
-    const option = view.options[view.cursor] as MenuOption;
     if (option.model === undefined) return { ...state, view: { kind: "typing", agent: option.agent, text: "", problems: [] } };
     return choose(state, { agent: option.agent, model: option.model });
   }
   return state;
+}
+
+export function credentialPrompted(state: MenuState, outcome: "saved" | "cancelled"): MenuState {
+  const { view } = state;
+  if (view.kind !== "credential") return state;
+  if (outcome === "cancelled") return { ...state, view: { kind: "step", options: view.options, cursor: view.cursor } };
+  const missing = state.missing.filter((agent) => agent !== view.agent);
+  const entry = state.entries[state.selected] as RoleEntry;
+  const menu = roleMenu(
+    { role: entry.role, offered: entry.offered, ...(entry.choice ? { preselected: entry.choice } : {}) },
+    state.models,
+    missing,
+  );
+  return { ...state, missing, view: { kind: "step", options: menu.options, cursor: view.cursor } };
 }
 
 function reduceTyping(state: MenuState, view: Extract<MenuView, { kind: "typing" }>, key: MenuKey): MenuState {
@@ -195,7 +230,7 @@ export function renderMenu(state: MenuState): string[] {
   const { view } = state;
   if (view.kind === "summary") return renderSummary(state);
   const entry = state.entries[state.selected] as RoleEntry;
-  if (view.kind === "step") return renderStep(entry, view);
+  if (view.kind === "step" || view.kind === "credential") return renderStep(entry, view);
   const hint = view.agent === "opencode" ? " (opencode-go/…)" : "";
   return [`Model of ${view.agent}${hint}: ${view.text}`, ...view.problems];
 }
@@ -217,11 +252,11 @@ function renderSummary(state: MenuState): string[] {
   return [...lines, `${missing ? "Enter to choose the missing roles" : "Enter to start"}${change}`];
 }
 
-function renderStep(entry: RoleEntry, view: Extract<MenuView, { kind: "step" }>): string[] {
+function renderStep(entry: RoleEntry, view: Extract<MenuView, { kind: "step" | "credential" }>): string[] {
   const options = view.options.map((option, index) => {
     const marker = index === view.cursor ? "❯" : " ";
-    const current = option.agent === entry.choice?.agent && option.model === entry.choice?.model ? " (current)" : "";
-    return `${marker} ${option.agent.padEnd(12)} ${option.model ?? "other model…"}${current}`;
+    const current = option.noCredential !== true && option.agent === entry.choice?.agent && option.model === entry.choice?.model ? " (current)" : "";
+    return `${marker} ${option.agent.padEnd(12)} ${option.noCredential ? "(no credential · → to add)" : (option.model ?? "other model…")}${current}`;
   });
   return [`Agent and model of the ${ROLE_LABELS[entry.role]} (↑/↓ move · Enter choose · ← back):`, ...options];
 }
