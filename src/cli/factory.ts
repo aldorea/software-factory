@@ -2,9 +2,11 @@
 import { join } from "node:path";
 import { CREDENTIAL_VARIABLES } from "../config/roles.ts";
 import { configuredVerifier } from "../coordinator/docker-verifier.ts";
+import { originHeadProblem } from "../git/repo.ts";
 import { ghGitHub, ghProblem } from "../github/gh.ts";
 import { macosNotifier } from "../notify/macos.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
+import { claudeSessionProblem } from "../workers/claude-session.ts";
 import { DockerWorkerRunner } from "../workers/docker-runner.ts";
 import { dockerProblem } from "../workers/docker.ts";
 import { askRolesInTerminal } from "./ask-role.ts";
@@ -52,6 +54,8 @@ process.exitCode = await main(process.argv.slice(2), {
   credentials,
   docker: () => dockerProblem(),
   gh: () => ghProblem(),
+  claudeSession: () => claudeSessionProblem(),
+  originHead: (repoDir) => originHeadProblem(repoDir),
   ...(features.menu ? { ask: askRolesInTerminal } : {}),
   color: colorEnabled({ stdout: features.screen, noColor: process.env.NO_COLOR }),
   ...(terminal ? { terminal } : {}),

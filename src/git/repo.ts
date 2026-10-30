@@ -19,6 +19,11 @@ export async function defaultBranch(repoDir: string): Promise<string> {
   return branch;
 }
 
+export async function originHeadProblem(repoDir: string): Promise<string | null> {
+  const head = await exec("git", ["-C", repoDir, "symbolic-ref", "--quiet", "--short", `refs/remotes/${REMOTE}/HEAD`]);
+  return head.exitCode === 0 && head.stdout.trim().startsWith(`${REMOTE}/`) ? null : `${REMOTE}/HEAD is not set`;
+}
+
 export async function isAncestor(repoDir: string, ancestor: string, descendant: string): Promise<boolean> {
   const checked = await exec("git", ["-C", repoDir, "merge-base", "--is-ancestor", ancestor, descendant]);
   if (checked.exitCode === 0) return true;

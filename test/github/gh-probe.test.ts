@@ -7,7 +7,7 @@ describe("ghProblem", () => {
   });
 
   it("should say that gh is not signed in when its command fails, as gh auth status does with no session", async () => {
-    expect(await ghProblem("false")).toContain("gh is not signed in, run gh auth login: false auth status failed with exit code 1");
+    expect(await ghProblem("false")).toContain("gh is not signed in: false auth status failed with exit code 1");
   });
 
   it("should find no problem when the command answers", async () => {

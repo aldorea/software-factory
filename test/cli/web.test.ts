@@ -42,6 +42,8 @@ function cli(cwd: string) {
     credentials: {},
     docker: async () => null,
     gh: async () => null,
+    claudeSession: async () => null,
+    originHead: async () => null,
     launch: async () => 0,
     signal: stop.signal,
     out: (text) => {
