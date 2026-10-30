@@ -131,3 +131,25 @@ export function replaceCredentialLine(text: string, variable: string, value: str
   else lines[at] = line;
   return `${lines.join("\n")}\n`;
 }
+
+export function removeCredentialLine(text: string, variable: string): string {
+  const lines = text
+    .split("\n")
+    .filter((line) => line !== "" && !line.startsWith(`${variable}=`));
+  return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+}
+
+export function maskCredential(value: string): string {
+  return value.length > 4 ? `…${value.slice(-4)}` : "…";
+}
+
+export function credentialOrigin(
+  agent: AgentKind,
+  environment: Record<string, string | undefined>,
+  saved: Credentials,
+): string {
+  const source = credentialSource(agent, environment, saved);
+  if (source === "environment") return "from environment (wins over saved)";
+  const value = saved[agent];
+  return source === "saved" && value !== undefined ? `saved (${maskCredential(value)})` : "not set";
+}

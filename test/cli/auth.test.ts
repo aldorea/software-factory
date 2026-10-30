@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type AuthInput } from "../../src/cli/auth.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
+import type { MenuKey } from "../../src/cli/role-menu.ts";
 import { reduceSecret, type SecretState } from "../../src/cli/secret-input.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
@@ -20,6 +21,7 @@ interface Session {
   secret?: string | null;
   confirms?: boolean;
   environment?: Record<string, string>;
+  keys?: MenuKey[];
 }
 
 async function session(options: Session = {}) {
@@ -27,7 +29,19 @@ async function session(options: Session = {}) {
   const out: string[] = [];
   const err: string[] = [];
   const asked: string[] = [];
+  const shown: string[][] = [];
+  const queue = [...(options.keys ?? [])];
   const auth: AuthInput = {
+    ...(options.keys === undefined
+      ? {}
+      : {
+          screen: {
+            open: () => undefined,
+            close: () => undefined,
+            show: (lines: string[]) => shown.push(lines),
+            nextKey: async () => queue.shift() ?? ("escape" as const),
+          },
+        }),
     credentialsPath,
     environment: options.environment ?? {},
     terminal: options.terminal ?? false,
@@ -58,7 +72,7 @@ async function session(options: Session = {}) {
     out: (text) => out.push(text),
     err: (text) => err.push(text),
   };
-  return { env, out, err, asked, credentialsPath };
+  return { env, out, err, asked, credentialsPath, shown };
 }
 
 describe("factory auth", () => {
@@ -168,6 +182,46 @@ describe("factory auth", () => {
       expect(out.filter((line) => line.includes("CLAUDE_CODE_OAUTH_TOKEN"))).toHaveLength(1);
       expect(out.filter((line) => line.includes("OPENCODE_API_KEY"))).toHaveLength(1);
     }
+  });
+
+  it("should open the menu with a terminal and no agent, and open the prompt of the selected agent on Enter", async () => {
+    const { env, shown, asked, credentialsPath } = await session({ terminal: true, keys: ["down", "enter", "escape"], secret: "key-1" });
+
+    expect(await main(["auth"], env)).toBe(0);
+
+    expect(shown[0]?.[0]).toBe("❯ claude-code  CLAUDE_CODE_OAUTH_TOKEN  not set");
+    expect(asked).toEqual(["Paste the credential (it is not shown): "]);
+    expect(await readFile(credentialsPath, "utf8")).toBe("OPENCODE_API_KEY=key-1\n");
+    expect(shown.at(-1)?.[1]).toBe("❯ opencode     OPENCODE_API_KEY         saved (…ey-1)");
+  });
+
+  it("should leave the file untouched when Esc quits the menu", async () => {
+    const { env, asked, credentialsPath } = await session({ terminal: true, keys: ["escape"] });
+
+    expect(await main(["auth"], env)).toBe(0);
+
+    expect(asked).toEqual([]);
+    await expect(stat(credentialsPath)).rejects.toThrow();
+  });
+
+  it("should print the help instead of the menu with no terminal, and not wait for a key", async () => {
+    const { env, out, shown } = await session({ terminal: false, keys: ["enter"] });
+
+    expect(await main(["auth"], env)).toBe(0);
+
+    expect(shown).toEqual([]);
+    expect(out.join("\n")).toContain("usage: factory auth <agent>");
+  });
+
+  it("should fail with the chmod fix from the menu when the saved file can be read by others", async () => {
+    const { env, err, credentialsPath } = await session({ terminal: true, keys: ["escape"] });
+    await mkdir(dirname(credentialsPath), { recursive: true, mode: 0o700 });
+    await writeFile(credentialsPath, "OPENCODE_API_KEY=old\n");
+    await chmod(credentialsPath, 0o644);
+
+    expect(await main(["auth"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain(`chmod 600 ${credentialsPath}`);
   });
 
   it("should list factory auth in the usage of the CLI", async () => {

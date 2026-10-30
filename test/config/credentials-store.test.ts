@@ -1,7 +1,7 @@
 import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadCredentials, readSavedCredentials, saveCredential } from "../../src/config/credentials-store.ts";
+import { deleteCredential, loadCredentials, readSavedCredentials, saveCredential } from "../../src/config/credentials-store.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
@@ -73,6 +73,55 @@ describe("saveCredential", () => {
 
     expect((await saveCredential(path, "opencode", "b")).ok).toBe(false);
     expect(await readFile(path, "utf8")).toBe("nonsense\n");
+  });
+});
+
+describe("deleteCredential", () => {
+  it("should remove only the line of the agent and keep the other lines as they were", async () => {
+    const path = await credentialsPath();
+    await seed(path, "CLAUDE_CODE_OAUTH_TOKEN=one\nOPENCODE_API_KEY=two\n");
+
+    expect(await deleteCredential(path, "claude-code")).toEqual({ ok: true, path });
+
+    expect(await readFile(path, "utf8")).toBe("OPENCODE_API_KEY=two\n");
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect(await readdir(dirname(path))).toEqual(["credentials"]);
+  });
+
+  it("should leave an empty file that reads as no credential when the last line goes", async () => {
+    const path = await credentialsPath();
+    await seed(path, "OPENCODE_API_KEY=two\n");
+
+    await deleteCredential(path, "opencode");
+
+    expect(await readFile(path, "utf8")).toBe("");
+    expect(await readSavedCredentials(path)).toEqual({ ok: true, values: {} });
+  });
+
+  it("should succeed and create nothing when there is no file", async () => {
+    const path = await credentialsPath();
+
+    expect((await deleteCredential(path, "opencode")).ok).toBe(true);
+
+    await expect(stat(dirname(path))).rejects.toThrow();
+  });
+
+  it("should refuse to rewrite a file that others can read, and leave it unchanged", async () => {
+    const path = await credentialsPath();
+    await seed(path, "OPENCODE_API_KEY=a\n", 0o644);
+
+    const outcome = await deleteCredential(path, "opencode");
+
+    expect(outcome.ok).toBe(false);
+    expect(await readFile(path, "utf8")).toBe("OPENCODE_API_KEY=a\n");
+  });
+
+  it("should refuse to rewrite a file with a line it does not understand, and leave it unchanged", async () => {
+    const path = await credentialsPath();
+    await seed(path, "OPENCODE_API_KEY=a\nnonsense\n");
+
+    expect((await deleteCredential(path, "opencode")).ok).toBe(false);
+    expect(await readFile(path, "utf8")).toBe("OPENCODE_API_KEY=a\nnonsense\n");
   });
 });
 

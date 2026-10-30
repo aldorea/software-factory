@@ -10,6 +10,7 @@ import { DockerWorkerRunner } from "../workers/docker-runner.ts";
 import { dockerProblem } from "../workers/docker.ts";
 import { dockerImages } from "../workers/docker-images.ts";
 import { askRolesInTerminal } from "./ask-role.ts";
+import { terminalMenuScreen } from "./auth-screen.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
 import { confirmInTerminal, readLineFromStdin, readSecretInTerminal } from "./secret-input.ts";
@@ -67,6 +68,7 @@ process.exitCode = await main(process.argv.slice(2), {
     credentialsPath,
     environment: process.env,
     terminal: features.menu,
+    ...(features.menu ? { screen: terminalMenuScreen() } : {}),
     readSecret: (prompt) => (features.menu ? readSecretInTerminal(prompt) : readLineFromStdin()),
     confirm: confirmInTerminal,
   },
