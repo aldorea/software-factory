@@ -26,6 +26,7 @@ import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
 import { renderSetup, type SetupLine } from "./setup-render.ts";
 import { runSummary } from "./run-summary.ts";
 import { RunView } from "./run-view.ts";
+import { refused } from "./target-repo.ts";
 import { renderProgress } from "./terminal-render.ts";
 import { web, WEB_USAGE } from "./web.ts";
 
@@ -80,6 +81,7 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
   }
   const { command, issue, repoArg, flags, refinementFlag } = parsed;
   const repoDir = resolve(env.cwd, repoArg ?? ".");
+  if (await refused(repoDir, env)) return 1;
   if (command === "refine") return refine(repoDir, issue, refinementFlag, env);
   try {
     if (command === "run") return await run(repoDir, issue, flags, env);
@@ -285,8 +287,10 @@ async function init(args: string[], env: CliEnv): Promise<number> {
     env.err(USAGE);
     return 2;
   }
+  const repoDir = resolve(env.cwd, args[0] ?? ".");
+  if (await refused(repoDir, env)) return 1;
   try {
-    const written = await initRepo(resolve(env.cwd, args[0] ?? "."));
+    const written = await initRepo(repoDir);
     for (const line of renderSetup(
       written.map((text): SetupLine => ({ kind: "ok", text })),
       env.color === true,
@@ -305,8 +309,9 @@ async function stats(args: string[], env: CliEnv): Promise<number> {
     env.err(USAGE);
     return 2;
   }
+  const repoDir = resolve(env.cwd, args[0] ?? ".");
+  if (await refused(repoDir, env)) return 1;
   try {
-    const repoDir = resolve(env.cwd, args[0] ?? ".");
     const { runs, unreadable } = await readRunEntries(join(repoDir, ".factory", "logs"));
     const abandoned = abandonedLogs(runs, env.clock.now());
     env.out(formatStats(summarizeRuns(runs.map((entry) => entry.log), abandoned), unreadable));

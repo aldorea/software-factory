@@ -2,10 +2,11 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { DEFAULT_WEB_PORT, startWebServer } from "../web/server.ts";
 import type { CliEnv } from "./main.ts";
+import { refused } from "./target-repo.ts";
 
 export const WEB_USAGE = "factory web [target-repo] [--port <port>]";
 
-type WebEnv = Pick<CliEnv, "cwd" | "clock" | "signal" | "out" | "err">;
+type WebEnv = Pick<CliEnv, "cwd" | "factoryRoot" | "clock" | "signal" | "out" | "err">;
 
 interface WebArgs {
   repoArg?: string;
@@ -41,6 +42,7 @@ export async function web(args: string[], env: WebEnv, usage: string): Promise<n
     return 2;
   }
   const repoDir = resolve(env.cwd, parsed.repoArg ?? ".");
+  if (await refused(repoDir, env)) return 1;
   let server;
   try {
     server = await startWebServer({
