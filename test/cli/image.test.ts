@@ -23,11 +23,12 @@ const CONFIG = `export default {
 };
 `;
 
-async function targetRepo(options: { dockerfile?: boolean } = {}): Promise<string> {
+async function targetRepo(options: { dockerfile?: boolean; dockerignore?: string | null } = {}): Promise<string> {
   const dir = await temp.make("cli-image-");
   await mkdir(join(dir, ".factory"));
   await writeFile(join(dir, ".factory", "config.ts"), CONFIG);
   if (options.dockerfile !== false) await writeFile(join(dir, ".factory", "Dockerfile"), "FROM scratch\n");
+  if (options.dockerignore !== null) await writeFile(join(dir, ".factory", ".dockerignore"), options.dockerignore ?? ".env\n");
   return dir;
 }
 
@@ -87,7 +88,7 @@ describe("factory image", () => {
         `${BASE_IMAGE_LABEL}=sha256:0123456789abcdef0123456789abcdef`,
         "-f",
         join(repoDir, ".factory", "Dockerfile"),
-        "/factory/docker",
+        join(repoDir, ".factory"),
       ],
     ]);
     expect(out).toEqual([
@@ -159,6 +160,29 @@ describe("factory image", () => {
     expect(code).toBe(1);
     expect(images.builds).toEqual([]);
     expect(err.join("\n")).toContain("factory init");
+  });
+
+  it("should not build anything when .factory/.dockerignore is missing, because the build context would hold .factory/.env, and point to factory init", async () => {
+    const images = new FakeImageDocker();
+    const { env, err } = cli(await targetRepo({ dockerignore: null }), images);
+
+    const code = await main(["image"], env);
+
+    expect(code).toBe(1);
+    expect(images.builds).toEqual([]);
+    expect(err).toEqual(["✗ .factory/.dockerignore does not exist, so the build context would hold .factory/.env → factory init"]);
+  });
+
+  it("should not build anything when .factory/.dockerignore does not exclude .env, and not point to factory init, which never overwrites the file", async () => {
+    const images = new FakeImageDocker();
+    const { env, err } = cli(await targetRepo({ dockerignore: "node_modules\n" }), images);
+
+    const code = await main(["image"], env);
+
+    expect(code).toBe(1);
+    expect(images.builds).toEqual([]);
+    expect(err.join("\n")).toContain("does not exclude .env");
+    expect(err.join("\n")).not.toContain("factory init");
   });
 
   it("should not build anything when Docker is not running", async () => {

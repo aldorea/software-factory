@@ -15,7 +15,7 @@ import type { CliEnv } from "./main.ts";
 import { reportFailure, reportOut, type Reporter } from "./report.ts";
 import type { SetupLine } from "./setup-render.ts";
 
-export const AUTH_USAGE = "factory auth <agent>";
+export const AUTH_USAGE = "factory auth <agent> [--force]";
 
 export interface AuthInput {
   credentialsPath: string;
@@ -32,6 +32,7 @@ export type PromptOutcome =
   | { kind: "rejected" | "declined"; problem: string }
   | { kind: "failed"; problem: string; fix?: string };
 
+const FORCE_FLAG = "--force";
 const SECRET_PROMPT = "Paste the credential (it is not shown): ";
 
 export const AUTH_USAGE_LINE = `usage: ${AUTH_USAGE}   (agents: ${AGENT_KINDS.join(", ")})`;
@@ -54,11 +55,17 @@ export function authHelp(): string[] {
   return [
     AUTH_USAGE_LINE,
     "       pbpaste | factory auth <agent>   reads one line from stdin when there is no terminal",
+    "  --force: with no terminal, saves a Claude Code token that does not start with sk-ant-oat; it never saves a value with a space, a line break, a #, a quote, a backtick or a backslash",
     ...AGENT_KINDS.map((agent) => `  ${agent}: ${CREDENTIAL_VARIABLES[agent]}; ${credentialHint(agent)}`),
   ];
 }
 
-export async function promptCredential(agent: AgentKind, input: AuthInput, env: Reporter): Promise<PromptOutcome> {
+export async function promptCredential(
+  agent: AgentKind,
+  input: AuthInput,
+  env: Reporter,
+  force = false,
+): Promise<PromptOutcome> {
   const print = (lines: SetupLine[]) => reportOut(lines, env);
   if (input.terminal) print(credentialExplanation(agent, input.credentialsPath));
   const value = await input.readSecret(SECRET_PROMPT);
@@ -66,11 +73,18 @@ export async function promptCredential(agent: AgentKind, input: AuthInput, env: 
   const checked = checkCredentialInput(agent, value);
   if (checked.kind === "rejected") return { kind: "rejected", problem: checked.problem };
   if (checked.kind === "warning") {
-    if (!input.terminal) {
-      return { kind: "declined", problem: `${checked.warning}; with no terminal there is nobody to confirm, so nothing was saved` };
+    if (!input.terminal && !force) {
+      return {
+        kind: "declined",
+        problem: `${checked.warning}; with no terminal there is nobody to confirm, so nothing was saved: pass --force to save it`,
+      };
     }
-    print([{ kind: "warn", text: checked.warning }]);
-    if (!(await input.confirm("Save it anyway? [y/N] "))) return { kind: "declined", problem: "nothing was saved" };
+    if (!input.terminal) {
+      print([{ kind: "warn", text: `${checked.warning}; saved anyway because of --force` }]);
+    } else {
+      print([{ kind: "warn", text: checked.warning }]);
+      if (!(await input.confirm("Save it anyway? [y/N] "))) return { kind: "declined", problem: "nothing was saved" };
+    }
   }
   const saved = await saveCredential(input.credentialsPath, agent, value);
   if (!saved.ok) return { kind: "failed", ...problemOf(saved) };
@@ -103,7 +117,12 @@ export async function auth(args: string[], env: CliEnv): Promise<number> {
     reportFailure(menu, env);
     return 1;
   }
-  const [agent, ...rest] = args;
+  const force = args.includes(FORCE_FLAG);
+  const [agent, ...rest] = args.filter((arg) => arg !== FORCE_FLAG);
+  if (force && agent === undefined) {
+    env.err(AUTH_USAGE_LINE);
+    return 2;
+  }
   if (agent === undefined || (rest.length === 0 && (agent === "--help" || agent === "-h"))) {
     for (const line of authHelp()) env.out(line);
     return 0;
@@ -114,7 +133,7 @@ export async function auth(args: string[], env: CliEnv): Promise<number> {
   }
   if (!isAgentKind(agent)) return fail(`${agent} is not an agent: use one of ${AGENT_KINDS.join(", ")}`);
   if (credential === undefined) return fail("factory auth is not available here");
-  const outcome = await promptCredential(agent, credential, env);
+  const outcome = await promptCredential(agent, credential, env, force);
   if (outcome.kind === "saved") return 0;
   if (outcome.kind === "cancelled") return fail(credential.terminal ? "cancelled; nothing was saved" : "no credential on stdin");
   reportFailure(outcome, env);

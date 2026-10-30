@@ -9,6 +9,7 @@ import { configPath, loadConfig } from "../config/load.ts";
 import { choiceProblems, chooseRole, parseRoleFlag, ROLES, type ChosenRole } from "../config/roles.ts";
 import type { Clock, Notifier } from "../coordinator/ports.ts";
 import { abandonedLogs, lastChange, runAbandoned } from "../coordinator/abandoned.ts";
+import { onlyNeeded } from "../coordinator/credential-needs.ts";
 import { defaultOrigin, resumeDefaults } from "../coordinator/resume.ts";
 import { latestRunEntry, readRunEntries } from "../coordinator/run-history.ts";
 import { runIssue } from "../coordinator/run.ts";
@@ -34,6 +35,7 @@ import { reportErr, reportOut } from "./report.ts";
 import type { SetupLine } from "./setup-render.ts";
 import { doctor } from "./doctor.ts";
 import { envProbes } from "./env-probes.ts";
+import { specCredentialNeeds } from "./spec-needs.ts";
 import { runSummary } from "./run-summary.ts";
 import { RunView } from "./run-view.ts";
 import { refused } from "./target-repo.ts";
@@ -199,7 +201,13 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     if (parsed.ok) flagged[role] = parsed.choice;
     else flagProblems.push({ kind: "fail", text: parsed.problem });
   }
-  const beforeMenu = readiness("run", { probes, roles: { ...defaults, ...flagged }, credentials: env.credentials });
+  const needs = await specCredentialNeeds(repoDir, issue);
+  const menuWillOpen = env.ask !== undefined;
+  const beforeMenu = readiness("run", {
+    probes,
+    roles: onlyNeeded(menuWillOpen ? flagged : { ...defaults, ...flagged }, needs),
+    credentials: env.credentials,
+  });
   if (reportErr([...readinessProblems(beforeMenu), ...flagProblems], env)) return 1;
   if (!loaded.ok) throw loaded.error;
   const config = loaded.config;
@@ -228,7 +236,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     }
     roles[role] = chosen.choice;
   }
-  const afterMenu = readiness("run", { probes, roles, credentials: env.credentials });
+  const afterMenu = readiness("run", { probes, roles: onlyNeeded(roles, needs), credentials: env.credentials });
   if (reportErr(readinessProblems(afterMenu), env)) return 1;
   env.out(`Preparing run #${issue}; factory web shows it at http://${WEB_HOST}:${DEFAULT_WEB_PORT}/`);
   const view = env.terminal ? new RunView({ now: () => env.clock.now(), ...env.terminal }) : null;

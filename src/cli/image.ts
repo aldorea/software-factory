@@ -1,7 +1,9 @@
 import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { loadConfig } from "../config/load.ts";
+import { dockerignoreProblem } from "../workers/dockerignore.ts";
 import { BASE_IMAGE_TAG, buildImages, type ImageBuildOutcome } from "../workers/images.ts";
+import { readDockerignore } from "./env-facts.ts";
 import type { CliEnv } from "./main.ts";
 import { reportErr, reportFailure, reportOut } from "./report.ts";
 import { refused } from "./target-repo.ts";
@@ -47,7 +49,12 @@ export async function image(args: string[], env: CliEnv, usage: string): Promise
       reportErr([{ kind: "fail", text: `${workerDockerfile} does not exist`, command: "factory init" }], env);
       return 1;
     }
-    const outcome = await buildImages({ factoryRoot: env.factoryRoot, workerDockerfile, image: config.image }, env.images);
+    const ignored = dockerignoreProblem(await readDockerignore(repoDir));
+    if (ignored !== null) {
+      reportErr([{ kind: "fail", text: ignored.problem, command: ignored.fix }], env);
+      return 1;
+    }
+    const outcome = await buildImages({ factoryRoot: env.factoryRoot, repoDir, image: config.image }, env.images);
     if (outcome.kind === "built" || outcome.kind === "worker-failed") {
       reportOut([{ kind: "ok", text: `built the base image ${BASE_IMAGE_TAG} (${shortId(outcome.baseImageId)})` }], env);
     }

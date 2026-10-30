@@ -19,3 +19,12 @@ export async function readEnvFacts(repoDir: string): Promise<EnvFacts> {
   const example = await readEnvFile(join(repoDir, ".factory", ".env.example"));
   return { variables: Object.keys(example ?? {}), values: await readEnvFile(join(repoDir, ".factory", ".env")) };
 }
+
+export async function readDockerignore(repoDir: string): Promise<string | null> {
+  try {
+    return await readFile(join(repoDir, ".factory", ".dockerignore"), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}

@@ -10,6 +10,7 @@ const READY: ReadinessFacts = {
   },
   credentials: { "claude-code": "token" },
   env: { variables: ["FACTORY_E2E_DATABASE_URL_0"], values: { FACTORY_E2E_DATABASE_URL_0: "postgres://x" } },
+  dockerignore: ".env\n",
 };
 
 function facts(change: Partial<ReadinessFacts> & { probes?: ReadinessFacts["probes"] }): ReadinessFacts {
@@ -29,6 +30,7 @@ describe("readiness of factory doctor", () => {
       { kind: "ok", text: "the Claude Code session of the host is signed in" },
       { kind: "ok", text: ".factory/config.ts loads" },
       { kind: "ok", text: ".factory/.env has every value of .factory/.env.example" },
+      { kind: "ok", text: ".factory/.dockerignore excludes .env from the build context" },
       { kind: "ok", text: "origin/HEAD is set" },
       { kind: "ok", text: "CLAUDE_CODE_OAUTH_TOKEN is set for claude-code" },
       { kind: "ok", text: "the worker image is built from the current base image" },
@@ -89,7 +91,7 @@ describe("readiness of factory doctor", () => {
   it("should not ask anything of .factory/.env when .env.example lists no variable", () => {
     const none = facts({ env: { variables: [], values: null } });
 
-    expect(readiness("doctor", none).filter((result) => result.text.includes(".env"))).toEqual([]);
+    expect(readiness("doctor", none).filter((result) => result.text.includes(".factory/.env"))).toEqual([]);
   });
 
   it("should check the credential of the agents of the workers, verifier and tester only, because refinement runs on the host", () => {
@@ -128,6 +130,28 @@ describe("readiness of factory doctor", () => {
     const given = facts({ credentials: {}, credentialsProblem: { problem: "/c line 2 is not understood: fix the line or delete it" } });
 
     expect(failures(given)).toEqual([{ kind: "fail", text: "/c line 2 is not understood: fix the line or delete it" }]);
+  });
+
+  it("should fail with factory init when .factory/.dockerignore does not exist, since the build context of the worker image would hold .factory/.env", () => {
+    expect(failures(facts({ dockerignore: null }))).toEqual([
+      { kind: "fail", text: ".factory/.dockerignore does not exist, so the build context would hold .factory/.env", command: "factory init" },
+    ]);
+  });
+
+  it("should fail without factory init when .factory/.dockerignore does not exclude .env, because factory init never overwrites the file", () => {
+    expect(failures(facts({ dockerignore: "node_modules\n" }))).toEqual([
+      {
+        kind: "fail",
+        text: ".factory/.dockerignore does not exclude .env, so the build context would hold .factory/.env",
+        command: "add .env to .factory/.dockerignore",
+      },
+    ]);
+  });
+
+  it("should refuse to evaluate the .dockerignore check when the file was not read", () => {
+    const { dockerignore: _unread, ...unread } = READY;
+
+    expect(() => readiness("doctor", unread)).toThrow("the .dockerignore file was not read");
   });
 
   it("should refuse to evaluate the .env check when the .env facts were not read", () => {

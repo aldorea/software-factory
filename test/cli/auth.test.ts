@@ -156,6 +156,76 @@ describe("factory auth", () => {
     await expect(stat(credentialsPath)).rejects.toThrow();
   });
 
+  it("should save a Claude Code token with an unexpected prefix with no terminal when --force is given, and say so with a warning line", async () => {
+    const { env, out, err, credentialsPath } = await session({ secret: "abc" });
+
+    expect(await main(["auth", "claude-code", "--force"], env)).toBe(0);
+
+    expect(await readFile(credentialsPath, "utf8")).toBe("CLAUDE_CODE_OAUTH_TOKEN=abc\n");
+    expect(out[0]).toMatch(/^⚠ .*sk-ant-oat/);
+    expect(out.join("\n")).toContain("--force");
+    expect(err).toEqual([]);
+  });
+
+  it("should take --force before the agent too", async () => {
+    const { env, credentialsPath } = await session({ secret: "abc" });
+
+    expect(await main(["auth", "--force", "claude-code"], env)).toBe(0);
+
+    expect(await readFile(credentialsPath, "utf8")).toBe("CLAUDE_CODE_OAUTH_TOKEN=abc\n");
+  });
+
+  it("should still ask the developer to confirm in a terminal when --force is given, because the prompt is the safer way to save an odd token", async () => {
+    const declined = await session({ terminal: true, secret: "abc", confirms: false });
+
+    expect(await main(["auth", "claude-code", "--force"], declined.env)).toBe(1);
+
+    expect(declined.asked).toContain("Save it anyway? [y/N] ");
+    await expect(stat(declined.credentialsPath)).rejects.toThrow();
+  });
+
+  it.each([
+    ["an empty value", ""],
+    ["a value with a space", "sk-ant-oat ab"],
+    ["a value with a line break", "sk-ant-oat\nab"],
+    ["a value with a #", "sk-ant-oat#ab"],
+    ["a value with a double quote", 'sk-ant-oat"ab'],
+    ["a value with a single quote", "sk-ant-oat'ab"],
+    ["a value with a backtick", "sk-ant-oat`ab"],
+    ["a value with a backslash", "sk-ant-oat\\ab"],
+  ])("should not let --force save %s", async (_name, secret) => {
+    const { env, err, credentialsPath } = await session({ secret });
+
+    expect(await main(["auth", "claude-code", "--force"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("factory:");
+    await expect(stat(credentialsPath)).rejects.toThrow();
+  });
+
+  it("should save an OpenCode key with --force and print no warning, because only a Claude Code token has a known prefix", async () => {
+    const { env, out } = await session({ secret: "abc" });
+
+    expect(await main(["auth", "opencode", "--force"], env)).toBe(0);
+
+    expect(out.some((line) => line.startsWith("⚠"))).toBe(false);
+  });
+
+  it("should tell the developer that --force saves the token when there is no terminal to confirm", async () => {
+    const { env, err } = await session({ secret: "abc" });
+
+    await main(["auth", "claude-code"], env);
+
+    expect(err.join("\n")).toContain("--force");
+  });
+
+  it("should print the usage with exit 2 when --force comes with no agent", async () => {
+    const { env, err } = await session({ secret: "abc" });
+
+    expect(await main(["auth", "--force"], env)).toBe(2);
+
+    expect(err.join("\n")).toContain("factory auth <agent>");
+  });
+
   it("should fail with the list of agents on an unknown agent", async () => {
     const { env, err } = await session({ secret: "x" });
 
@@ -181,6 +251,7 @@ describe("factory auth", () => {
       const { env, out } = await session();
       expect(await main(args, env)).toBe(0);
       expect(out.join("\n")).toContain("usage: factory auth <agent>");
+      expect(out.join("\n")).toContain("--force");
       expect(out.filter((line) => line.includes("CLAUDE_CODE_OAUTH_TOKEN"))).toHaveLength(1);
       expect(out.filter((line) => line.includes("OPENCODE_API_KEY"))).toHaveLength(1);
     }

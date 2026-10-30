@@ -15,6 +15,7 @@ import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
+import { specText } from "../coordinator/harness.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
@@ -34,7 +35,7 @@ const CONFIG = `export default {
 };
 `;
 
-async function repo(options: { originHead: boolean }): Promise<string> {
+async function repo(options: { originHead: boolean; spec?: string }): Promise<string> {
   const remote = await temp.make("readiness-remote-");
   await execOk("git", ["init", "-q", "--bare", "-b", "main", remote]);
   const dir = await temp.make("readiness-target-");
@@ -48,8 +49,33 @@ async function repo(options: { originHead: boolean }): Promise<string> {
   await execOk("git", ["-C", dir, "commit", "-q", "-m", "init"]);
   await execOk("git", ["-C", dir, "push", "-q", "origin", "main"]);
   if (options.originHead) await execOk("git", ["-C", dir, "remote", "set-head", "origin", "--auto"]);
+  if (options.spec !== undefined) {
+    await execOk("git", ["-C", dir, "switch", "-q", "-c", "factory/42-greeting"]);
+    await mkdir(join(dir, "specs"));
+    await writeFile(join(dir, "specs", "42.md"), options.spec);
+    await execOk("git", ["-C", dir, "add", "."]);
+    await execOk("git", ["-C", dir, "commit", "-q", "-m", "spec"]);
+    await execOk("git", ["-C", dir, "switch", "-q", "main"]);
+  }
   return dir;
 }
+
+function specOf(...evidence: ("playwright" | "request" | "human")[]): string {
+  const criteria = Object.fromEntries(
+    evidence.map((kind, index) => [
+      `A${index + 1}`,
+      { evidence: kind, level: kind === "human" ? "integration" : "subtask", ...(kind === "human" ? { reason: "subjective" } : {}) },
+    ]),
+  );
+  return specText({
+    files: Object.fromEntries(evidence.map((_, index) => [`A${index + 1}`, ["src/greeting.txt"]])),
+    base: null,
+    subtasks: [{ id: "S1", criteria: Object.keys(criteria), scope: ["src/"], dependsOn: [], testChanges: [] }],
+    criteria,
+  });
+}
+
+const OPENCODE_TESTER = ["--tester-agent", "opencode:opencode-go/kimi-k2"];
 
 function cli(cwd: string, overrides: Partial<CliEnv> = {}) {
   const out: string[] = [];
@@ -164,28 +190,62 @@ describe("readiness when factory run starts", () => {
     const code = await main(["run", "42", "--worker-agent", "opencode:opencode-go/glm-5"], env);
 
     expect(code).toBe(1);
-    expect(err).toEqual([
-      "✗ OPENCODE_API_KEY not set; roles.workers and roles.verifier use opencode → factory auth opencode",
-    ]);
+    expect(err).toEqual(["✗ OPENCODE_API_KEY not set; roles.workers uses opencode → factory auth opencode"]);
     expect(asked).toEqual([]);
     expect(runner.workers).toEqual([]);
   });
 
-  it("should stop before the role menu when a value of the config chooses an agent with no credential", async () => {
+  it("should stop before starting when a value of the config chooses an agent with no credential and there is no terminal to show a menu", async () => {
     const dir = await repo({ originHead: true });
-    const asked: RoleEntry[][] = [];
-    const { env, err } = cli(dir, {
-      credentials: { "claude-code": "token" },
-      ask: async (entries) => {
-        asked.push(entries);
-        return {};
-      },
-    });
+    const { env, err, runner } = cli(dir, { credentials: { "claude-code": "token" } });
 
     expect(await main(["run", "42"], env)).toBe(1);
 
     expect(err).toEqual(["✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode"]);
+    expect(runner.workers).toEqual([]);
+  });
+
+  it("should open the role menu when only a value of the config chooses an agent with no credential, so the developer can switch agent or add the credential there", async () => {
+    const dir = await repo({ originHead: true });
+    const asked: RoleEntry[][] = [];
+    const offered: (MenuCredentials | undefined)[] = [];
+    const { env, err } = cli(dir, { credentials: { "claude-code": "token" } });
+    env.ask = async (entries, _annotate, credentials) => {
+      asked.push(entries);
+      offered.push(credentials);
+      return {};
+    };
+
+    await main(["run", "42"], env);
+
+    expect(asked).toHaveLength(1);
+    expect(err).toEqual(["✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode"]);
+  });
+
+  it("should let the developer switch the agent in the menu and then start, when the config chose an agent with no credential", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err, out } = cli(dir, { credentials: { "claude-code": "token" } });
+    env.ask = async () => ({ verifier: { agent: "claude-code", model: "opus" } });
+
+    await main(["run", "42"], env);
+
+    expect(err.filter((line) => line.startsWith("✗ OPENCODE_API_KEY"))).toEqual([]);
+    expect(out).toContainEqual(expect.stringContaining("Preparing run #42"));
+  });
+
+  it("should still stop before the menu, with the menu not opened, when a flag chooses an agent with no credential, since the developer asked for it by hand", async () => {
+    const dir = await repo({ originHead: true });
+    const asked: RoleEntry[][] = [];
+    const { env, err } = cli(dir, { credentials: { "claude-code": "token" } });
+    env.ask = async (entries) => {
+      asked.push(entries);
+      return {};
+    };
+
+    await main(["run", "42", "--tester-agent", "opencode:opencode-go/kimi-k2"], env);
+
     expect(asked).toEqual([]);
+    expect(err).toEqual(["✗ OPENCODE_API_KEY not set; roles.tester uses opencode → factory auth opencode"]);
   });
 
   it("should list the tool problems and the credential problems together, each with its fix", async () => {
@@ -294,6 +354,67 @@ describe("readiness when factory run starts", () => {
     expect(await main(["run", "42", "--worker-agent", "gemini:pro"], env)).toBe(1);
 
     expect(err).toEqual(["✗ Docker is not running", "✗ gemini is not an agent: use one of claude-code, opencode"]);
+  });
+});
+
+describe("the credentials that factory run asks for follow the spec", () => {
+  const ONLY_CLAUDE = { "claude-code": "token" };
+
+  it("should not ask for the credential of the tester or the verifier when every criterion of the spec is for a human", async () => {
+    const dir = await repo({ originHead: true, spec: specOf("human") });
+    const { env, err, out } = cli(dir, { credentials: ONLY_CLAUDE });
+
+    await main(["run", "42", ...OPENCODE_TESTER], env);
+
+    expect(err.filter((line) => line.includes("OPENCODE_API_KEY"))).toEqual([]);
+    expect(out).toContainEqual(expect.stringContaining("Preparing run #42"));
+  });
+
+  it("should ask for the credential of the tester, and not of the verifier, when a criterion has request evidence", async () => {
+    const dir = await repo({ originHead: true, spec: specOf("request", "human") });
+    const { env, err, runner } = cli(dir, { credentials: ONLY_CLAUDE });
+
+    expect(await main(["run", "42", ...OPENCODE_TESTER], env)).toBe(1);
+
+    expect(err).toEqual(["✗ OPENCODE_API_KEY not set; roles.tester uses opencode → factory auth opencode"]);
+    expect(runner.workers).toEqual([]);
+  });
+
+  it("should ask for the credential of the verifier and the tester when a criterion has playwright evidence", async () => {
+    const dir = await repo({ originHead: true, spec: specOf("playwright") });
+    const { env, err } = cli(dir, { credentials: ONLY_CLAUDE });
+
+    expect(await main(["run", "42", ...OPENCODE_TESTER], env)).toBe(1);
+
+    expect(err).toEqual(["✗ OPENCODE_API_KEY not set; roles.verifier and roles.tester use opencode → factory auth opencode"]);
+  });
+
+  it("should always ask for the credential of the workers, even when every criterion is for a human", async () => {
+    const dir = await repo({ originHead: true, spec: specOf("human") });
+    const { env, err } = cli(dir, { credentials: { opencode: "key" } });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err).toEqual(["✗ CLAUDE_CODE_OAUTH_TOKEN not set; roles.workers uses claude-code → factory auth claude-code"]);
+  });
+
+  it("should ask for every credential when the spec cannot be read, and leave the spec problem to the run", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err } = cli(dir, { credentials: ONLY_CLAUDE });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err).toEqual(["✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode"]);
+  });
+
+  it("should leave out of the check after the menu the roles the spec does not need, even when the menu picked an agent with no credential for them", async () => {
+    const dir = await repo({ originHead: true, spec: specOf("human") });
+    const { env, err } = cli(dir, { credentials: ONLY_CLAUDE });
+    env.ask = async () => ({ tester: { agent: "opencode", model: "opencode-go/kimi-k2" } });
+
+    await main(["run", "42"], env);
+
+    expect(err.filter((line) => line.includes("OPENCODE_API_KEY"))).toEqual([]);
   });
 });
 

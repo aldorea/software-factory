@@ -107,6 +107,10 @@ RUN npm --version
 `;
 }
 
+export function renderDockerignore(): string {
+  return ".env\n";
+}
+
 export function renderEnvExample(): string {
   const names = Object.values(SLOT_VARIABLES).flatMap((prefix) =>
     Array.from({ length: SLOT_COUNT }, (_, slot) => `${prefix}_${slot}=`),
@@ -125,6 +129,7 @@ export function factoryFiles(input: FactoryTemplateInput): FactoryFile[] {
   return [
     { path: ".factory/config.ts", content: renderConfig(input) },
     { path: ".factory/Dockerfile", content: renderDockerfile(input.packageManager) },
+    { path: ".factory/.dockerignore", content: renderDockerignore() },
     { path: ".factory/.env.example", content: renderEnvExample() },
     { path: ".factory/package.json", content: renderPackageJson() },
   ];

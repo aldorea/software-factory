@@ -34,7 +34,9 @@ const CONFIG = `export default {
 const ENV_EXAMPLE = "FACTORY_E2E_DATABASE_URL_0=\nFACTORY_E2E_DATABASE_URL_1=\n";
 const ENV_FILLED = "FACTORY_E2E_DATABASE_URL_0=postgres://a\nFACTORY_E2E_DATABASE_URL_1=postgres://b\n";
 
-async function repo(options: { config?: string; env?: string | null; originHead?: boolean } = {}): Promise<string> {
+async function repo(
+  options: { config?: string; env?: string | null; originHead?: boolean; dockerignore?: string | null } = {},
+): Promise<string> {
   const remote = await temp.make("doctor-remote-");
   await execOk("git", ["init", "-q", "--bare", "-b", "main", remote]);
   const dir = await temp.make("doctor-target-");
@@ -45,6 +47,7 @@ async function repo(options: { config?: string; env?: string | null; originHead?
   await mkdir(join(dir, ".factory"));
   await writeFile(join(dir, ".factory", "config.ts"), options.config ?? CONFIG);
   await writeFile(join(dir, ".factory", ".env.example"), ENV_EXAMPLE);
+  if (options.dockerignore !== null) await writeFile(join(dir, ".factory", ".dockerignore"), options.dockerignore ?? ".env\n");
   if (options.env !== null) await writeFile(join(dir, ".factory", ".env"), options.env ?? ENV_FILLED);
   await execOk("git", ["-C", dir, "add", "."]);
   await execOk("git", ["-C", dir, "commit", "-q", "-m", "init"]);
@@ -112,6 +115,7 @@ describe("factory doctor", () => {
       "✓ the Claude Code session of the host is signed in",
       "✓ .factory/config.ts loads",
       "✓ .factory/.env has every value of .factory/.env.example",
+      "✓ .factory/.dockerignore excludes .env from the build context",
       "✓ origin/HEAD is set",
       "✓ CLAUDE_CODE_OAUTH_TOKEN is set for claude-code",
       "✓ OPENCODE_API_KEY is set for opencode",
@@ -142,7 +146,7 @@ describe("factory doctor", () => {
       "✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode",
       "✗ worker:dev built from an older base image → factory image",
     ]);
-    expect(out.filter((line) => line.startsWith("✓"))).toHaveLength(7);
+    expect(out.filter((line) => line.startsWith("✓"))).toHaveLength(8);
   });
 
   it("should not check the credential of the refinement, because it runs on the host session", async () => {
@@ -168,6 +172,28 @@ describe("factory doctor", () => {
     expect(out).toContain(
       "✗ .factory/.env does not exist; .factory/.env.example lists FACTORY_E2E_DATABASE_URL_0, FACTORY_E2E_DATABASE_URL_1 → cp .factory/.env.example .factory/.env",
     );
+  });
+
+  it("should report a missing .factory/.dockerignore with factory init, and change nothing", async () => {
+    const dir = await repo({ dockerignore: null });
+    const before = await snapshot(dir);
+    const { env, out } = await cli(dir);
+
+    expect(await main(["doctor"], env)).toBe(1);
+
+    expect(out).toContain("✗ .factory/.dockerignore does not exist, so the build context would hold .factory/.env → factory init");
+    expect(await snapshot(dir)).toEqual(before);
+  });
+
+  it("should report a .factory/.dockerignore that does not exclude .env", async () => {
+    const dir = await repo({ dockerignore: "node_modules\n" });
+    const { env, out } = await cli(dir);
+
+    expect(await main(["doctor"], env)).toBe(1);
+
+    expect(out.filter((line) => line.startsWith("✗"))).toEqual([
+      "✗ .factory/.dockerignore does not exclude .env, so the build context would hold .factory/.env → add .env to .factory/.dockerignore",
+    ]);
   });
 
   it("should report a config that does not load and not guess the worker image", async () => {

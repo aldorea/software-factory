@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { loadConfig } from "../config/load.ts";
 import { envProbes } from "./env-probes.ts";
-import { readEnvFacts } from "./env-facts.ts";
+import { readDockerignore, readEnvFacts } from "./env-facts.ts";
 import type { CliEnv } from "./main.ts";
 import { gatherProbes, readiness, readinessLines } from "./readiness.ts";
 import { reportOut } from "./report.ts";
@@ -30,6 +30,7 @@ export async function doctor(args: string[], env: CliEnv, usage: string): Promis
       credentials: env.credentials,
       credentialsProblem: env.credentialsProblem ?? null,
       env: await readEnvFacts(repoDir),
+      dockerignore: await readDockerignore(repoDir),
     });
     reportOut(readinessLines(results), env);
     return results.some((result) => result.kind === "fail") ? 1 : 0;

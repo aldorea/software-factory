@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+const FACTORY_DIR = ".factory";
 export const BASE_IMAGE_TAG = "software-factory/worker:dev";
 export const BASE_IMAGE_LABEL = "software-factory.base-image-id";
 
@@ -43,7 +44,7 @@ export type ImageBuildOutcome =
 
 export interface ImageBuildInput {
   factoryRoot: string;
-  workerDockerfile: string;
+  repoDir: string;
   image: string;
   baseTag?: string;
 }
@@ -66,8 +67,7 @@ export function baseImageBuildArgs(input: {
 }
 
 export function workerImageBuildArgs(input: {
-  factoryRoot: string;
-  workerDockerfile: string;
+  repoDir: string;
   image: string;
   baseTag: string;
   baseImageId: string;
@@ -81,8 +81,8 @@ export function workerImageBuildArgs(input: {
     "--label",
     `${BASE_IMAGE_LABEL}=${input.baseImageId}`,
     "-f",
-    input.workerDockerfile,
-    join(input.factoryRoot, "docker"),
+    join(input.repoDir, FACTORY_DIR, "Dockerfile"),
+    join(input.repoDir, FACTORY_DIR),
   ];
 }
 

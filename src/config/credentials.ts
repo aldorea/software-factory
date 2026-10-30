@@ -122,7 +122,7 @@ export function checkCredentialInput(agent: AgentKind, value: string): Credentia
     return { kind: "rejected", problem: "the credential has a space or a line break, which would break the env file of the container" };
   }
   if (/[#"'`\\]/.test(value)) {
-    return { kind: "rejected", problem: "the credential has a quote, a backslash or a #, which the credentials file cannot hold as it is" };
+    return { kind: "rejected", problem: "the credential has a quote, a backtick, a backslash or a #: Node's env parser would truncate or unquote it, so the credentials file cannot hold it as it is" };
   }
   if (agent === "claude-code" && !value.startsWith(CLAUDE_CODE_TOKEN_PREFIX)) {
     return {

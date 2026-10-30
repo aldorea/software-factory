@@ -90,6 +90,13 @@ describe("checkCredentialInput", () => {
     }
   });
 
+  it("should say why quotes, backticks, backslashes and # are rejected: the env parser of Node would truncate or unquote the value", () => {
+    for (const value of ['a"b', "a'b", "a#b", "a`b", "a\\b"]) {
+      const checked = checkCredentialInput("opencode", value);
+      expect(checked.kind === "rejected" && checked.problem).toContain("Node's env parser would truncate or unquote it");
+    }
+  });
+
   it("should warn when a Claude Code token does not start with sk-ant-oat", () => {
     expect(checkCredentialInput("claude-code", "abc").kind).toBe("warning");
     expect(checkCredentialInput("claude-code", "sk-ant-oat01-abc").kind).toBe("accepted");

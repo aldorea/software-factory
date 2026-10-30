@@ -1,6 +1,7 @@
 import type { Role, RoleChoice } from "../config/config.ts";
 import { CREDENTIAL_VARIABLES, type CredentialsProblem } from "../config/credentials.ts";
 import { ROLES } from "../config/roles.ts";
+import { dockerignoreProblem } from "../workers/dockerignore.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { EnvFacts } from "./env-facts.ts";
@@ -18,6 +19,7 @@ export interface ReadinessFacts {
   credentials: Partial<Record<AgentKind, string>>;
   credentialsProblem?: CredentialsProblem | null;
   env?: EnvFacts;
+  dockerignore?: string | null;
 }
 
 export interface CheckResult {
@@ -110,6 +112,19 @@ const envFileCheck: Check = {
   },
 };
 
+const dockerignoreCheck: Check = {
+  commands: ["doctor"],
+  needs: [],
+  evaluate({ dockerignore }) {
+    if (dockerignore === undefined) throw new Error("the .dockerignore file was not read before the .dockerignore readiness check");
+    const problem = dockerignoreProblem(dockerignore);
+    if (problem === null) {
+      return [{ kind: "ok", text: ".factory/.dockerignore excludes .env from the build context" }];
+    }
+    return [{ kind: "fail", text: problem.problem, command: problem.fix }];
+  },
+};
+
 const workerImageCheck: Check = {
   commands: ["run", "doctor"],
   needs: ["docker", "workerImage"],
@@ -129,6 +144,7 @@ export const CHECKS: Check[] = [
   probeCheck("claudeSession", ["refine", "doctor"], "the Claude Code session of the host is signed in", "claude auth login"),
   probeCheck("config", ["doctor"], ".factory/config.ts loads", undefined),
   envFileCheck,
+  dockerignoreCheck,
   probeCheck("originHead", ["refine", "doctor"], "origin/HEAD is set", "git remote set-head origin --auto"),
   credentialCheck,
   workerImageCheck,

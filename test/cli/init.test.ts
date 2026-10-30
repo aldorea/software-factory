@@ -10,6 +10,7 @@ import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
+import { dockerignoreProblem } from "../../src/workers/dockerignore.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
@@ -102,9 +103,10 @@ describe("factory init", () => {
     expect(await main(["init"], env)).toBe(0);
 
     expect(err).toEqual([]);
-    expect(out.slice(0, 5)).toEqual([
+    expect(out.slice(0, 6)).toEqual([
       "✓ wrote .factory/config.ts",
       "✓ wrote .factory/Dockerfile",
+      "✓ wrote .factory/.dockerignore",
       "✓ wrote .factory/.env.example",
       "✓ wrote .factory/package.json",
       "✓ wrote .gitignore",
@@ -118,6 +120,25 @@ describe("factory init", () => {
     ]);
     expect(await readFile(join(dir, ".factory", "Dockerfile"), "utf8")).toContain("pnpm");
     expect(await readFile(join(dir, ".factory", "package.json"), "utf8")).toContain('"type": "module"');
+  });
+
+  it("should write a .factory/.dockerignore that excludes .env, so the build context of the worker image never holds the secrets of the repo", async () => {
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "" } });
+    const { env } = cli(dir);
+
+    expect(await main(["init"], env)).toBe(0);
+
+    expect(dockerignoreProblem(await readFile(join(dir, ".factory", ".dockerignore"), "utf8"))).toBeNull();
+  });
+
+  it("should never overwrite an existing .factory/.dockerignore, even one that does not exclude .env", async () => {
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "", ".factory/.dockerignore": "node_modules\n" } });
+    const { env, out } = cli(dir);
+
+    expect(await main(["init"], env)).toBe(0);
+
+    expect(out).toContain("✓ skipped .factory/.dockerignore (already exists)");
+    expect(await readFile(join(dir, ".factory", ".dockerignore"), "utf8")).toBe("node_modules\n");
   });
 
   it("should install with npm ci in an npm repo and run the scripts with npm run", async () => {
@@ -167,9 +188,10 @@ describe("factory init", () => {
 
     expect(await main(["init"], env)).toBe(0);
 
-    expect(out.slice(0, 5)).toEqual([
+    expect(out.slice(0, 6)).toEqual([
       "✓ wrote .factory/config.ts",
       "✓ skipped .factory/Dockerfile (already exists)",
+      "✓ wrote .factory/.dockerignore",
       "✓ wrote .factory/.env.example",
       "✓ wrote .factory/package.json",
       "✓ skipped .gitignore (already lists the factory entries)",
@@ -178,7 +200,7 @@ describe("factory init", () => {
 
     const second = cli(dir);
     expect(await main(["init"], second.env)).toBe(0);
-    expect(second.out.slice(0, 5).every((line) => line.startsWith("✓ skipped "))).toBe(true);
+    expect(second.out.slice(0, 6).every((line) => line.startsWith("✓ skipped "))).toBe(true);
   });
 
   it("should leave package.json of the target repo byte for byte unchanged", async () => {
@@ -243,7 +265,7 @@ describe("factory init", () => {
 
     expect(await main(["init"], env)).toBe(0);
 
-    expect(out.slice(5)).toEqual([
+    expect(out.slice(6)).toEqual([
       "Next:",
       "  1. fill .factory/.env (copy of .env.example: FACTORY_E2E_DATABASE_URL_0, FACTORY_E2E_DATABASE_URL_1)",
       "  2. factory auth          set the credential of each agent, once for every repo",

@@ -26,7 +26,7 @@ function fakeDocker(exitCodes: number[] = [], id: string | null = "sha256:base")
 
 const INPUT = {
   factoryRoot: "/factory",
-  workerDockerfile: "/repo/.factory/Dockerfile",
+  repoDir: "/repo",
   image: "toy-factory-worker:dev",
 };
 
@@ -57,8 +57,15 @@ describe("workerImageBuildArgs", () => {
       `${BASE_IMAGE_LABEL}=sha256:abc`,
       "-f",
       "/repo/.factory/Dockerfile",
-      "/factory/docker",
+      "/repo/.factory",
     ]);
+  });
+
+  it("should use .factory of the target repo as the build context, not the docker directory of the factory, so the worker image cannot be built from files of the factory", () => {
+    const args = workerImageBuildArgs({ ...INPUT, baseTag: BASE_IMAGE_TAG, baseImageId: "sha256:abc" });
+
+    expect(args.at(-1)).toBe("/repo/.factory");
+    expect(args).not.toContain("/factory/docker");
   });
 });
 
