@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  credentialPrompted,
   initialMenu,
   menuChoices,
   menuEntries,
@@ -319,5 +320,108 @@ describe("menuEntries", () => {
     const [entry] = menuEntries({ roles: ["verifier"], flagged: {}, defaults: {}, defaultOrigin: () => "config" });
 
     expect(entry?.offered).toEqual(["claude-code", "opencode"]);
+  });
+});
+
+describe("the role menu: an agent with no credential", () => {
+  const WORKERS: RoleEntry[] = [
+    { role: "workers", offered: [...BOTH], choice: { agent: "claude-code", model: "opus" }, origin: "config" },
+  ];
+  const opened = () => reduceMenu(initialMenu(WORKERS, MODELS, undefined, ["opencode"]), "right");
+  const onOpencode = () => reduceMenu(reduceMenu(reduceMenu(opened(), "down"), "down"), "down");
+
+  it("should replace the models of the agent with one marked entry, so nothing can be chosen on an agent that cannot run", () => {
+    const menu = roleMenu({ role: "workers", offered: [...BOTH] }, MODELS, ["opencode"]);
+
+    expect(menu.options).toEqual([
+      { agent: "claude-code", model: "opus" },
+      { agent: "claude-code", model: "sonnet" },
+      { agent: "claude-code" },
+      { agent: "opencode", noCredential: true },
+    ]);
+  });
+
+  it("should show the entry as no credential with the key to add it", () => {
+    expect(renderMenu(onOpencode())).toEqual([
+      "Agent and model of the workers (↑/↓ move · Enter choose · ← back):",
+      "  claude-code  opus (current)",
+      "  claude-code  sonnet",
+      "  claude-code  other model…",
+      "❯ opencode     (no credential · → to add)",
+    ]);
+  });
+
+  it("should open the credential prompt of that agent on → and on Enter, remembering the step", () => {
+    const step = onOpencode();
+
+    for (const key of ["right", "enter"] as const) {
+      expect(reduceMenu(step, key).view).toMatchObject({ kind: "credential", agent: "opencode", cursor: 3 });
+    }
+  });
+
+  it("should not open the prompt on → over an entry that has a credential", () => {
+    expect(reduceMenu(opened(), "right")).toEqual(opened());
+  });
+
+  it("should go back to the step with the agent available and the choice untouched once the credential is saved", () => {
+    const state = credentialPrompted(reduceMenu(onOpencode(), "enter"), "saved");
+
+    expect(state.view).toMatchObject({ kind: "step", cursor: 3 });
+    expect(renderMenu(state).slice(4)).toEqual([
+      "❯ opencode     opencode-go/kimi-k3",
+      "  opencode     other model…",
+    ]);
+    expect(state.entries).toEqual(WORKERS);
+  });
+
+  it("should let the developer choose a model of the agent once its credential is saved", () => {
+    const saved = credentialPrompted(reduceMenu(onOpencode(), "enter"), "saved");
+
+    const state = reduceMenu(saved, "enter");
+
+    expect(menuChoices(state)).toEqual({ workers: { agent: "opencode", model: "opencode-go/kimi-k3" } });
+  });
+
+  it("should go back to the same step with the same entry and the choice untouched when the prompt is cancelled", () => {
+    const before = onOpencode();
+
+    const state = credentialPrompted(reduceMenu(before, "enter"), "cancelled");
+
+    expect(state).toEqual(before);
+    expect(state.entries).toEqual(WORKERS);
+  });
+
+  it("should keep the entry marked after a cancelled prompt, so the prompt can open again", () => {
+    const state = credentialPrompted(reduceMenu(onOpencode(), "enter"), "cancelled");
+
+    expect(reduceMenu(state, "right").view).toMatchObject({ kind: "credential", agent: "opencode" });
+  });
+
+  it("should still reject a model of OpenCode outside opencode-go/ after the credential is saved", () => {
+    const saved = credentialPrompted(reduceMenu(onOpencode(), "enter"), "saved");
+    const typing = reduceMenu(reduceMenu(saved, "down"), "enter");
+
+    const state = [...chars("opencode/kimi-k2"), "enter" as const].reduce(reduceMenu, typing);
+
+    expect(state.view).toMatchObject({ kind: "typing", problems: [expect.stringContaining("the workers model must be an opencode-go/ model")] });
+    expect(menuChoices(state)).toEqual({ workers: { agent: "claude-code", model: "opus" } });
+  });
+
+  it("should select the entry when the current choice is an agent with no credential, and keep it as the choice", () => {
+    const entries: RoleEntry[] = [
+      { role: "verifier", offered: [...BOTH], choice: { agent: "opencode", model: "opencode-go/kimi-k3" }, origin: "config" },
+    ];
+
+    const state = reduceMenu(initialMenu(entries, MODELS, undefined, ["opencode"]), "right");
+
+    expect(state.view).toMatchObject({ kind: "step", cursor: 3 });
+    expect(menuChoices(state)).toEqual({ verifier: { agent: "opencode", model: "opencode-go/kimi-k3" } });
+  });
+
+  it("should cancel on Ctrl-C while the prompt is open and ignore every other key", () => {
+    const prompting = reduceMenu(onOpencode(), "enter");
+
+    expect(reduceMenu(prompting, "ctrl-c").outcome).toBe("cancelled");
+    expect(reduceMenu(prompting, "down")).toBe(prompting);
   });
 });

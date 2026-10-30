@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
-import type { RoleEntry } from "../../src/cli/role-menu.ts";
+import type { AuthInput } from "../../src/cli/auth.ts";
+import type { MenuCredentials, RoleEntry } from "../../src/cli/role-menu.ts";
 import type { RoleChoice } from "../../src/config/config.ts";
 import { originHeadProblem } from "../../src/git/repo.ts";
 import { execOk } from "../../src/workers/sh.ts";
@@ -293,5 +294,108 @@ describe("readiness when factory run starts", () => {
     expect(await main(["run", "42", "--worker-agent", "gemini:pro"], env)).toBe(1);
 
     expect(err).toEqual(["✗ Docker is not running", "✗ gemini is not an agent: use one of claude-code, opencode"]);
+  });
+});
+
+describe("adding a credential from the role menu", () => {
+  const OPENCODE_KEY = "opencode-key-0123456789";
+  const GLM: RoleChoice = { agent: "opencode", model: "opencode-go/glm-5" };
+  const CLAUDE_VERIFIER = ["--verifier-agent", "claude-code:opus"];
+
+  async function session(secret: string | null, overrides: Partial<CliEnv> = {}) {
+    const dir = await repo({ originHead: true });
+    const credentialsPath = join(await temp.make("menu-credentials-"), "software-factory", "credentials");
+    const auth: AuthInput = {
+      credentialsPath,
+      environment: {},
+      terminal: true,
+      readSecret: async () => secret,
+      confirm: async () => false,
+    };
+    const made = cli(dir, { credentials: { "claude-code": "token" }, auth, ...overrides });
+    return { ...made, credentialsPath };
+  }
+
+  it("should offer the menu the agents with no credential, so a step can mark them", async () => {
+    const { env } = await session(null);
+    const offered: (MenuCredentials | undefined)[] = [];
+    env.ask = async (_entries, _annotate, credentials) => {
+      offered.push(credentials);
+      return {};
+    };
+
+    await main(["run", "42", ...CLAUDE_VERIFIER], env);
+
+    expect(offered).toHaveLength(1);
+    expect(offered[0]?.missing).toEqual(["opencode"]);
+  });
+
+  it("should save the credential the prompt reads, make it count for the rest of the run and let the check after the menu pass", async () => {
+    const { env, err, out, credentialsPath } = await session(OPENCODE_KEY);
+    let added: boolean | undefined;
+    env.ask = async (_entries, _annotate, credentials) => {
+      added = await credentials?.add("opencode");
+      return { workers: GLM };
+    };
+
+    await main(["run", "42", ...CLAUDE_VERIFIER], env);
+
+    expect(added).toBe(true);
+    expect(await readFile(credentialsPath, "utf8")).toBe(`OPENCODE_API_KEY=${OPENCODE_KEY}\n`);
+    expect(env.credentials).toEqual({ "claude-code": "token", opencode: OPENCODE_KEY });
+    expect(err.filter((line) => line.startsWith("✗"))).toEqual([]);
+    expect(out).toContainEqual(expect.stringContaining("Preparing run #42"));
+  });
+
+  it("should change nothing when the prompt is cancelled, so the check after the menu still stops a run that picked the agent", async () => {
+    const { env, err, runner, credentialsPath } = await session(null);
+    let added: boolean | undefined;
+    env.ask = async (_entries, _annotate, credentials) => {
+      added = await credentials?.add("opencode");
+      return { workers: GLM };
+    };
+
+    expect(await main(["run", "42", ...CLAUDE_VERIFIER], env)).toBe(1);
+
+    expect(added).toBe(false);
+    expect(existsSync(credentialsPath)).toBe(false);
+    expect(env.credentials).toEqual({ "claude-code": "token" });
+    expect(err).toEqual(["✗ OPENCODE_API_KEY not set; roles.workers uses opencode → factory auth opencode"]);
+    expect(runner.workers).toEqual([]);
+  });
+
+  it("should say why a credential was refused and add nothing", async () => {
+    const { env, err, credentialsPath } = await session("   ");
+    let added: boolean | undefined;
+    env.ask = async (_entries, _annotate, credentials) => {
+      added = await credentials?.add("opencode");
+      return {};
+    };
+
+    await main(["run", "42", ...CLAUDE_VERIFIER], env);
+
+    expect(added).toBe(false);
+    expect(existsSync(credentialsPath)).toBe(false);
+    expect(env.credentials).toEqual({ "claude-code": "token" });
+    expect(err.some((line) => line.includes("✗"))).toBe(true);
+  });
+
+  it("should offer no way to add a credential where there is no prompt, and none in refine, which needs no credential", async () => {
+    const { env } = await session(null);
+    delete env.auth;
+    const offered: (MenuCredentials | undefined)[] = [];
+    env.ask = async (_entries, _annotate, credentials) => {
+      offered.push(credentials);
+      return {};
+    };
+    await main(["run", "42", ...CLAUDE_VERIFIER], env);
+    const refine = await session(null);
+    refine.env.ask = async (_entries, _annotate, credentials) => {
+      offered.push(credentials);
+      return { refinement: { agent: "claude-code", model: "opus" } };
+    };
+    await main(["refine", "42"], refine.env);
+
+    expect(offered).toEqual([undefined, undefined]);
   });
 });

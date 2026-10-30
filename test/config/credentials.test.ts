@@ -6,6 +6,9 @@ import {
   credentialSource,
   credentialsFilePath,
   parseCredentialsFile,
+  credentialOrigin,
+  maskCredential,
+  removeCredentialLine,
   replaceCredentialLine,
   resolveCredentials,
 } from "../../src/config/credentials.ts";
@@ -122,5 +125,46 @@ describe("credential texts", () => {
     expect(hint).not.toContain("\n");
     expect(hint).toContain("claude setup-token");
     expect(hint).toContain("factory auth claude-code");
+  });
+});
+
+describe("removeCredentialLine", () => {
+  it("should drop only the line of the variable", () => {
+    expect(removeCredentialLine("OPENCODE_API_KEY=a\nCLAUDE_CODE_OAUTH_TOKEN=b\n", "OPENCODE_API_KEY")).toBe(
+      "CLAUDE_CODE_OAUTH_TOKEN=b\n",
+    );
+  });
+
+  it("should return an empty text when no line is left", () => {
+    expect(removeCredentialLine("OPENCODE_API_KEY=a\n", "OPENCODE_API_KEY")).toBe("");
+  });
+
+  it("should leave a text without the variable as it was", () => {
+    expect(removeCredentialLine("OPENCODE_API_KEY=a\n", "CLAUDE_CODE_OAUTH_TOKEN")).toBe("OPENCODE_API_KEY=a\n");
+  });
+});
+
+describe("maskCredential", () => {
+  it("should show only the last 4 characters", () => {
+    expect(maskCredential("sk-ant-oat01-abcdef1f3a")).toBe("…1f3a");
+  });
+
+  it("should show nothing of a value of 4 characters or fewer", () => {
+    expect(maskCredential("abcd")).toBe("…");
+  });
+});
+
+describe("credentialOrigin", () => {
+  it("should say saved with the last 4 characters when only the file holds it", () => {
+    expect(credentialOrigin("claude-code", {}, { "claude-code": "sk-ant-oat01-xxxxa1f3" })).toBe("saved (…a1f3)");
+  });
+
+  it("should say the environment wins when it holds it, with or without a saved one", () => {
+    expect(credentialOrigin("opencode", { OPENCODE_API_KEY: "e" }, { opencode: "s" })).toBe("from environment (wins over saved)");
+    expect(credentialOrigin("opencode", { OPENCODE_API_KEY: "e" }, {})).toBe("from environment (wins over saved)");
+  });
+
+  it("should say not set when neither holds it, and treat an empty variable as not set", () => {
+    expect(credentialOrigin("opencode", { OPENCODE_API_KEY: "" }, {})).toBe("not set");
   });
 });

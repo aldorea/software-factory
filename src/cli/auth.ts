@@ -9,6 +9,7 @@ import { saveCredential } from "../config/credentials-store.ts";
 import { isAgentKind, ROLES } from "../config/roles.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
+import { runAuthMenu, type MenuScreen } from "./auth-menu.ts";
 import type { CliEnv } from "./main.ts";
 import { renderSetup, type SetupLine } from "./setup-render.ts";
 
@@ -18,6 +19,7 @@ export interface AuthInput {
   credentialsPath: string;
   environment: Record<string, string | undefined>;
   terminal: boolean;
+  screen?: MenuScreen;
   readSecret(prompt: string): Promise<string | null>;
   confirm(question: string): Promise<boolean>;
 }
@@ -81,6 +83,21 @@ export async function promptCredential(agent: AgentKind, input: AuthInput, env: 
 }
 
 export async function auth(args: string[], env: CliEnv): Promise<number> {
+  const fail = (text: string) => {
+    for (const line of renderSetup([{ kind: "fail", text: `factory: ${text}` }], env.color === true)) env.err(line);
+    return 1;
+  };
+  if (args.length === 0 && env.auth?.terminal === true && env.auth.screen !== undefined) {
+    const { credentialsPath, environment, screen } = env.auth;
+    const menu = await runAuthMenu({
+      credentialsPath,
+      environment,
+      screen,
+      color: env.color === true,
+      prompt: (agent) => promptCredential(agent, env.auth as AuthInput, env),
+    });
+    return menu.ok ? 0 : fail(menu.problem);
+  }
   if (args.length === 0 || (args.length === 1 && (args[0] === "--help" || args[0] === "-h"))) {
     for (const line of authHelp()) env.out(line);
     return 0;
@@ -90,10 +107,6 @@ export async function auth(args: string[], env: CliEnv): Promise<number> {
     env.err(authHelp()[0] as string);
     return 2;
   }
-  const fail = (text: string) => {
-    for (const line of renderSetup([{ kind: "fail", text: `factory: ${text}` }], env.color === true)) env.err(line);
-    return 1;
-  };
   if (!isAgentKind(agent)) return fail(`${agent} is not an agent: use one of ${AGENT_KINDS.join(", ")}`);
   if (env.auth === undefined) return fail("factory auth is not available here");
   const outcome = await promptCredential(agent, env.auth, env);
