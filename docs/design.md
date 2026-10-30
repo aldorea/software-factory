@@ -22,12 +22,15 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 | `factory stats` | Summary of the `run.json` files of a repo |
 | `factory web [target-repo] [--port <port>]` | Local read-only web view of the run log of a repo |
 | `factory init` | Prepares `.factory/` in a target repo |
+| `factory auth [agent]` | Saves the credential of an agent, once for every target repo |
+| `factory image [target-repo]` | Builds the base image, then the worker image of the target repo |
+| `factory doctor [target-repo]` | Checks that the host and the target repo are ready for any issue, and changes nothing |
 
-The target repo is the current directory, or the last argument. The developer starts each command. Nothing starts on its own. `factory run` refuses to start when Docker is not running, or when `gh` is missing or not signed in (`gh auth status`). It reports every such problem before it loads the config or asks for the agent of any role. To set a repo up, see the [onboarding guide](onboarding.md).
+The target repo is the current directory, or the last argument. The developer starts each command. Nothing starts on its own. Every command refuses to work on the factory itself or on a folder inside `.factory/worktrees/` of a repo, because its run log would land there. To set a repo up, see the [onboarding guide](onboarding.md).
 
 Before `factory run` starts, the developer chooses the agent and the model of each role: the workers, the independent verifier and the acceptance tester. The choice comes from the flags (`--worker-agent`, `--verifier-agent`, `--tester-agent`); else, in a terminal, from a menu; else from that default. With none of them, the command refuses to start. The prompt comes only before a run starts or when it resumes, never during it. See [ADR 0003](adr/0003-interchangeable-agents.md).
 
-The menu opens on a summary with the choice of every role, by its name in the glossary, each with its origin: `.factory/config.ts`, the paused run that resumes, a flag, or `chosen` for a value the developer changed in the menu. Enter starts. ↑/↓ selects a role that no flag fixed and → opens its step, which lists agent and model pairs with the current choice selected and an entry per agent to type another model; ← or Esc goes back to the summary and keeps the choice. Ctrl-C cancels and starts nothing. When the paused run reached the plan limit of an agent that the summary still holds and `now` is before its `resetsAt`, the summary warns that the run will pause again:
+The menu opens on a summary with the choice of every role, by its name in the glossary, each with its origin: `.factory/config.ts`, the paused run that resumes, a flag, or `chosen` for a value the developer changed in the menu. Enter starts. ↑/↓ selects a role that no flag fixed and → opens its step, which lists agent and model pairs with the current choice selected and an entry per agent to type another model; ← or Esc goes back to the summary and keeps the choice. Ctrl-C cancels and starts nothing. A step shows an agent with no credential as `opencode (no credential · → to add)`; choosing it opens the prompt of `factory auth` for that agent and, once the credential is saved, goes back to the step. With no terminal, a chosen agent with no credential fails the readiness check before the run starts. When the paused run reached the plan limit of an agent that the summary still holds and `now` is before its `resetsAt`, the summary warns that the run will pause again:
 
 ```
 ❯ workers:               claude-code opus (paused run)
@@ -38,6 +41,43 @@ Enter to start · → to change a role
 ```
 
 Before `factory refine` starts, the developer chooses the agent and the model of the refinement the same way: from `--refinement-agent`, else in a terminal from the same menu with one role, else from `roles.refinement` of `.factory/config.ts`. Only Claude Code is offered until the refinement skill works on another agent ([ADR 0003](adr/0003-interchangeable-agents.md)).
+
+### Readiness
+
+One set of checks tells whether the host and the target repo are ready. `factory doctor` runs all of them and lists every problem; each command runs the ones it needs before it does anything:
+
+| Command | Checks before it starts |
+|---|---|
+| `factory refine` | `gh` signed in, the Claude session of the host (`claude auth status`), `origin/HEAD` resolved |
+| `factory run` | Docker running, `gh` signed in, the credential of the agent of each chosen role, the worker image present and built from the current base image |
+| `factory doctor` | All of the above, Node, the config loads, `.factory/.env` has every value the config reads, and the credential of each agent the config's roles use |
+
+What depends on one issue, such as a criterion whose type has no evidence command, stays in `factory validate <n>`. A command reports every problem it finds, not only the first, and each problem names the command that fixes it:
+
+```
+✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode
+✗ mi-repo-factory-worker:dev built from an older base image → factory image
+✗ origin/HEAD not set → git remote set-head origin --auto
+```
+
+`factory doctor` exits with 1 when it finds a problem and 0 otherwise.
+
+### Setup
+
+- **Init.** `factory init` writes the files of `.factory/` that are missing, including the default agent and model of each role: Claude Code for all of them, `opus` for the refinement and the independent verifier, `sonnet` for the workers and the acceptance tester, so that the verifier's model differs from the workers'. It ends with the steps left, adapted to the repo, and marks with `✓` the ones already done:
+
+  ```
+  Next:
+    1. fill .factory/.env (copy of .env.example: FACTORY_E2E_DATABASE_URL_1, _2)
+    2. factory auth          set the credential of each agent, once for every repo
+    3. factory image         build the base image and mi-repo-factory-worker:dev
+    4. factory doctor        check that everything is ready
+    5. factory refine <n>
+  ```
+
+- **Images.** `factory image` always builds the base image from the factory, with the developer's user and group ids, then the worker image from `.factory/Dockerfile` with the `image` name of the config. Docker's cache makes the base image free when nothing changed. The worker image carries a label with the id of the base image it was built from. A worker image with no such label, or with the id of an older base image, fails the readiness check of `factory run` closed. `pnpm image:build` stays for the factory's own Docker tests.
+- **Credentials.** See [Agents and authentication](#agents-and-authentication).
+- **Colours.** The output of `init`, `auth`, `image`, `doctor` and of the readiness checks uses strong colours, in bold and bright: green `✓` for a step done or a check passed, red `✗` for a problem, yellow `⚠` for a warning that does not block, cyan for each command to type (after `→` and in `Next:`), and bold titles. Colour goes out only when the output is a terminal and `NO_COLOR` is not set; otherwise the same lines go out as plain text. The output during a run keeps its own colours (see [Blocks during a run](#blocks-during-a-run)).
 
 ## Flow
 
@@ -205,7 +245,7 @@ The issue, `specs/<n>.md` and the PR are the records. A new session starts again
 - **`software-factory`** (this repo): the coordinator, the gates, the worker layer, the skills (refinement, independent verifier), the prompts and the `factory` CLI. It takes the target repo as an argument.
 - **Each target repo:** a `.factory/` folder:
   - `config.ts`: checks, app start and the command that tells when the app is ready, e2e commands, environment, protected paths, the default agent and model of each role, and per agent its token limits and `maxParallel`. It imports nothing from this repo, so it works wherever the two repos live, and the factory validates it when it loads and reports each mistake by field. It reads its own `.factory/.env` and fails with a clear message when a value is missing: the factory never loads `.env`, and only the values that `environment` returns reach a container.
-  - `Dockerfile`: the image of the workers of that repo, from the factory's base image.
+  - `Dockerfile`: the worker image of that repo, from the factory's base image.
   - `.env.example`, and `.env` in `.gitignore`.
   - `package.json` with `"type": "module"`, so that the config loads as an ES module.
   - `logs/` and `worktrees/`, in `.gitignore`.
@@ -224,7 +264,7 @@ The issue, `specs/<n>.md` and the PR are the records. A new session starts again
 - A fake `WorkerRunner` tests the coordinator with no Docker and no plan usage.
 - Each worker runs in its own Docker container, with a bind mount of its worktree, on its own branch.
 - Each container gets only:
-  - its token;
+  - the credential of its agent;
   - the URL of a Neon branch for tests;
   - its own `E2E_PORT`.
 - The independent verifier runs in a container of the same image, created for one question and removed after it:
@@ -236,7 +276,7 @@ The issue, `specs/<n>.md` and the PR are the records. A new session starts again
 - The acceptance tester runs in a container of the same image, created for one round of the integrated verification and removed after it:
   - with a bind mount of a worktree of the integration branch at the verified SHA, only to start the app;
   - with its own clean context, never shared with the workers, even when it runs their agent and model;
-  - with its token, the URL of a Neon branch and its own `E2E_PORT`, as a worker;
+  - with the credential of its agent, the URL of a Neon branch and its own `E2E_PORT`, as a worker;
   - with its tools, because it uses the app; its evidence goes to a folder outside the worktree, which the coordinator copies to the log of the run.
 - No container has:
   - the `.env` of the repo;
@@ -265,7 +305,17 @@ Only subscriptions, no paid API calls: see [ADR 0001](adr/0001-subscriptions-onl
 | Agent | Authentication |
 |---|---|
 | Claude Code CLI | In Docker: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (Max 5x). On the host, for the refinement: my Claude session |
-| OpenCode CLI | OpenCode Go key, with Extra Usage off. Only models of the `opencode-go/` provider: `opencode/` is the pay-per-use Console |
+| OpenCode CLI | `OPENCODE_API_KEY`: an OpenCode Go key, with Extra Usage off. Only models of the `opencode-go/` provider: `opencode/` is the pay-per-use Console |
+
+The developer sets the credential of each agent once, and it serves every target repo. For each agent, the factory takes its environment variable when it is set and not empty; otherwise it reads the credentials file of the developer. Nothing of a target repo holds a credential: `.factory/.env` is for the values of the app only.
+
+- **The file.** `~/.config/software-factory/credentials`, or `$XDG_CONFIG_HOME/software-factory/credentials` when that variable is set. It holds one `VARIABLE=value` line per saved agent, with the names of the environment variables, and nothing else. Its folder has mode `0700` and the file mode `0600`. The factory reads it with Node's env parser and runs nothing from it.
+- **Fail closed.** When the file can be read by anyone but the developer, every command that reads it stops and names the fix (`chmod 600 <path>`); it never changes the mode itself. A line it cannot parse stops it too.
+- **`factory auth`.** With no argument it opens a menu with the agents, the variable of each and where its credential comes from: `saved (…a1f3)`, `from environment (wins over saved)` or `not set`. Enter sets a credential, `d` deletes the saved one, Esc quits. `factory auth <agent>` goes straight to the prompt of that agent; with no terminal it reads one line from stdin (`pbpaste | factory auth claude-code`), and with no terminal and no agent it prints its help.
+- **The prompt explains itself.** Before it asks, it says what the credential is and which roles use it, how to get it (`claude setup-token` on a Max plan; an OpenCode Go key with Extra Usage off), where it is saved and that it serves every target repo, and that an environment variable of the same name wins. The input is not echoed, and a saved value shows only its last 4 characters. `factory auth --help` and the message of a missing credential say the same, one line each.
+- **What it checks.** No call to the agent: that would spend the plan and needs Docker; the first attempt is the real check. It refuses an empty value or one with a space or a line break, because it would break the env file of the container. It warns when a Claude Code token does not start with `sk-ant-oat`, and saves only if the developer confirms.
+- **The write.** It changes or adds only the line of that agent, writes the result to a temporary file of mode `0600` in the same folder and renames it over the old one, so a half-written file never exists.
+- **To a container.** As before: the credential of the agent of the role goes in an env file of mode `0600`, removed in a `finally`.
 
 | Role | Agents it can use |
 |---|---|

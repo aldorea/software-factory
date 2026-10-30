@@ -36,6 +36,10 @@ _Avoid_: orchestrator
 **Agent**:
 A CLI that runs on a subscription and does the work of a role: today Claude Code or OpenCode Go.
 
+**Credential**:
+The secret that lets an agent run on its subscription inside a container. The developer sets it once and it serves every target repo; an environment variable of the same name wins over the saved one.
+_Avoid_: API key (implies pay-per-use), token (too narrow), secret
+
 **Role**:
 What an agent acts as in the factory: the refinement, the workers of a run, the independent verifier, or the acceptance tester. The developer chooses the agent and the model of each role before a command starts.
 _Avoid_: stage
@@ -46,6 +50,14 @@ _Avoid_: agent (too broad), runner
 
 **Worker layer**:
 The part of the factory that starts, supervises and stops workers, the independent verifier and the acceptance tester on behalf of the coordinator.
+
+**Base image**:
+The container image that holds the agents. It is the same for every target repo.
+_Avoid_: factory image, agent image
+
+**Worker image**:
+The container image of a target repo, built from the base image with what that repo needs. Workers, the independent verifier and the acceptance tester run in it.
+_Avoid_: target image, repo image
 
 **Attempt**:
 One invocation of the agent inside a worker, from its start to its report or its stop.

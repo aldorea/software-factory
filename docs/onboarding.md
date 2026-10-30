@@ -2,40 +2,42 @@
 
 How to install the `factory` CLI once and prepare any TypeScript repo to use it. For what the factory does and why, see [`design.md`](design.md); for the terms, [`../GLOSSARY.md`](../GLOSSARY.md).
 
-## What you need on the host
+## The short path
 
-- Node 24 (`engines` in [`package.json`](../package.json) has the exact floor), pnpm, Docker and the GitHub CLI `gh`, signed in (`gh auth login`).
-- The Claude Code CLI, `claude`, signed in: the refinement runs it on the host.
-- The credential of each agent that a run will use, in the environment of the shell that starts `factory`, not in `.factory/.env`: `CLAUDE_CODE_OAUTH_TOKEN` and, for OpenCode Go, `OPENCODE_API_KEY`. See [ADR 0001](adr/0001-subscriptions-only.md).
-
-`factory run` checks Docker and `gh` first and reports every missing tool before it asks anything.
-
-## 1. Install the CLI
-
-The factory is a local clone that you link, not a published package. From the clone:
+From the factory's clone, once:
 
 ```sh
 pnpm link --global
 ```
 
-`factory` is then on your PATH, under the Node of your shell. The bin is TypeScript that Node 24 runs as it is, so there is no build step. If `pnpm link --global` complains that there is no global bin directory, run `pnpm setup` and open a new shell.
-
-## 2. Build the images, base first
-
-Each worker runs in a container. The base image holds the agents; the image of a target repo starts `FROM` it and adds what that repo needs. Build them in this order, and rebuild the target repo's image after every rebuild of the base, or the change never reaches it.
-
-1. The base image, from the clone: `pnpm image:build` (it tags `software-factory/worker:dev`, with your user and group ids so that bind-mounted worktrees stay yours).
-2. The target repo's image, after `factory init` has written its `.factory/Dockerfile` (step 3): `docker build -t <image> .factory` from the root of the target repo, where `<image>` is the `image` field of `.factory/config.ts`.
-
-## 3. Prepare the target repo
-
-From the root of the target repo:
+Then, from the root of each target repo:
 
 ```sh
-factory init
+factory init      # writes .factory/ and ends with the steps left
+                  # fill .factory/.env from .factory/.env.example
+factory auth      # once for every repo: the credential of each agent
+factory image     # the base image, then the worker image of this repo
+factory doctor    # every problem left, each with the command that fixes it
+factory refine <n>
 ```
 
-It stops with a message when the folder is not the root of a git repo, or the repo has no `origin` remote. It writes the files of `.factory/` that are missing, adds `.factory/logs/`, `.factory/worktrees/` and `.factory/.env` to `.gitignore` when they are not there, and lists each file as written or skipped. It never overwrites a file, so you can run it again on a half-prepared repo, and it never touches the repo's `package.json`. The templates are in [`src/init/templates.ts`](../src/init/templates.ts) and the decisions in [`src/init/plan.ts`](../src/init/plan.ts).
+Each command explains what it needs and how to fix what is missing, so this page is for the reasons and the edge cases.
+
+## What you need on the host
+
+- Node 24 (`engines` in [`package.json`](../package.json) has the exact floor), pnpm, Docker and the GitHub CLI `gh`, signed in (`gh auth login`).
+- The Claude Code CLI, `claude`, signed in: the refinement runs it on the host with your session.
+- The credential of each agent that a run will use: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` and, for OpenCode Go, `OPENCODE_API_KEY`. `factory auth` saves them once, outside every repo; an environment variable of the same name wins over the saved one. See [ADR 0001](adr/0001-subscriptions-only.md) and [design.md](design.md#agents-and-authentication).
+
+`factory doctor` checks all of this, and `factory run` and `factory refine` check what they need before they start.
+
+## 1. Install the CLI
+
+The factory is a local clone that you link, not a published package. From the clone, `pnpm link --global` puts `factory` on your PATH, under the Node of your shell. The bin is TypeScript that Node 24 runs as it is, so there is no build step. If `pnpm link --global` complains that there is no global bin directory, run `pnpm setup` and open a new shell.
+
+## 2. Prepare the target repo
+
+From the root of the target repo, `factory init` stops with a message when the folder is not the root of a git repo, or the repo has no `origin` remote. It writes the files of `.factory/` that are missing, adds `.factory/logs/`, `.factory/worktrees/` and `.factory/.env` to `.gitignore` when they are not there, and lists each file as written or skipped. It never overwrites a file, so you can run it again on a half-prepared repo, and it never touches the repo's `package.json`. The templates are in [`src/init/templates.ts`](../src/init/templates.ts) and the decisions in [`src/init/plan.ts`](../src/init/plan.ts).
 
 What the generated files assume, and what you may need to change:
 
@@ -43,6 +45,7 @@ What the generated files assume, and what you may need to change:
 - **No recognised lockfile (yarn, or none).** `init` writes no install check, and its Dockerfile is the npm one, with no other package manager added. Add an install check as the first one, and make sure `.factory/Dockerfile` provides the package manager it uses. Without the install check the worktree has no `node_modules` and every later check fails.
 - **The config imports nothing from the factory** and reads `.factory/.env` itself, with Node's own parser. It fails with a message naming the file or the variable that is missing. Copy `.factory/.env.example` to `.factory/.env` and fill it in.
 - **The database variable.** The generated `environment` gives each worker slot its own `E2E_PORT` and its own `FACTORY_E2E_DATABASE_URL_<slot>` from `.env`. `.env.example` lists one variable for each slot that the default parallelism ceiling can reach (2 today): if you raise `maxParallelCeiling` in the config, add a variable for each new slot. A repo with no database removes that variable from the config and from `.env.example`; otherwise the run fails on the missing value.
+- **Roles.** The config sets a default agent and model for each role: Claude Code everywhere, `opus` for the refinement and the independent verifier, `sonnet` for the workers and the acceptance tester. Change them there, or per command with a flag or the menu.
 - **The image name** is `<repo folder>-factory-worker:dev`, with the folder name cut to the characters that Docker allows.
 - **Evidence and app.** The generated config has no `app` and no `evidence` commands. Add them before a run that has Playwright or request criteria: a criterion whose type has no command stops the run before any worker starts.
 - **Anything else the image needs** (Playwright, a browser) goes in `.factory/Dockerfile`.
@@ -50,11 +53,15 @@ What the generated files assume, and what you may need to change:
 
 A mistake in the config is reported field by field when it loads. `factory validate <issue>` loads it too.
 
+## 3. Build the images
+
+Each worker runs in a container of the worker image of its repo, built `FROM` the base image, which holds the agents. From the root of the target repo, `factory image` builds both, in that order: the base image from the factory's clone with your user and group ids, so that bind-mounted worktrees stay yours, then the worker image from `.factory/Dockerfile` with the `image` name of the config. The worker image records which base image it was built from, and `factory run` refuses a worker image built by hand or from an older base image. Run `factory image` again after you pull the factory or change `.factory/Dockerfile`.
+
 ## 4. Where and how to run the commands
 
-- **Run every command from the root of the target repo, never from a worktree.** The target repo is the current directory, or the last argument. The run logs go to `.factory/logs/` of that directory, and `factory stats` reads them there; from a worktree they land in the worktree.
+- **Run every command from the root of the target repo.** The target repo is the current directory, or the last argument. The run logs go to `.factory/logs/` of that directory, and `factory stats` reads them there. Every command refuses to work on a folder inside `.factory/worktrees/`, where the logs would land in the worktree.
 - **Update the default branch before `factory refine`.** The integration branch starts from your local copy of the default branch (the branch that `origin/HEAD` points to), and the factory never fetches. Check it out and pull it first, or the spec starts from old code, and local commits on it are included. The command stops with the fix when it cannot resolve the branch: `git remote set-head origin --auto` when `origin/HEAD` is not set, and `git switch <branch>` when the default branch has no local copy.
-- **`pnpm factory` runs in the factory's clone**, so its current directory is the factory itself. Use it only with the target repo as an argument (`pnpm factory refine 12 ../target`); with no argument it works on the factory. The linked `factory` has no such trap, and is the way to run it.
+- **`pnpm factory` runs in the factory's clone**, so its current directory is the factory itself. Use it only with the target repo as an argument (`pnpm factory refine 12 ../target`); with no argument it refuses to work on the factory. The linked `factory` is the way to run it.
 
 ## 5. Optional: watch the runs
 
