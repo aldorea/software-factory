@@ -26,6 +26,7 @@ import { image } from "./image.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
 import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
+import { gatherProbes, readiness, readinessProblems, type Probes } from "./readiness.ts";
 import { renderSetup, type SetupLine } from "./setup-render.ts";
 import { runSummary } from "./run-summary.ts";
 import { RunView } from "./run-view.ts";
@@ -44,6 +45,8 @@ export interface CliEnv {
   credentials: Partial<Record<AgentKind, string>>;
   docker(): Promise<string | null>;
   gh(): Promise<string | null>;
+  claudeSession(): Promise<string | null>;
+  originHead(repoDir: string): Promise<string | null>;
   ask?: (entries: RoleEntry[], annotate: Annotate) => Promise<Partial<Record<Role, RoleChoice>>>;
   terminal?: { columns(): number; write(text: string): void };
   launch(launch: InteractiveLaunch): Promise<number>;
@@ -160,34 +163,44 @@ function parseCommand(args: string[]): Command | null {
   };
 }
 
+function reportProblems(lines: SetupLine[], env: CliEnv): boolean {
+  for (const line of renderSetup(lines, env.color === true)) env.err(line);
+  return lines.length > 0;
+}
+
+function envProbes(repoDir: string, env: CliEnv): Probes {
+  return {
+    docker: () => env.docker(),
+    gh: () => env.gh(),
+    claudeSession: () => env.claudeSession(),
+    originHead: () => env.originHead(repoDir),
+  };
+}
+
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
-  const toolProblems = [await env.docker(), await env.gh()].filter((problem) => problem !== null);
-  if (toolProblems.length > 0) {
-    for (const line of renderSetup(
-      toolProblems.map((problem): SetupLine => ({ kind: "fail", text: `factory: ${problem}` })),
-      env.color === true,
-    )) {
-      env.err(line);
-    }
-    return 1;
-  }
-  const config = await loadConfig(repoDir);
+  const probes = await gatherProbes("run", envProbes(repoDir, env));
+  const loaded = await loadConfig(repoDir).then(
+    (config) => ({ ok: true as const, config }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
   const latest = await latestRunEntry(join(repoDir, ".factory", "logs"), issue);
   const previous = latest?.log ?? null;
-  if (latest !== null && runAbandoned(latest, env.clock.now())) {
-    env.out(`run ${latest.log.runId} of #${issue} was abandoned at ${clockMinutes(lastChange(latest))}; starting a new run`);
-  }
-  const defaults = resumeDefaults(previous, config.roles);
+  const defaults = loaded.ok ? resumeDefaults(previous, loaded.config.roles) : {};
   const flagged: Partial<Record<RunRole, RoleChoice>> = {};
+  const flagProblems: SetupLine[] = [];
   for (const role of ROLES) {
     const flag = flags[role];
     if (flag === undefined) continue;
     const parsed = parseRoleFlag(role, flag, defaults[role]);
-    if (!parsed.ok) {
-      env.err(`factory: ${parsed.problem}`);
-      return 1;
-    }
-    flagged[role] = parsed.choice;
+    if (parsed.ok) flagged[role] = parsed.choice;
+    else flagProblems.push({ kind: "fail", text: parsed.problem });
+  }
+  const beforeMenu = readiness("run", { probes, roles: { ...defaults, ...flagged }, credentials: env.credentials });
+  if (reportProblems([...readinessProblems(beforeMenu), ...flagProblems], env)) return 1;
+  if (!loaded.ok) throw loaded.error;
+  const config = loaded.config;
+  if (latest !== null && runAbandoned(latest, env.clock.now())) {
+    env.out(`run ${latest.log.runId} of #${issue} was abandoned at ${clockMinutes(lastChange(latest))}; starting a new run`);
   }
   const prompted =
     env.ask === undefined
@@ -210,6 +223,8 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     }
     roles[role] = chosen.choice;
   }
+  const afterMenu = readiness("run", { probes, roles, credentials: env.credentials });
+  if (reportProblems(readinessProblems(afterMenu), env)) return 1;
   env.out(`Preparing run #${issue}; factory web shows it at http://${WEB_HOST}:${DEFAULT_WEB_PORT}/`);
   const view = env.terminal ? new RunView({ now: () => env.clock.now(), ...env.terminal }) : null;
   const ticker = view ? setInterval(() => view.tick(), 1000) : null;
@@ -238,6 +253,9 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
 
 async function refine(repoDir: string, issue: number, flag: string | undefined, env: CliEnv): Promise<number> {
   try {
+    const probes = await gatherProbes("refine", envProbes(repoDir, env));
+    const ready = readiness("refine", { probes, roles: {}, credentials: env.credentials });
+    if (reportProblems(readinessProblems(ready), env)) return 1;
     const chosen = await refinementChoice(repoDir, flag, env);
     if (!chosen.ok) {
       env.err(`factory: ${chosen.problem}`);
