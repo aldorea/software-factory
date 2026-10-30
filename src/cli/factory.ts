@@ -7,6 +7,7 @@ import { macosNotifier } from "../notify/macos.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import { DockerWorkerRunner } from "../workers/docker-runner.ts";
 import { dockerProblem } from "../workers/docker.ts";
+import { dockerImages } from "../workers/docker-images.ts";
 import { askRolesInTerminal } from "./ask-role.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
@@ -56,6 +57,7 @@ process.exitCode = await main(process.argv.slice(2), {
   color: colorEnabled({ stdout: features.screen, noColor: process.env.NO_COLOR }),
   ...(terminal ? { terminal } : {}),
   launch: launchInteractive,
+  images: dockerImages({ user: { uid: process.getuid?.() ?? 1000, gid: process.getgid?.() ?? 1000 } }),
   signal: stop.signal,
   out: (text) => process.stdout.write(`${text}\n`),
   err: (text) => process.stderr.write(`${text}\n`),
