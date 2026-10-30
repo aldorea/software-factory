@@ -10,7 +10,7 @@ import {
 } from "../../src/cli/readiness.ts";
 
 const READY: ReadinessFacts = {
-  probes: { docker: null, gh: null, claudeSession: null, originHead: null },
+  probes: { docker: null, gh: null, claudeSession: null, originHead: null, workerImage: null },
   roles: {
     workers: { agent: "claude-code", model: "sonnet" },
     verifier: { agent: "claude-code", model: "opus" },
@@ -122,6 +122,24 @@ describe("readiness of factory run", () => {
     expect(failures("run", broken)).toEqual([]);
   });
 
+  it("should fail with factory image when the worker image is missing or built from an older base image", () => {
+    const stale = facts({ probes: { workerImage: "mi-repo-factory-worker:dev built from an older base image" } });
+
+    expect(failures("run", stale)).toEqual([
+      { kind: "fail", text: "mi-repo-factory-worker:dev built from an older base image", command: "factory image" },
+    ]);
+  });
+
+  it("should not report the worker image while Docker is down, because the Docker problem already explains it", () => {
+    const down = facts({ probes: { docker: "Docker is not running", workerImage: "worker:dev not built" } });
+
+    expect(failures("run", down)).toEqual([{ kind: "fail", text: "Docker is not running" }]);
+  });
+
+  it("should not check the worker image for refine, which runs on the host", () => {
+    expect(failures("refine", facts({ probes: { workerImage: "worker:dev not built" } }))).toEqual([]);
+  });
+
   it("should list a tool problem and a credential problem together", () => {
     const given = facts({ probes: { docker: "Docker is not running", gh: "gh is not signed in" }, credentials: {} });
 
@@ -151,14 +169,15 @@ describe("probes a command needs", () => {
     gh: async () => "gh",
     claudeSession: async () => "claude",
     originHead: async () => "origin",
+    workerImage: async () => "image",
   };
 
   it("should list only the probes of the checks of that command", () => {
     expect(neededProbes("refine").sort()).toEqual(["claudeSession", "gh", "originHead"]);
-    expect(neededProbes("run").sort()).toEqual(["docker", "gh"]);
+    expect(neededProbes("run").sort()).toEqual(["docker", "gh", "workerImage"]);
   });
 
   it("should run only those probes", async () => {
-    expect(await gatherProbes("run", silent)).toEqual({ docker: "docker", gh: "gh" });
+    expect(await gatherProbes("run", silent)).toEqual({ docker: "docker", gh: "gh", workerImage: "image" });
   });
 });

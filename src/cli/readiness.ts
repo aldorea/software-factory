@@ -6,7 +6,7 @@ import type { SetupLine } from "./setup-render.ts";
 
 export type ReadinessCommand = "refine" | "run";
 
-export type ProbeName = "docker" | "gh" | "claudeSession" | "originHead";
+export type ProbeName = "docker" | "gh" | "claudeSession" | "originHead" | "workerImage";
 
 export type Probes = Record<ProbeName, () => Promise<string | null>>;
 
@@ -79,12 +79,24 @@ const credentialCheck: Check = {
   },
 };
 
+const workerImageCheck: Check = {
+  commands: ["run"],
+  needs: ["docker", "workerImage"],
+  evaluate(facts) {
+    if (probed(facts, "docker") !== null) return [];
+    const problem = probed(facts, "workerImage");
+    if (problem === null) return [{ kind: "ok", text: "the worker image is built from the current base image" }];
+    return [{ kind: "fail", text: problem, command: "factory image" }];
+  },
+};
+
 export const CHECKS: Check[] = [
   probeCheck("docker", ["run"], "Docker is running", undefined),
   probeCheck("gh", ["refine", "run"], "gh is signed in", "gh auth login"),
   probeCheck("claudeSession", ["refine"], "the Claude Code session of the host is signed in", "claude auth login"),
   probeCheck("originHead", ["refine"], "origin/HEAD is set", "git remote set-head origin --auto"),
   credentialCheck,
+  workerImageCheck,
 ];
 
 function checksOf(command: ReadinessCommand): Check[] {

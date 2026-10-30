@@ -7,6 +7,32 @@ export interface ImageDocker {
   user: { uid: number; gid: number };
   build(args: string[]): Promise<number>;
   id(reference: string): Promise<string | null>;
+  label(reference: string, name: string): Promise<string | null>;
+}
+
+export interface WorkerImageFacts {
+  baseImageId: string | null;
+  workerImageId: string | null;
+  workerLabel: string | null;
+}
+
+export type WorkerImageState = "missing" | "base-missing" | "unlabelled" | "stale" | "current";
+
+export function workerImageState(facts: WorkerImageFacts): WorkerImageState {
+  if (facts.workerImageId === null) return "missing";
+  if (facts.baseImageId === null) return "base-missing";
+  if (facts.workerLabel === null) return "unlabelled";
+  return facts.workerLabel === facts.baseImageId ? "current" : "stale";
+}
+
+export async function readWorkerImageFacts(
+  image: string,
+  docker: ImageDocker,
+  baseTag: string = BASE_IMAGE_TAG,
+): Promise<WorkerImageFacts> {
+  const [baseImageId, workerImageId] = await Promise.all([docker.id(baseTag), docker.id(image)]);
+  const workerLabel = workerImageId === null ? null : await docker.label(image, BASE_IMAGE_LABEL);
+  return { baseImageId, workerImageId, workerLabel };
 }
 
 export type ImageBuildOutcome =

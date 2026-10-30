@@ -28,6 +28,7 @@ import { planLimitAnnotate } from "./plan-limit-warning.ts";
 import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
 import { gatherProbes, readiness, readinessProblems, type Probes } from "./readiness.ts";
 import { renderSetup, type SetupLine } from "./setup-render.ts";
+import { workerImageProblem } from "./worker-image-probe.ts";
 import { runSummary } from "./run-summary.ts";
 import { RunView } from "./run-view.ts";
 import { refused } from "./target-repo.ts";
@@ -168,21 +169,22 @@ function reportProblems(lines: SetupLine[], env: CliEnv): boolean {
   return lines.length > 0;
 }
 
-function envProbes(repoDir: string, env: CliEnv): Probes {
+function envProbes(repoDir: string, env: CliEnv, image: string | null = null): Probes {
   return {
     docker: () => env.docker(),
     gh: () => env.gh(),
     claudeSession: () => env.claudeSession(),
     originHead: () => env.originHead(repoDir),
+    workerImage: () => workerImageProblem(image, env.images),
   };
 }
 
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
-  const probes = await gatherProbes("run", envProbes(repoDir, env));
   const loaded = await loadConfig(repoDir).then(
     (config) => ({ ok: true as const, config }),
     (error: unknown) => ({ ok: false as const, error }),
   );
+  const probes = await gatherProbes("run", envProbes(repoDir, env, loaded.ok ? loaded.config.image : null));
   const latest = await latestRunEntry(join(repoDir, ".factory", "logs"), issue);
   const previous = latest?.log ?? null;
   const defaults = loaded.ok ? resumeDefaults(previous, loaded.config.roles) : {};

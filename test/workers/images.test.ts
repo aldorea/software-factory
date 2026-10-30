@@ -4,7 +4,9 @@ import {
   BASE_IMAGE_TAG,
   baseImageBuildArgs,
   buildImages,
+  readWorkerImageFacts,
   workerImageBuildArgs,
+  workerImageState,
   type ImageDocker,
 } from "../../src/workers/images.ts";
 
@@ -18,6 +20,7 @@ function fakeDocker(exitCodes: number[] = [], id: string | null = "sha256:base")
       return exitCodes[builds.length - 1] ?? 0;
     },
     id: async () => id,
+    label: async () => id,
   };
 }
 
@@ -96,5 +99,52 @@ describe("buildImages", () => {
     const outcome = await buildImages(INPUT, docker);
 
     expect(outcome).toEqual({ kind: "worker-failed", baseImageId: "sha256:base", exitCode: 2 });
+  });
+});
+
+describe("workerImageState", () => {
+  const BASE = "sha256:base-now";
+
+  it("should be missing when the worker image does not exist", () => {
+    expect(workerImageState({ baseImageId: BASE, workerImageId: null, workerLabel: null })).toBe("missing");
+  });
+
+  it("should be base-missing when the base image does not exist, because no worker image can then be current", () => {
+    expect(workerImageState({ baseImageId: null, workerImageId: "sha256:w", workerLabel: BASE })).toBe("base-missing");
+  });
+
+  it("should be unlabelled when the worker image has no label, as when it was built by hand", () => {
+    expect(workerImageState({ baseImageId: BASE, workerImageId: "sha256:w", workerLabel: null })).toBe("unlabelled");
+  });
+
+  it("should be stale when the label holds the id of an older base image", () => {
+    expect(workerImageState({ baseImageId: BASE, workerImageId: "sha256:w", workerLabel: "sha256:base-old" })).toBe("stale");
+  });
+
+  it("should be current when the label holds the id of the current base image", () => {
+    expect(workerImageState({ baseImageId: BASE, workerImageId: "sha256:w", workerLabel: BASE })).toBe("current");
+  });
+});
+
+describe("readWorkerImageFacts", () => {
+  it("should read the ids of both images and the label of the worker image through the port", async () => {
+    const docker = fakeDocker([], "sha256:base");
+    docker.label = async (reference, name) => (reference === "toy:dev" && name === BASE_IMAGE_LABEL ? "sha256:old" : null);
+
+    expect(await readWorkerImageFacts("toy:dev", docker)).toEqual({
+      baseImageId: "sha256:base",
+      workerImageId: "sha256:base",
+      workerLabel: "sha256:old",
+    });
+  });
+
+  it("should not read the label of a worker image that does not exist", async () => {
+    const docker = fakeDocker([], "sha256:base");
+    docker.id = async (reference) => (reference === BASE_IMAGE_TAG ? "sha256:base" : null);
+    docker.label = async () => {
+      throw new Error("label read of a missing image");
+    };
+
+    expect((await readWorkerImageFacts("toy:dev", docker)).workerLabel).toBeNull();
   });
 });

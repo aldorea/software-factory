@@ -2,6 +2,18 @@ import { spawn } from "node:child_process";
 import type { ImageDocker } from "./images.ts";
 import { exec } from "./sh.ts";
 
+async function inspect(reference: string, format: string): Promise<string | null> {
+  let result;
+  try {
+    result = await exec("docker", ["image", "inspect", "--format", format, reference]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const value = result.stdout.trim();
+  return result.exitCode === 0 && value !== "" && value !== "<no value>" ? value : null;
+}
+
 export function dockerImages(options: {
   user: { uid: number; gid: number };
   output?: "inherit" | "ignore";
@@ -16,10 +28,7 @@ export function dockerImages(options: {
         });
         child.once("close", (code, signal) => resolve(code ?? (signal ? 128 : 1)));
       }),
-    id: async (reference) => {
-      const result = await exec("docker", ["image", "inspect", "--format", "{{.Id}}", reference]);
-      const id = result.stdout.trim();
-      return result.exitCode === 0 && id !== "" ? id : null;
-    },
+    id: (reference) => inspect(reference, "{{.Id}}"),
+    label: (reference, name) => inspect(reference, `{{ index .Config.Labels ${JSON.stringify(name)} }}`),
   };
 }

@@ -226,6 +226,66 @@ describe("readiness when factory run starts", () => {
     expect(err.join("\n")).not.toContain("✗");
   });
 
+  it("should stop with the factory image fix and create no worktree when the worker image was built from an older base image", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err, runner } = cli(dir, {
+      images: new FakeImageDocker([], "sha256:base-now", { label: "sha256:base-old" }),
+    });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err).toEqual(["✗ worker:dev built from an older base image → factory image"]);
+    expect(runner.workers).toEqual([]);
+    expect(existsSync(join(dir, ".factory", "worktrees"))).toBe(false);
+  });
+
+  it("should stop with the factory image fix when the worker image does not exist", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err } = cli(dir, { images: new FakeImageDocker([], undefined, { present: false }) });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err).toEqual(["✗ worker:dev not built → factory image"]);
+  });
+
+  it("should stop with the factory image fix when the worker image has no base image label", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err } = cli(dir, { images: new FakeImageDocker([], undefined, { label: null }) });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err).toEqual([
+      "✗ worker:dev has no software-factory.base-image-id label, so it was built by hand → factory image",
+    ]);
+  });
+
+  it("should list the image problem together with the credential problems", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err } = cli(dir, {
+      credentials: { "claude-code": "token" },
+      images: new FakeImageDocker([], undefined, { present: false }),
+    });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err).toEqual([
+      "✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode",
+      "✗ worker:dev not built → factory image",
+    ]);
+  });
+
+  it("should not report the worker image while Docker is down", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err } = cli(dir, {
+      docker: async () => "Docker is not running",
+      images: new FakeImageDocker([], undefined, { present: false }),
+    });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err).toEqual(["✗ Docker is not running"]);
+  });
+
   it("should show a flag problem together with the readiness problems", async () => {
     const dir = await repo({ originHead: true });
     const { env, err } = cli(dir, { docker: async () => "Docker is not running" });
