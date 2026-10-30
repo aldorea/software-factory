@@ -17,6 +17,18 @@ describe("factory bin", () => {
     expect(result.exitCode).not.toBe(0);
   });
 
+  it("should print the output of init with no ANSI code when stdout is not a terminal", async () => {
+    const dir = await temp.make("bin-init-");
+    await exec("git", ["init", "-q", "-b", "main", dir]);
+    await exec("git", ["-C", dir, "remote", "add", "origin", "https://example.invalid/toy.git"]);
+
+    const result = await exec(process.execPath, [BIN, "init", dir]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("✓ wrote .factory/config.ts");
+    expect(result.stdout).not.toContain(String.fromCharCode(27));
+  });
+
   it("should stop factory web on Ctrl-C with exit code 0", async () => {
     const dir = await temp.make("bin-web-");
     const child = spawn(process.execPath, [BIN, "web", dir, "--port", "0"], { stdio: ["ignore", "pipe", "pipe"] });

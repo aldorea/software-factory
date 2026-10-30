@@ -99,11 +99,11 @@ describe("factory init", () => {
 
     expect(err).toEqual([]);
     expect(out).toEqual([
-      "wrote .factory/config.ts",
-      "wrote .factory/Dockerfile",
-      "wrote .factory/.env.example",
-      "wrote .factory/package.json",
-      "wrote .gitignore",
+      "✓ wrote .factory/config.ts",
+      "✓ wrote .factory/Dockerfile",
+      "✓ wrote .factory/.env.example",
+      "✓ wrote .factory/package.json",
+      "✓ wrote .gitignore",
     ]);
     const config = await loadConfig(dir);
     expect(config.image).toBe("toy-factory-worker:dev");
@@ -164,17 +164,17 @@ describe("factory init", () => {
     expect(await main(["init"], env)).toBe(0);
 
     expect(out).toEqual([
-      "wrote .factory/config.ts",
-      "skipped .factory/Dockerfile (already exists)",
-      "wrote .factory/.env.example",
-      "wrote .factory/package.json",
-      "skipped .gitignore (already lists the factory entries)",
+      "✓ wrote .factory/config.ts",
+      "✓ skipped .factory/Dockerfile (already exists)",
+      "✓ wrote .factory/.env.example",
+      "✓ wrote .factory/package.json",
+      "✓ skipped .gitignore (already lists the factory entries)",
     ]);
     expect(await readFile(join(dir, ".factory", "Dockerfile"), "utf8")).toBe("FROM mine\n");
 
     const second = cli(dir);
     expect(await main(["init"], second.env)).toBe(0);
-    expect(second.out.every((line) => line.startsWith("skipped "))).toBe(true);
+    expect(second.out.every((line) => line.startsWith("✓ skipped "))).toBe(true);
     expect(second.out).toHaveLength(5);
   });
 
@@ -194,7 +194,7 @@ describe("factory init", () => {
 
     expect(await main(["init"], env)).toBe(0);
 
-    expect(out).toContain("updated .gitignore");
+    expect(out).toContain("✓ updated .gitignore");
     expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("node_modules\n.factory/logs/\n.factory/worktrees/\n.factory/.env\n");
   });
 
@@ -214,6 +214,24 @@ describe("factory init", () => {
     expect(await main(["init", dir], env)).toBe(0);
     expect(err).toEqual([]);
     expect(existsSync(join(dir, ".factory", "config.ts"))).toBe(true);
+  });
+
+  it("should paint the written files in green when the environment says colour is on", async () => {
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "" } });
+    const { env, out } = cli(dir);
+
+    expect(await main(["init"], { ...env, color: true }), "exit code").toBe(0);
+
+    expect(out[0]).toBe(`\u001b[1;92m✓\u001b[0m wrote .factory/config.ts`);
+  });
+
+  it("should print no ANSI code when the environment says colour is off", async () => {
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "" } });
+    const { env, out } = cli(dir);
+
+    expect(await main(["init"], { ...env, color: false })).toBe(0);
+
+    expect(out.join("\n")).not.toMatch(/\u001b\[/);
   });
 
   it("should print the usage when init gets more than a repo", async () => {

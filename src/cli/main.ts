@@ -23,6 +23,7 @@ import { clockMinutes } from "./clock-time.ts";
 import type { InteractiveLaunch } from "./launch.ts";
 import { planLimitAnnotate } from "./plan-limit-warning.ts";
 import { menuEntries, type Annotate, type RoleEntry } from "./role-menu.ts";
+import { renderSetup, type SetupLine } from "./setup-render.ts";
 import { runSummary } from "./run-summary.ts";
 import { RunView } from "./run-view.ts";
 import { renderProgress } from "./terminal-render.ts";
@@ -43,6 +44,7 @@ export interface CliEnv {
   terminal?: { columns(): number; write(text: string): void };
   launch(launch: InteractiveLaunch): Promise<number>;
   signal: AbortSignal;
+  color?: boolean;
   out(text: string): void;
   err(text: string): void;
 }
@@ -150,7 +152,12 @@ function parseCommand(args: string[]): Command | null {
 async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv): Promise<number> {
   const toolProblems = [await env.docker(), await env.gh()].filter((problem) => problem !== null);
   if (toolProblems.length > 0) {
-    for (const problem of toolProblems) env.err(`factory: ${problem}`);
+    for (const line of renderSetup(
+      toolProblems.map((problem): SetupLine => ({ kind: "fail", text: `factory: ${problem}` })),
+      env.color === true,
+    )) {
+      env.err(line);
+    }
     return 1;
   }
   const config = await loadConfig(repoDir);
@@ -279,7 +286,13 @@ async function init(args: string[], env: CliEnv): Promise<number> {
     return 2;
   }
   try {
-    for (const line of await initRepo(resolve(env.cwd, args[0] ?? "."))) env.out(line);
+    const written = await initRepo(resolve(env.cwd, args[0] ?? "."));
+    for (const line of renderSetup(
+      written.map((text): SetupLine => ({ kind: "ok", text })),
+      env.color === true,
+    )) {
+      env.out(line);
+    }
     return 0;
   } catch (error) {
     env.err(`factory: ${(error as Error).message}`);

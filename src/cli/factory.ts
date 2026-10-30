@@ -10,6 +10,7 @@ import { dockerProblem } from "../workers/docker.ts";
 import { askRolesInTerminal } from "./ask-role.ts";
 import { launchInteractive } from "./launch.ts";
 import { main } from "./main.ts";
+import { colorEnabled } from "./setup-render.ts";
 import { CLEAR_LINE } from "./terminal-render.ts";
 import { terminalFeatures } from "./tty.ts";
 
@@ -52,6 +53,7 @@ process.exitCode = await main(process.argv.slice(2), {
   docker: () => dockerProblem(),
   gh: () => ghProblem(),
   ...(features.menu ? { ask: askRolesInTerminal } : {}),
+  color: colorEnabled({ stdout: features.screen, noColor: process.env.NO_COLOR }),
   ...(terminal ? { terminal } : {}),
   launch: launchInteractive,
   signal: stop.signal,
