@@ -81,6 +81,7 @@ export async function publish(args: string[], env: CliEnv): Promise<number> {
       runDir,
       github,
       clock: env.clock,
+      progress: (line) => env.out(line),
       save: () => writeRunLog(join(runDir, "run.json"), log),
     });
     await env.notifier.notify(publicationNotification(issue, log, result));
