@@ -7,7 +7,7 @@ import type { AgentKind } from "../workers/types.ts";
 import type { EnvFacts } from "./env-facts.ts";
 import type { SetupLine } from "./setup-render.ts";
 
-export type ReadinessCommand = "refine" | "run" | "doctor";
+export type ReadinessCommand = "refine" | "run" | "publish" | "doctor";
 
 export type ProbeName = "docker" | "gh" | "claudeSession" | "originHead" | "push" | "workerImage" | "node" | "config";
 
@@ -138,7 +138,7 @@ const workerImageCheck: Check = {
 };
 
 const pushCheck: Check = {
-  commands: ["run", "doctor"],
+  commands: ["run", "publish", "doctor"],
   needs: ["gh", "push"],
   evaluate(facts) {
     if (probed(facts, "gh") !== null) return [];
@@ -151,7 +151,7 @@ const pushCheck: Check = {
 export const CHECKS: Check[] = [
   probeCheck("node", ["doctor"], "Node is at the floor of engines in package.json", undefined),
   probeCheck("docker", ["run", "doctor"], "Docker is running", undefined),
-  probeCheck("gh", ["refine", "run", "doctor"], "gh is signed in", "gh auth login"),
+  probeCheck("gh", ["refine", "run", "publish", "doctor"], "gh is signed in", "gh auth login"),
   pushCheck,
   probeCheck("claudeSession", ["refine", "doctor"], "the Claude Code session of the host is signed in", "claude auth login"),
   probeCheck("config", ["doctor"], ".factory/config.ts loads", undefined),
