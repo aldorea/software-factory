@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
@@ -17,7 +17,7 @@ import type { ActivityEvent } from "../../src/workers/types.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { writeRunningRun } from "../coordinator/running-run.ts";
 import { FakeClock } from "../fakes/clock.ts";
-import { FakeGitHub } from "../fakes/github.ts";
+import { FakeGitHub, originOf } from "../fakes/github.ts";
 import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
@@ -102,7 +102,7 @@ async function mainRepo(): Promise<string> {
 
 function cli(
   cwd: string,
-  github: GitHub = new FakeGitHub([{ number: 42, title: "x", body: issueBody }]),
+  github: GitHub = new FakeGitHub([{ number: 42, title: "x", body: issueBody }], originOf(cwd)),
   script?: AttemptScript,
 ) {
   const out: string[] = [];
@@ -123,6 +123,7 @@ function cli(
     gh: async () => null,
     claudeSession: async () => null,
     originHead: async () => null,
+    push: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
@@ -561,6 +562,242 @@ describe("factory run: the summary at the end", () => {
   });
 });
 
+describe("factory run: a publication that failed", () => {
+  async function refusingRepo(): Promise<string> {
+    const repoDir = await runnableRepo();
+    const hook = join(originOf(repoDir) ?? "", "hooks", "pre-receive");
+    await writeFile(hook, '#!/bin/sh\necho "push refused" >&2\nexit 1\n');
+    await chmod(hook, 0o755);
+    return repoDir;
+  }
+
+  it("should print Not published with the title and the command that publishes again, in place of the pull request, and exit with 1", async () => {
+    const repoDir = await refusingRepo();
+    const { env, out, notifier } = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    const log = await lastRunLog(repoDir);
+    const summary = summaryOf(out);
+    expect(summary[0]).toBe(`Run ${log.runId}: ready`);
+    expect(summary.at(-1)).toBe("Not published: x → factory publish 42");
+    expect(summary.join("\n")).not.toContain("Pull request:");
+    expect(notifier.sent).toEqual([{ title: "factory run #42", message: "Not published: x → factory publish 42" }]);
+  });
+
+  it("should paint the Not published line red when the output has colour", async () => {
+    const repoDir = await refusingRepo();
+    const { env, out } = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
+    env.color = true;
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(out.at(-1)).toBe("\u001b[1;91mNot published: x → factory publish 42\u001b[0m");
+  });
+});
+
+describe("factory publish", () => {
+  async function unpublishedRun() {
+    const repoDir = await runnableRepo();
+    const github = new FakeGitHub([{ number: 42, title: "x", body: issueBody }], originOf(repoDir));
+    const hook = join(originOf(repoDir) ?? "", "hooks", "pre-receive");
+    await writeFile(hook, '#!/bin/sh\necho "push refused" >&2\nexit 1\n');
+    await chmod(hook, 0o755);
+    const session = cli(repoDir, github, () => ({ files: { "src/a.txt": "a\n" } }));
+    expect(await main(["approve", "42"], session.env)).toBe(0);
+    expect(await main(["run", "42"], session.env)).toBe(1);
+    const failed = await lastRunLog(repoDir);
+    expect(failed.publicationFailure?.phase).toBe("integration-push");
+    return { repoDir, github, session, hook, failed };
+  }
+
+  it("should publish a run that was not published, save the pull request, clear the previous failure and launch no agent", async () => {
+    const { repoDir, github, session, hook, failed } = await unpublishedRun();
+    await rm(hook);
+    const workersBefore = session.runner.workers.length;
+    session.out.length = 0;
+    session.notifier.sent.length = 0;
+
+    expect(await main(["publish", "42"], session.env)).toBe(0);
+
+    const log = await lastRunLog(repoDir);
+    expect(log.runId).toBe(failed.runId);
+    expect(log.publicationFailure).toBeUndefined();
+    expect(log.pullRequest).toEqual({ number: 100, url: "https://github.test/pull/100", draft: false });
+    expect(log.result).toBe("ready");
+    expect(github.pullRequests.map((pr) => pr.head)).toEqual([BRANCH]);
+    expect(await git(originOf(repoDir) ?? "", "rev-parse", BRANCH)).toBe(await git(repoDir, "rev-parse", BRANCH));
+    expect(session.runner.workers).toHaveLength(workersBefore);
+    expect(summaryOf(session.out).at(-1)).toBe("Pull request: https://github.test/pull/100");
+    expect(session.notifier.sent).toEqual([
+      { title: "factory run #42", message: "Ready for review: x", url: "https://github.test/pull/100" },
+    ]);
+  });
+
+  it("should show each retry of a push that failed on the network, wait as the env says and publish the run", async () => {
+    const { repoDir, github, session, hook } = await unpublishedRun();
+    const counter = join(dirname(hook), "..", "failures");
+    await writeFile(
+      hook,
+      `#!/bin/sh\nfailures=$(cat ${counter} 2>/dev/null || echo 0)\nif [ "$failures" -lt 1 ]; then echo 1 > ${counter}; echo "ssh: connect to host github.com port 22: Operation timed out" >&2; exit 1; fi\n`,
+    );
+    const waits: number[] = [];
+    session.env.sleep = async (ms) => void waits.push(ms);
+    session.out.length = 0;
+
+    expect(await main(["publish", "42"], session.env)).toBe(0);
+
+    expect(waits).toEqual([5_000]);
+    expect(session.out).toContain(
+      `publication: retry 1 of 3 in 5s: git push ${BRANCH} failed (1): remote: ssh: connect to host github.com port 22: Operation timed out`,
+    );
+    expect((await lastRunLog(repoDir)).publicationFailure).toBeUndefined();
+    expect(github.pullRequests.map((pr) => pr.head)).toEqual([BRANCH]);
+  });
+
+  it("should update the existing pull request when it runs again, instead of opening a second one", async () => {
+    const { repoDir, github, session, hook } = await unpublishedRun();
+    await rm(hook);
+    expect(await main(["publish", "42"], session.env)).toBe(0);
+
+    expect(await main(["publish", "42"], session.env)).toBe(0);
+
+    expect(github.pullRequests).toHaveLength(1);
+    expect((await lastRunLog(repoDir)).pullRequest?.number).toBe(100);
+  });
+
+  it("should keep the run result, record the new failure and exit with 1 when the publication fails again", async () => {
+    const { repoDir, session } = await unpublishedRun();
+    session.out.length = 0;
+    session.notifier.sent.length = 0;
+
+    expect(await main(["publish", "42"], session.env)).toBe(1);
+
+    const log = await lastRunLog(repoDir);
+    expect(log.result).toBe("ready");
+    expect(log.publicationFailure?.phase).toBe("integration-push");
+    expect(log.pullRequest).toBeUndefined();
+    expect(summaryOf(session.out).at(-1)).toBe("Not published: x → factory publish 42");
+    expect(session.notifier.sent).toEqual([{ title: "factory run #42", message: "Not published: x → factory publish 42" }]);
+  });
+
+  it("should refuse a run that is still running, with the reason, and push nothing", async () => {
+    const repoDir = await runnableRepo();
+    const { env, err, notifier } = cli(repoDir);
+    const run = await writeRunningRun({
+      logsDir: join(repoDir, ".factory", "logs"),
+      issue: 42,
+      runJsonAt: new Date("2026-10-24T07:59:00.000Z"),
+      logAt: new Date("2026-10-24T07:59:00.000Z"),
+    });
+
+    expect(await main(["publish", "42"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain(`run ${run.runId} of #42 is still running`);
+    expect(notifier.sent).toEqual([]);
+  });
+
+  it("should refuse an abandoned run, with the reason", async () => {
+    const repoDir = await runnableRepo();
+    const { env, err } = cli(repoDir);
+    const run = await writeRunningRun({
+      logsDir: join(repoDir, ".factory", "logs"),
+      issue: 42,
+      runJsonAt: new Date("2026-10-24T05:00:00.000Z"),
+      logAt: new Date("2026-10-24T05:00:00.000Z"),
+    });
+
+    expect(await main(["publish", "42"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain(`run ${run.runId} of #42 was abandoned`);
+  });
+
+  it("should say that the issue has no run when there is none", async () => {
+    const repoDir = await runnableRepo();
+    const { env, err } = cli(repoDir);
+
+    expect(await main(["publish", "42"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("#42 has no run to publish");
+  });
+
+  it("should refuse the factory itself as the target repo", async () => {
+    const repoDir = await runnableRepo();
+    const { env, err } = cli(repoDir);
+    env.factoryRoot = repoDir;
+
+    expect(await main(["publish", "42"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain("is the factory itself");
+  });
+
+  it("should refuse a folder inside .factory/worktrees/", async () => {
+    const repoDir = await runnableRepo();
+    const inside = join(repoDir, ".factory", "worktrees", "issue-42");
+    await mkdir(inside, { recursive: true });
+    const { env, err } = cli(inside);
+
+    expect(await main(["publish", "42"], env)).toBe(1);
+
+    expect(err.join("\n")).toContain(".factory/worktrees/");
+  });
+
+  it("should stop with the push problem and its fix before it pushes, when the readiness push check fails", async () => {
+    const { repoDir, session, hook } = await unpublishedRun();
+    await rm(hook);
+    session.env.push = async () => "cannot reach github.com/aldorea/askwell with the gh session";
+    session.err.length = 0;
+
+    expect(await main(["publish", "42"], session.env)).toBe(1);
+
+    expect(session.err.join("\n")).toContain("cannot reach github.com/aldorea/askwell with the gh session → gh auth status");
+    expect((await lastRunLog(repoDir)).pullRequest).toBeUndefined();
+  });
+
+  it("should not ask for Docker or an agent credential, because it launches no agent", async () => {
+    const { session, hook } = await unpublishedRun();
+    await rm(hook);
+    session.env.docker = async () => "Docker is not running";
+    session.env.credentials = {};
+
+    expect(await main(["publish", "42"], session.env)).toBe(0);
+  });
+
+  it("should print the usage with exit 2 when the issue is missing or not a number, or when there is a flag", async () => {
+    const { env, err } = cli(await temp.make("cli-publish-usage-"));
+
+    expect(await main(["publish"], env)).toBe(2);
+    expect(await main(["publish", "forty-two"], env)).toBe(2);
+    expect(await main(["publish", "42", "--worker-agent", "claude-code:opus"], env)).toBe(2);
+    expect(err.join("\n")).toContain("usage: factory publish <issue> [target-repo]");
+  });
+
+  it("should take the target repo from the last argument", async () => {
+    const { repoDir, session, hook } = await unpublishedRun();
+    await rm(hook);
+    session.env.cwd = await temp.make("elsewhere-");
+
+    expect(await main(["publish", "42", repoDir], session.env)).toBe(0);
+
+    expect((await lastRunLog(repoDir)).pullRequest?.number).toBe(100);
+  });
+
+  it("should be described in factory --help, with what it does and that it spends no plan", async () => {
+    const { env, out } = cli(await temp.make("cli-publish-help-"));
+
+    expect(await main(["--help"], env)).toBe(0);
+    expect(await main(["publish", "--help"], env)).toBe(0);
+
+    const lines = out.join("\n").split("\n");
+    const listed = lines.filter((line) => line.includes("factory publish"));
+    expect(listed.length).toBeGreaterThanOrEqual(2);
+    expect(listed[0]).toContain("no agent");
+    expect(out.join("\n")).toContain("pushes the branches");
+  });
+});
+
 describe("factory CLI", () => {
   it("should exit zero on a valid spec when validating, taking the target repo from the current directory", async () => {
     const repoDir = await targetRepo(await valid());
@@ -906,7 +1143,7 @@ describe("factory CLI: the default branch of the target repo", () => {
     await bareRemote(repoDir, "trunk");
     await git(repoDir, "branch", "trunk");
     await git(repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk");
-    const github = new FakeGitHub([{ number: 42, title: "x", body: issueBody }]);
+    const github = new FakeGitHub([{ number: 42, title: "x", body: issueBody }], originOf(repoDir));
     const { env } = cli(repoDir, github);
     expect(await main(["approve", "42"], env)).toBe(0);
 

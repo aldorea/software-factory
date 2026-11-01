@@ -6,7 +6,7 @@ import { main, type CliEnv } from "../../src/cli/main.ts";
 import { originHeadProblem } from "../../src/git/repo.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
-import { FakeGitHub } from "../fakes/github.ts";
+import { FakeGitHub, originOf } from "../fakes/github.ts";
 import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
@@ -93,7 +93,7 @@ function cli(cwd: string) {
   const out: string[] = [];
   const err: string[] = [];
   const runner = new FakeWorkerRunner(() => ({ files: { "src/a.txt": "a\n" } }));
-  const github = new FakeGitHub([{ number: 42, title: "Saved searches", body: ISSUE_BODY }]);
+  const github = new FakeGitHub([{ number: 42, title: "Saved searches", body: ISSUE_BODY }], originOf(cwd));
   const launches: InteractiveLaunch[] = [];
   const env: CliEnv = {
     cwd,
@@ -108,6 +108,7 @@ function cli(cwd: string) {
     gh: async () => null,
     claudeSession: async () => null,
     originHead: (repoDir) => originHeadProblem(repoDir),
+    push: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;

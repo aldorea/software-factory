@@ -1,7 +1,11 @@
-import type { RunLog, SubtaskRecord } from "../coordinator/run-log.ts";
+import { isUnpublished, type RunLog, type SubtaskRecord } from "../coordinator/run-log.ts";
+import { notPublishedMessage } from "../coordinator/publication.ts";
 import { countedTokens, formatDuration } from "../coordinator/stop-rules.ts";
+import { strong } from "./setup-render.ts";
 
-export function runSummary(log: RunLog): string[] {
+const RED = 91;
+
+export function runSummary(log: RunLog, issueTitle: string, color: boolean): string[] {
   const merged = ids(log.subtasks.filter((record) => record.state === "merged"));
   const blocked = log.subtasks.filter((record) => record.state === "blocked").map(blockedLabel);
   const unfinished = ids(log.subtasks.filter((record) => record.state !== "merged" && record.state !== "blocked"));
@@ -14,8 +18,13 @@ export function runSummary(log: RunLog): string[] {
     ...(log.block !== undefined ? [`Run block: ${log.block.type}`] : []),
     `Wall clock: ${formatDuration(log.cost.wallClockMs)}${paused}`,
     `Tokens: ${countedTokens(log.cost.usage)}`,
-    ...(log.pullRequest !== undefined ? [`Pull request: ${log.pullRequest.url}`] : []),
+    ...publicationLine(log, issueTitle, color),
   ];
+}
+
+function publicationLine(log: RunLog, issueTitle: string, color: boolean): string[] {
+  if (isUnpublished(log)) return [strong(RED, notPublishedMessage(issueTitle, log.issue), color)];
+  return log.pullRequest !== undefined ? [`Pull request: ${log.pullRequest.url}`] : [];
 }
 
 function ids(records: readonly SubtaskRecord[]): string {

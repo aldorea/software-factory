@@ -11,7 +11,7 @@ import {
 } from "../../src/cli/readiness.ts";
 
 const READY: ReadinessFacts = {
-  probes: { docker: null, gh: null, claudeSession: null, originHead: null, workerImage: null },
+  probes: { docker: null, gh: null, claudeSession: null, originHead: null, workerImage: null, push: null },
   roles: {
     workers: { agent: "claude-code", model: "sonnet" },
     verifier: { agent: "claude-code", model: "opus" },
@@ -137,6 +137,34 @@ describe("readiness of factory run", () => {
     expect(failures("run", down)).toEqual([{ kind: "fail", text: "Docker is not running" }]);
   });
 
+  it("should fail with gh auth status when the GitHub repo of origin cannot be reached with the gh session", () => {
+    const problem = "cannot reach github.com/aldorea/askwell with the gh session";
+
+    expect(failures("run", facts({ probes: { push: problem } }))).toEqual([{ kind: "fail", text: problem, command: "gh auth status" }]);
+  });
+
+  it("should report the push check as ok when the repo can be reached", () => {
+    expect(readiness("run", READY).filter((result) => result.text.includes("gh session"))).toEqual([
+      { kind: "ok", text: "the GitHub repo of origin is reachable with the gh session" },
+    ]);
+  });
+
+  it("should fail closed with the reason when origin is not a GitHub repo", () => {
+    const problem = "origin is not a GitHub repo: git@gitlab.com:aldorea/askwell.git";
+
+    expect(failures("run", facts({ probes: { push: problem } }))).toEqual([{ kind: "fail", text: problem, command: "gh auth status" }]);
+  });
+
+  it("should not report the push check while gh is signed out, because the gh problem already explains it", () => {
+    const given = facts({ probes: { gh: "gh is not signed in", push: "cannot reach github.com/aldorea/askwell with the gh session" } });
+
+    expect(failures("run", given)).toEqual([{ kind: "fail", text: "gh is not signed in", command: "gh auth login" }]);
+  });
+
+  it("should not check the push for refine, which pushes nothing", () => {
+    expect(failures("refine", facts({ probes: { push: "cannot reach github.com/a/b with the gh session" } }))).toEqual([]);
+  });
+
   it("should not check the worker image for refine, which runs on the host", () => {
     expect(failures("refine", facts({ probes: { workerImage: "worker:dev not built" } }))).toEqual([]);
   });
@@ -145,6 +173,34 @@ describe("readiness of factory run", () => {
     const given = facts({ probes: { docker: "Docker is not running", gh: "gh is not signed in" }, credentials: {} });
 
     expect(failures("run", given).map((result) => result.command)).toEqual([undefined, "gh auth login", "factory auth claude-code"]);
+  });
+});
+
+describe("readiness of factory publish", () => {
+  it("should pass with only gh and the push, and ask for no Docker, worker image or credential, because publish launches no agent", () => {
+    const broken = facts({ probes: { docker: "Docker is not running", workerImage: "worker:dev not built" }, roles: {}, credentials: {} });
+
+    expect(failures("publish", broken)).toEqual([]);
+    expect(readiness("publish", broken).map((result) => result.text)).toEqual([
+      "gh is signed in",
+      "the GitHub repo of origin is reachable with the gh session",
+    ]);
+  });
+
+  it("should fail with gh auth status when the GitHub repo of origin cannot be reached with the gh session", () => {
+    const problem = "cannot reach github.com/aldorea/askwell with the gh session";
+
+    expect(failures("publish", facts({ probes: { push: problem } }))).toEqual([{ kind: "fail", text: problem, command: "gh auth status" }]);
+  });
+
+  it("should fail with gh auth login when gh has no session, without the push check", () => {
+    const given = facts({ probes: { gh: "gh is not signed in", push: "cannot reach github.com/a/b with the gh session" } });
+
+    expect(failures("publish", given)).toEqual([{ kind: "fail", text: "gh is not signed in", command: "gh auth login" }]);
+  });
+
+  it("should need only the gh and push probes, so that publish never reads the Docker daemon", () => {
+    expect(neededProbes("publish").sort()).toEqual(["gh", "push"]);
   });
 });
 
@@ -171,17 +227,18 @@ describe("probes a command needs", () => {
     claudeSession: async () => "claude",
     originHead: async () => "origin",
     workerImage: async () => "image",
+    push: async () => "push",
     node: async () => "node",
     config: async () => "config",
   };
 
   it("should list only the probes of the checks of that command", () => {
     expect(neededProbes("refine").sort()).toEqual(["claudeSession", "gh", "originHead"]);
-    expect(neededProbes("run").sort()).toEqual(["docker", "gh", "workerImage"]);
-    expect(neededProbes("doctor").sort()).toEqual(["claudeSession", "config", "docker", "gh", "node", "originHead", "workerImage"]);
+    expect(neededProbes("run").sort()).toEqual(["docker", "gh", "push", "workerImage"]);
+    expect(neededProbes("doctor").sort()).toEqual(["claudeSession", "config", "docker", "gh", "node", "originHead", "push", "workerImage"]);
   });
 
   it("should run only those probes", async () => {
-    expect(await gatherProbes("run", silent)).toEqual({ docker: "docker", gh: "gh", workerImage: "image" });
+    expect(await gatherProbes("run", silent)).toEqual({ docker: "docker", gh: "gh", push: "push", workerImage: "image" });
   });
 });

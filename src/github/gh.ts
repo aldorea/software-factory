@@ -1,6 +1,6 @@
 import type { ExecResult } from "../workers/types.ts";
 import { exec } from "../workers/sh.ts";
-import type { GitHub, Issue, NewPullRequest, PullRequest, PullRequestUpdate } from "./github.ts";
+import type { GitHub, Issue, NewPullRequest, PullRequest, PullRequestUpdate, PushDestination } from "./github.ts";
 
 export interface GhOptions {
   repoDir: string;
@@ -14,6 +14,8 @@ interface GhPullRequest {
 }
 
 const PR_FIELDS = "number,url,isDraft";
+
+const SAFE_COMMAND = /^[A-Za-z0-9_./+-]+$/;
 
 function toPullRequest(data: GhPullRequest): PullRequest {
   return { number: data.number, url: data.url, draft: data.isDraft };
@@ -66,6 +68,16 @@ export function ghGitHub(options: GhOptions): GitHub {
     },
     async repositoryUrl(): Promise<string> {
       return (JSON.parse(await gh(["repo", "view", "--json", "url"])) as { url: string }).url;
+    },
+    async pushDestination(): Promise<PushDestination> {
+      if (!SAFE_COMMAND.test(command)) {
+        throw new Error(`gh command ${JSON.stringify(command)} is not a plain path, so git cannot run it as the credential helper`);
+      }
+      const { nameWithOwner } = JSON.parse(await gh(["repo", "view", "--json", "nameWithOwner"])) as { nameWithOwner: string };
+      return {
+        url: `https://github.com/${nameWithOwner}.git`,
+        gitArgs: ["-c", "credential.helper=", "-c", `credential.helper=!${command} auth git-credential`],
+      };
     },
     async findPullRequest(head: string, base: string): Promise<PullRequest | null> {
       const found = JSON.parse(

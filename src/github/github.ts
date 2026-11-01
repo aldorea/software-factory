@@ -24,9 +24,15 @@ export interface PullRequestUpdate {
   draft: boolean;
 }
 
+export interface PushDestination {
+  url: string;
+  gitArgs: string[];
+}
+
 export interface GitHub {
   readIssue(issue: number): Promise<Issue>;
   repositoryUrl(): Promise<string>;
+  pushDestination(): Promise<PushDestination>;
   findPullRequest(head: string, base: string): Promise<PullRequest | null>;
   createPullRequest(pullRequest: NewPullRequest): Promise<PullRequest>;
   updatePullRequest(number: number, update: PullRequestUpdate): Promise<PullRequest>;

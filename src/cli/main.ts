@@ -34,6 +34,7 @@ import { gatherProbes, readiness, readinessProblems } from "./readiness.ts";
 import { reportErr, reportOut } from "./report.ts";
 import type { SetupLine } from "./setup-render.ts";
 import { doctor } from "./doctor.ts";
+import { publish, PUBLISH_SUMMARY, PUBLISH_USAGE } from "./publish.ts";
 import { envProbes } from "./env-probes.ts";
 import { specCredentialNeeds } from "./spec-needs.ts";
 import { runSummary } from "./run-summary.ts";
@@ -46,6 +47,7 @@ export interface CliEnv {
   cwd: string;
   factoryRoot: string;
   clock: Clock;
+  sleep?: (ms: number) => Promise<void>;
   github(repoDir: string): GitHub;
   runner(): WorkerRunner;
   verifier(config: ResolvedConfig, role: RoleChoice): Verifier;
@@ -56,6 +58,7 @@ export interface CliEnv {
   gh(): Promise<string | null>;
   claudeSession(): Promise<string | null>;
   originHead(repoDir: string): Promise<string | null>;
+  push(repoDir: string): Promise<string | null>;
   ask?: (
     entries: RoleEntry[],
     annotate: Annotate,
@@ -77,6 +80,7 @@ const USAGE = [
   `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`,
   "       factory refine <issue> [target-repo] [--refinement-agent <agent>:<model>]",
   "       factory run <issue> [target-repo] [--worker-agent <agent>:<model>] [--verifier-agent <agent>:<model>] [--tester-agent <agent>:<model>]",
+  `       ${PUBLISH_USAGE}   ${PUBLISH_SUMMARY}`,
   "       factory stats [target-repo]",
   `       ${WEB_USAGE}`,
   "       factory init [target-repo]",
@@ -100,6 +104,7 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
     env.out(USAGE);
     return 0;
   }
+  if (args[0] === "publish") return publish(args.slice(1), env);
   if (args[0] === "stats") return stats(args.slice(1), env);
   if (args[0] === "doctor") return doctor(args.slice(1), env, USAGE);
   if (args[0] === "init") return init(args.slice(1), env);
@@ -251,6 +256,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
         github: env.github(repoDir),
         notifier: env.notifier,
         clock: env.clock,
+        ...(env.sleep ? { sleep: env.sleep } : {}),
         progress: view ? (line) => view.progress(line) : (line) => env.out(renderProgress(line, env.clock.now(), false)),
         activity: view ? (entry) => view.activity(entry) : (entry) => env.out(activityLine(entry)),
         ...(view ? { snapshot: (log) => view.snapshot(log) } : {}),
@@ -260,8 +266,8 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     if (ticker) clearInterval(ticker);
     view?.finish();
   }
-  for (const line of runSummary(report.log)) env.out(line);
-  return 0;
+  for (const line of runSummary(report.log, report.issueTitle, env.color === true)) env.out(line);
+  return report.publication.kind === "failed" ? 1 : 0;
 }
 
 async function refine(repoDir: string, issue: number, flag: string | undefined, env: CliEnv): Promise<number> {

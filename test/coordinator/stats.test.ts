@@ -174,6 +174,25 @@ describe("the printed summary", () => {
     expect(formatStats(summarizeRuns(history()))).not.toContain("abandoned");
   });
 
+  it("should count apart the runs whose publication failed and say so in a note after the total, not as one more bucket of it", () => {
+    const failure = { phase: "pull-request" as const, message: "HTTP 502", at: "2026-10-24T08:00:00.000Z" };
+    const stats = summarizeRuns([...history(), { ...cleanRun(4), publicationFailure: failure }]);
+
+    expect(stats.unpublished).toBe(1);
+    const lines = formatStats(stats).split("\n");
+    const total = /^Runs: (\d+) \(ready (\d+), draft (\d+), paused (\d+)\)$/.exec(lines[0]!);
+    expect(total).not.toBeNull();
+    expect(Number(total![1])).toBe(Number(total![2]) + Number(total![3]) + Number(total![4]));
+    expect(lines[1]).toBe("  of which not published: 1");
+  });
+
+  it("should not mention unpublished runs when every run was published", () => {
+    const stats = summarizeRuns(history());
+
+    expect(stats.unpublished).toBe(0);
+    expect(formatStats(stats)).not.toContain("not published");
+  });
+
   it("should say there were no worker-layer failures when there were none", () => {
     expect(formatStats(summarizeRuns([cleanRun(0)]))).toContain("Worker-layer failures: none");
   });

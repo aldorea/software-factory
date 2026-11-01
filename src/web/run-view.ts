@@ -1,6 +1,6 @@
 import { attemptAbandoned, runStatus } from "../coordinator/abandoned.ts";
 import type { RunEntry } from "../coordinator/run-history.ts";
-import type { AgentChangeRecord, EvidenceBranchRecord, RunBlockRecord, RunLog } from "../coordinator/run-log.ts";
+import { isUnpublished, type AgentChangeRecord, type EvidenceBranchRecord, type RunBlockRecord, type RunLog } from "../coordinator/run-log.ts";
 import type { RoleChoice } from "../config/config.ts";
 import { checkItem } from "./evidence-view.ts";
 import { anchor, badge, bullets, escapeHtml, page, titledList } from "./html.ts";
@@ -81,6 +81,18 @@ function evidenceBranchLink(evidence: EvidenceBranchRecord): string {
   return anchor(`${evidence.repositoryUrl}/tree/${path}`, evidence.branch);
 }
 
+function publicationSection(log: RunLog): string {
+  if (!isUnpublished(log)) return "";
+  const { publicationFailure, issue } = log;
+  return [
+    "<h2>Sin publicar</h2>",
+    `<p>Fase: ${escapeHtml(publicationFailure.phase)}</p>`,
+    `<p>Motivo: ${escapeHtml(publicationFailure.message)}</p>`,
+    `<p>Hora: ${escapeHtml(publicationFailure.at)}</p>`,
+    `<p>Para publicar de nuevo: ${escapeHtml(`factory publish ${issue}`)}</p>`,
+  ].join("\n");
+}
+
 function linksSection({ pullRequest, evidence }: RunLog): string {
   const lines: string[] = [];
   if (pullRequest !== undefined) {
@@ -88,8 +100,7 @@ function linksSection({ pullRequest, evidence }: RunLog): string {
     lines.push(`<p>Pull request: ${anchor(pullRequest.url, `#${pullRequest.number}`)}${draft}</p>`);
   }
   if (evidence !== undefined) {
-    const failure = evidence.failure === undefined ? "" : ` (fallo: ${escapeHtml(evidence.failure)})`;
-    lines.push(`<p>Evidence branch: ${evidenceBranchLink(evidence)}${failure}</p>`);
+    lines.push(`<p>Evidence branch: ${evidenceBranchLink(evidence)}</p>`);
   }
   return lines.join("\n");
 }
@@ -103,6 +114,7 @@ export function runView({ entry, now, logUrl }: RunData): string {
     `<p>Resultado: ${badge(status)}</p>`,
     `<p>Último cambio: ${escapeHtml(relativeTime(entry.modifiedAt, now))}</p>`,
     linksSection(log),
+    publicationSection(log),
     pauseSection(log),
     blockSection(log, logUrl),
     agentsSection(log),

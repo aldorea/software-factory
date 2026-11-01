@@ -24,6 +24,7 @@ function resultsSection(stats: RunStats): string {
       ["Paused", results.paused],
       ["Running", results.running],
       ["Abandoned", results.abandoned],
+      ["Sin publicar", stats.unpublished],
     ]),
   ].join("\n");
 }

@@ -5,6 +5,7 @@ import { credentialsFilePath, resolveCredentials } from "../config/credentials.t
 import { loadCredentials } from "../config/credentials-store.ts";
 import { configuredVerifier } from "../coordinator/docker-verifier.ts";
 import { originHeadProblem } from "../git/repo.ts";
+import { pushProblem } from "../git/push-probe.ts";
 import { ghGitHub, ghProblem } from "../github/gh.ts";
 import { macosNotifier } from "../notify/macos.ts";
 import { claudeSessionProblem } from "../workers/claude-session.ts";
@@ -76,6 +77,7 @@ process.exitCode = await main(process.argv.slice(2), {
   gh: () => ghProblem(),
   claudeSession: () => claudeSessionProblem(),
   originHead: (repoDir) => originHeadProblem(repoDir),
+  push: (repoDir) => pushProblem(repoDir, ghGitHub({ repoDir })),
   ...(features.menu ? { ask: askRolesInTerminal } : {}),
   auth: {
     credentialsPath,

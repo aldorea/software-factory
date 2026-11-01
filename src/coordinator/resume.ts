@@ -45,6 +45,7 @@ export function resumedLog({ fresh, previous, merged, now }: ResumeInput): RunLo
     pauseReason: _pauseReason,
     resetsAt: _resetsAt,
     verification: _verification,
+    publicationFailure: _publicationFailure,
     ...kept
   } = previous;
   return {

@@ -1,23 +1,20 @@
 import { join } from "node:path";
-import { pushBranch, REMOTE } from "../git/repo.ts";
-import type { PullRequest } from "../github/github.ts";
 import { emptyUsage } from "../workers/agent-adapter.ts";
 import { WorkerLayerError } from "../workers/failures.ts";
 import { runId as makeRunId, runResult } from "./decisions.ts";
 import { testFilesAt } from "./diff.ts";
 import { requestCheckPaths } from "./gate.ts";
-import { evidenceBranchName, evidenceFiles, publishEvidence } from "./evidence-branch.ts";
 import { includeDefaultBranch } from "./default-branch.ts";
 import { verifyIntegration } from "./integrated-verification.ts";
 import { adjustMaxParallel } from "./parallelism.ts";
 import type { RunPorts } from "./ports.ts";
 import { prepare } from "./prepare.ts";
 import { progressLines } from "./progress.ts";
-import { renderPullRequest } from "./pull-request.ts";
+import { publicationNotification, publishRun, type PublicationResult } from "./publication.ts";
 import { resumedLog } from "./resume.ts";
 import { paused, type RunContext, type RunRequest } from "./run-context.ts";
 import { latestRunLog, mergedSubtasks, readRunLogs, runBaseSha } from "./run-history.ts";
-import { RUN_LOG_VERSION, writeRunLog, type EvidenceBranchRecord, type RunLog, type SubtaskRecord } from "./run-log.ts";
+import { RUN_LOG_VERSION, writeRunLog, type RunLog, type SubtaskRecord } from "./run-log.ts";
 import { applyTotals, emptyCost, emptyFriction } from "./run-totals.ts";
 import { inWaves, Lock } from "./slots.ts";
 import { startSubtask } from "./subtask-work.ts";
@@ -29,7 +26,8 @@ export { REMOTE } from "../git/repo.ts";
 
 export interface RunReport {
   result: RunLog["result"];
-  pullRequest: PullRequest;
+  publication: PublicationResult;
+  issueTitle: string;
   runLogPath: string;
   log: RunLog;
 }
@@ -123,54 +121,26 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   await inWaves(plan, log.maxParallel, (subtask, slot) => startSubtask(context, subtask, slot));
   if (!paused(context)) await verifyIntegration(context, subtasks);
   await includeDefaultBranch(context, subtasks);
-  await publishEvidenceBranch(context);
   log.result = runResult(log);
   log.endedAt = ports.clock.now().toISOString();
   await save();
 
-  await pushBranch(request.repoDir, REMOTE, branch);
-  const text = renderPullRequest(issue, log);
-  const draft = log.result !== "ready";
-  const existing = await ports.github.findPullRequest(branch, defaultBranch);
-  const pullRequest = existing
-    ? await ports.github.updatePullRequest(existing.number, { ...text, draft })
-    : await ports.github.createPullRequest({ ...text, head: branch, base: defaultBranch, draft });
-  log.pullRequest = { number: pullRequest.number, url: pullRequest.url, draft: pullRequest.draft };
-  await save();
-
-  await ports.notifier.notify({
-    title: `factory run #${request.issue}`,
-    message: notificationMessage(log, issue.title),
-    url: pullRequest.url,
+  const publication = await publishRun({
+    repoDir: request.repoDir,
+    issue,
+    defaultBranch,
+    log,
+    runDir,
+    github: ports.github,
+    clock: ports.clock,
+    sleep: ports.sleep,
+    progress: ports.progress,
+    save,
   });
-  return { result: log.result, pullRequest, runLogPath, log };
-}
-
-async function publishEvidenceBranch(context: RunContext): Promise<void> {
-  const { log, request } = context;
-  delete log.evidence;
-  const tested = (log.verification?.tester?.verdicts ?? []).map((verdict) => ({ id: verdict.id, attachments: verdict.evidence }));
-  const files = evidenceFiles(log.runId, context.runDir, [...(log.verification?.humanCriteria ?? []), ...tested]);
-  if (files.length === 0) return;
-  const record: EvidenceBranchRecord = { branch: evidenceBranchName(request.issue) };
-  log.evidence = record;
-  try {
-    record.commit = await context.gitLock.exclusive(() =>
-      publishEvidence({ repoDir: request.repoDir, remote: REMOTE, issue: request.issue, runId: log.runId, files }),
-    );
-    record.repositoryUrl = await context.ports.github.repositoryUrl();
-  } catch (error) {
-    record.failure = (error as Error).message;
-  }
-  await context.save();
+  await ports.notifier.notify(publicationNotification(issue, log, publication));
+  return { result: log.result, publication, issueTitle: issue.title, runLogPath, log };
 }
 
 export function subtaskBranch(integration: string, subtaskId: string): string {
   return `factory-subtask/${integration.replace(/^factory\//, "")}/${subtaskId}`;
-}
-
-function notificationMessage(log: RunLog, title: string): string {
-  if (log.result === "ready") return `Ready for review: ${title}`;
-  if (log.result !== "paused") return `Draft: ${title}`;
-  return log.resetsAt === undefined ? `Paused: ${title}` : `Paused until the plan limit resets at ${log.resetsAt}: ${title}`;
 }

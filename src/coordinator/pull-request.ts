@@ -85,7 +85,6 @@ function resultLine(log: RunLog): string {
     );
   }
   if (log.block !== undefined) failed.push(`the run is blocked by ${log.block.type} (see Blocks)`);
-  if (log.evidence?.failure !== undefined) failed.push(`the attachments of the human criteria were not published: ${log.evidence.failure}`);
   const layer = log.workerLayerFailures.length;
   if (layer > 0) failed.push(`${layer} failure${layer === 1 ? "" : "s"} of the worker layer, not of the design`);
   return `Draft: ${failed.join("; ")}.`;
@@ -170,7 +169,7 @@ function humanLine(criterion: HumanCriterionRecord, label: (id: string) => strin
 
 function filesText(id: string, files: string[], log: RunLog): string {
   const evidence = log.evidence;
-  if (evidence?.failure === undefined && evidence?.commit !== undefined && evidence.repositoryUrl !== undefined) {
+  if (evidence?.commit !== undefined && evidence.repositoryUrl !== undefined) {
     const links = files.map((file) => {
       const name = basename(file);
       const url = evidenceUrl(evidence.repositoryUrl ?? "", evidence.commit ?? "", evidencePath(log.runId, id, file));
@@ -191,10 +190,5 @@ function evidenceUrl(repositoryUrl: string, commit: string, path: string): strin
 function evidenceNotes(log: RunLog): string[] {
   const evidence = log.evidence;
   if (evidence === undefined) return [];
-  if (evidence.failure !== undefined) {
-    return [
-      `The attachments could not be published to \`${evidence.branch}\`: ${evidence.failure}. They stay on the host under \`.factory/logs/${log.runId}/attachments/\`.\n`,
-    ];
-  }
   return [`The attachments are on branch \`${evidence.branch}\` at \`${(evidence.commit ?? "").slice(0, 12)}\`. That branch is never merged.\n`];
 }

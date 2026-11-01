@@ -29,6 +29,7 @@ export interface RunPorts {
   github: GitHub;
   notifier: Notifier;
   clock: Clock;
+  sleep?(ms: number): Promise<void>;
   progress?(line: string): void;
   activity?(entry: ActivityEntry): void;
   snapshot?(log: RunLog): void;

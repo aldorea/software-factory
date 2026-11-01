@@ -32,6 +32,7 @@ function cli(cwd: string, factoryRoot: string) {
     gh: async () => null,
     claudeSession: async () => null,
     originHead: async () => null,
+    push: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;

@@ -123,7 +123,7 @@ async function targetRepo(options: TargetOptions = {}): Promise<Target> {
   await git(repoDir, "add", ".");
   await git(repoDir, "commit", "-q", "-m", "Spec #42");
   await git(repoDir, "switch", "-q", "main");
-  const github = new FakeGitHub([{ number: ISSUE, title: "Greeting", body: options.issueBody ?? ISSUE_BODY }]);
+  const github = new FakeGitHub([{ number: ISSUE, title: "Greeting", body: options.issueBody ?? ISSUE_BODY }], remoteDir);
   await approveSpec({ repoDir, issue: ISSUE, github, protectedPaths: ["package.json"], now: new Date("2026-10-24T07:00:00Z") });
   return { repoDir, remoteDir, github };
 }
@@ -328,7 +328,7 @@ describe("factory run for a one-subtask spec", () => {
     const report = await second.run();
 
     expect(target.github.pullRequests).toHaveLength(1);
-    expect(report.pullRequest.number).toBe(target.github.pullRequests[0]?.number);
+    expect(report.publication).toEqual({ kind: "published", pullRequest: { number: 100, url: "https://github.test/pull/100", draft: false } });
     expect(target.github.pullRequests[0]?.draft).toBe(false);
     expect(report.result).toBe("ready");
   });
@@ -351,7 +351,7 @@ describe("factory run for a one-subtask spec", () => {
       integrationBranch: BRANCH,
       result: "ready",
       agents: { workers: { agent: "claude-code", model: "sonnet" } },
-      pullRequest: { number: report.pullRequest.number, url: report.pullRequest.url, draft: false },
+      pullRequest: { number: 100, url: "https://github.test/pull/100", draft: false },
       verification: { passed: true, sha: await revParse(target.repoDir, BRANCH) },
     });
     expect(log.subtasks).toHaveLength(1);

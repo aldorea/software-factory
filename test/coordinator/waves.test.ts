@@ -129,7 +129,7 @@ async function targetRepo(options: TargetOptions): Promise<Target> {
   await git(repoDir, "add", ".");
   await git(repoDir, "commit", "-q", "-m", "Spec #42");
   await git(repoDir, "switch", "-q", "main");
-  const github = new FakeGitHub([{ number: ISSUE, title: "Greeting", body: issueBody }]);
+  const github = new FakeGitHub([{ number: ISSUE, title: "Greeting", body: issueBody }], remoteDir);
   await approveSpec({ repoDir, issue: ISSUE, github, protectedPaths: ["package.json"], now: new Date("2026-10-24T07:00:00Z") });
   return { repoDir, remoteDir, github };
 }
