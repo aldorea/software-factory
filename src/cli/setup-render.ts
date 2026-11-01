@@ -13,7 +13,7 @@ export function colorEnabled({ tty, noColor }: { tty: boolean; noColor: string |
   return tty && (noColor === undefined || noColor === "");
 }
 
-function strong(code: number, text: string, color: boolean): string {
+export function strong(code: number, text: string, color: boolean): string {
   return color ? `${ESC}[1;${code}m${text}${RESET}` : text;
 }
 

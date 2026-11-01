@@ -260,8 +260,8 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
     if (ticker) clearInterval(ticker);
     view?.finish();
   }
-  for (const line of runSummary(report.log)) env.out(line);
-  return 0;
+  for (const line of runSummary(report.log, report.issueTitle, env.color === true)) env.out(line);
+  return report.publication.kind === "failed" ? 1 : 0;
 }
 
 async function refine(repoDir: string, issue: number, flag: string | undefined, env: CliEnv): Promise<number> {

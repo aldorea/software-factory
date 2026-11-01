@@ -45,12 +45,16 @@ export class FakeGitHub implements GitHub {
     return "https://github.test/aldorea/greeting";
   }
 
+  pullRequestFailure: string | null = null;
+
   async findPullRequest(head: string, base: string): Promise<PullRequest | null> {
+    if (this.pullRequestFailure !== null) throw new Error(this.pullRequestFailure);
     const found = this.pullRequests.find((pr) => pr.head === head && pr.base === base);
     return found ? { number: found.number, url: found.url, draft: found.draft } : null;
   }
 
   async createPullRequest(pullRequest: NewPullRequest): Promise<PullRequest> {
+    if (this.pullRequestFailure !== null) throw new Error(this.pullRequestFailure);
     const number = 100 + this.pullRequests.length;
     const created: FakePullRequest = { ...pullRequest, number, url: `https://github.test/pull/${number}` };
     this.pullRequests.push(created);
@@ -58,6 +62,7 @@ export class FakeGitHub implements GitHub {
   }
 
   async updatePullRequest(number: number, update: PullRequestUpdate): Promise<PullRequest> {
+    if (this.pullRequestFailure !== null) throw new Error(this.pullRequestFailure);
     const found = this.pullRequests.find((pr) => pr.number === number);
     if (!found) throw new Error(`pull request #${number} does not exist`);
     Object.assign(found, update);

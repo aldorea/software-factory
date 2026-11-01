@@ -81,6 +81,17 @@ function evidenceBranchLink(evidence: EvidenceBranchRecord): string {
   return anchor(`${evidence.repositoryUrl}/tree/${path}`, evidence.branch);
 }
 
+function publicationSection({ publicationFailure, issue }: RunLog): string {
+  if (publicationFailure === undefined) return "";
+  return [
+    "<h2>Sin publicar</h2>",
+    `<p>Fase: ${escapeHtml(publicationFailure.phase)}</p>`,
+    `<p>Motivo: ${escapeHtml(publicationFailure.message)}</p>`,
+    `<p>Hora: ${escapeHtml(publicationFailure.at)}</p>`,
+    `<p>Para publicar de nuevo: ${escapeHtml(`factory publish ${issue}`)}</p>`,
+  ].join("\n");
+}
+
 function linksSection({ pullRequest, evidence }: RunLog): string {
   const lines: string[] = [];
   if (pullRequest !== undefined) {
@@ -88,8 +99,7 @@ function linksSection({ pullRequest, evidence }: RunLog): string {
     lines.push(`<p>Pull request: ${anchor(pullRequest.url, `#${pullRequest.number}`)}${draft}</p>`);
   }
   if (evidence !== undefined) {
-    const failure = evidence.failure === undefined ? "" : ` (fallo: ${escapeHtml(evidence.failure)})`;
-    lines.push(`<p>Evidence branch: ${evidenceBranchLink(evidence)}${failure}</p>`);
+    lines.push(`<p>Evidence branch: ${evidenceBranchLink(evidence)}</p>`);
   }
   return lines.join("\n");
 }
@@ -103,6 +113,7 @@ export function runView({ entry, now, logUrl }: RunData): string {
     `<p>Resultado: ${badge(status)}</p>`,
     `<p>Último cambio: ${escapeHtml(relativeTime(entry.modifiedAt, now))}</p>`,
     linksSection(log),
+    publicationSection(log),
     pauseSection(log),
     blockSection(log, logUrl),
     agentsSection(log),

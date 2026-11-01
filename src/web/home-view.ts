@@ -15,6 +15,7 @@ export interface HomeData {
 }
 
 function pullRequestCell(entry: RunEntry): string {
+  if (entry.log.publicationFailure !== undefined) return badge("not published");
   const pullRequest = entry.log.pullRequest;
   if (pullRequest === undefined) return "";
   return anchor(pullRequest.url, `#${pullRequest.number}`);

@@ -59,11 +59,11 @@ export function verificationPassed(checks: CheckRecord[], criteria: CriterionRec
 }
 
 export function runResult(
-  log: Pick<RunLog, "subtasks" | "verification" | "pauseReason" | "evidence" | "block">,
+  log: Pick<RunLog, "subtasks" | "verification" | "pauseReason" | "block">,
 ): Exclude<RunResult, "running"> {
   if (log.pauseReason !== undefined) return "paused";
   const merged = log.subtasks.every((subtask) => subtask.state === "merged");
-  return merged && log.verification?.passed === true && log.evidence?.failure === undefined && log.block === undefined ? "ready" : "draft";
+  return merged && log.verification?.passed === true && log.block === undefined ? "ready" : "draft";
 }
 
 export function runId(issue: number, now: Date): string {

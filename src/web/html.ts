@@ -48,6 +48,7 @@ const TONES = new Map<string, string>([
   ["working", "info"],
   ["gating", "info"],
   ["blocked", "bad"],
+  ["not published", "bad"],
   ["falla", "bad"],
   ["rechazado", "bad"],
   ["refute", "bad"],

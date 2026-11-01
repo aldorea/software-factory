@@ -220,16 +220,6 @@ describe("the pull request and the evidence branch of a run", () => {
     expect(body).toContain("#52</a> (draft)");
   });
 
-  it("should show the failure of the evidence branch when it was not pushed", async () => {
-    const log = aRun(0, { evidence: { branch: "factory-evidence/45", failure: "push rejected" } });
-
-    const body = await runPage(log);
-
-    expect(body).toContain("factory-evidence/45");
-    expect(body).toContain("push rejected");
-    expect(body).not.toContain('href="undefined');
-  });
-
   it("should show neither when the run has no pull request and no evidence branch", async () => {
     const body = await runPage(aRun(0));
 
@@ -266,7 +256,8 @@ describe("the escaping of a run", () => {
       criteria: { passing: [hostile], blocked: [hostile], human: [hostile], pending: [hostile] },
       block: { type: "default-branch-conflict", reason: hostile, sha: hostile, files: [hostile] },
       pullRequest: { number: 1, url: `https://x.test/"><script>alert(1)</script>`, draft: false },
-      evidence: { branch: hostile, repositoryUrl: `https://x.test/"><script>alert(1)</script>`, failure: hostile },
+      evidence: { branch: hostile, repositoryUrl: `https://x.test/"><script>alert(1)</script>` },
+      publicationFailure: { phase: "evidence-push", message: hostile, at: hostile },
     });
 
     const body = await runPage(log);

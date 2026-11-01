@@ -15,6 +15,7 @@ export interface AgentStats {
 export interface RunStats {
   runs: number;
   results: Record<RunStatus, number>;
+  unpublished: number;
   criteria: Record<keyof CriteriaRecord, number>;
   cost: {
     attempts: number;
@@ -37,6 +38,7 @@ export function summarizeRuns(logs: readonly RunLog[], abandoned: ReadonlySet<Ru
   const stats: RunStats = {
     runs: logs.length,
     results: { ready: 0, draft: 0, paused: 0, running: 0, abandoned: 0 },
+    unpublished: 0,
     criteria: { passing: 0, blocked: 0, human: 0, pending: 0 },
     cost: {
       attempts: 0,
@@ -56,6 +58,7 @@ export function summarizeRuns(logs: readonly RunLog[], abandoned: ReadonlySet<Ru
   let subtaskAttempts = 0;
   for (const log of logs) {
     stats.results[abandoned.has(log) ? "abandoned" : log.result] += 1;
+    if (log.publicationFailure !== undefined) stats.unpublished += 1;
     for (const key of Object.keys(stats.criteria) as (keyof CriteriaRecord)[]) stats.criteria[key] += log.criteria[key].length;
     stats.cost.attempts += log.cost.attempts;
     stats.cost.countedTokens += countedTokens(log.cost.usage);
@@ -111,8 +114,9 @@ export function formatStats(stats: RunStats, unreadable: readonly string[] = [])
   );
   const running = results.running > 0 ? `, running ${results.running}` : "";
   const abandoned = results.abandoned > 0 ? `, abandoned ${results.abandoned}` : "";
+  const unpublished = stats.unpublished > 0 ? `, not published ${stats.unpublished}` : "";
   return [
-    `Runs: ${stats.runs} (ready ${results.ready}, draft ${results.draft}, paused ${results.paused}${running}${abandoned})`,
+    `Runs: ${stats.runs} (ready ${results.ready}, draft ${results.draft}, paused ${results.paused}${running}${abandoned}${unpublished})`,
     `Criteria: passing ${criteria.passing}, blocked ${criteria.blocked}, human ${criteria.human}, pending ${criteria.pending}`,
     "",
     "Cost",

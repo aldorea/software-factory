@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
@@ -558,6 +558,42 @@ describe("factory run: the summary at the end", () => {
     const log = await lastRunLog(repoDir);
     expect(log.cost.pausedMs).toBe(3 * 3_600_000);
     expect(summaryOf(resumed.out)).toContain("Wall clock: 10 min (3 h in pause not counted)");
+  });
+});
+
+describe("factory run: a publication that failed", () => {
+  async function refusingRepo(): Promise<string> {
+    const repoDir = await runnableRepo();
+    const hook = join(originOf(repoDir) ?? "", "hooks", "pre-receive");
+    await writeFile(hook, '#!/bin/sh\necho "push refused" >&2\nexit 1\n');
+    await chmod(hook, 0o755);
+    return repoDir;
+  }
+
+  it("should print Not published with the title and the command that publishes again, in place of the pull request, and exit with 1", async () => {
+    const repoDir = await refusingRepo();
+    const { env, out, notifier } = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    const log = await lastRunLog(repoDir);
+    const summary = summaryOf(out);
+    expect(summary[0]).toBe(`Run ${log.runId}: ready`);
+    expect(summary.at(-1)).toBe("Not published: x → factory publish 42");
+    expect(summary.join("\n")).not.toContain("Pull request:");
+    expect(notifier.sent).toEqual([{ title: "factory run #42", message: "Not published: x → factory publish 42" }]);
+  });
+
+  it("should paint the Not published line red when the output has colour", async () => {
+    const repoDir = await refusingRepo();
+    const { env, out } = cli(repoDir, undefined, () => ({ files: { "src/a.txt": "a\n" } }));
+    env.color = true;
+    expect(await main(["approve", "42"], env)).toBe(0);
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(out.at(-1)).toBe("\u001b[1;91mNot published: x → factory publish 42\u001b[0m");
   });
 });
 

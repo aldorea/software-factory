@@ -50,6 +50,17 @@ describe("resumedLog", () => {
   });
 });
 
+describe("resumedLog and a publication that failed", () => {
+  it("should not carry the failure of the paused run into the continued one, because the new run publishes again", () => {
+    const failure = { phase: "integration-push" as const, message: "timed out", at: NOW.toISOString() };
+    const previous = runRecord(0, [], { result: "paused", publicationFailure: failure });
+
+    const log = resumedLog({ fresh: fresh(), previous, merged: new Set(), now: NOW });
+
+    expect(log).not.toHaveProperty("publicationFailure");
+  });
+});
+
 describe("resumedLog and the idle threshold of the run", () => {
   it("should keep the attemptIdleTimeoutMs the paused run recorded, although the new start carries another", () => {
     const previous = runRecord(0, [], { result: "paused", attemptIdleTimeoutMs: 1_800_000 });

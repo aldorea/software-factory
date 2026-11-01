@@ -166,25 +166,24 @@ describe("a failure to publish the evidence branch", () => {
     return target;
   }
 
-  it("should be recorded in run.json, named in the pull request and keep it a draft, without losing the integration branch", async () => {
+  it("should be a publication failure in the phase of the evidence branch, with the run keeping its result, no pull request, and the integration branch already pushed", async () => {
     const target = await refusingRemote();
-    const { run } = harness(target, writes("png-of-the-greeting\n"));
+    const { run, notifier } = harness(target, writes("png-of-the-greeting\n"));
 
     const report = await run();
 
-    expect(report.result).toBe("draft");
+    expect(report.result).toBe("ready");
+    expect(report.publication).toMatchObject({ kind: "failed", phase: "evidence-push" });
     expect(report.log.evidence?.branch).toBe(EVIDENCE_BRANCH);
-    expect(report.log.evidence?.failure).toContain("evidence refused");
-    const body = target.github.pullRequests[0]?.body ?? "";
-    expect(target.github.pullRequests[0]?.draft).toBe(true);
-    expect(body).toContain("Draft: the attachments of the human criteria were not published:");
-    expect(body).toContain(`The attachments could not be published to \`${EVIDENCE_BRANCH}\``);
-    expect(body).toContain(`.factory/logs/${report.log.runId}/attachments/A2/A2.png`);
-    expect(body).not.toContain("/blob/");
+    expect(report.log.publicationFailure).toMatchObject({ phase: "evidence-push", message: expect.stringContaining("evidence refused") });
+    expect(report.log.pullRequest).toBeUndefined();
+    expect(target.github.pullRequests).toEqual([]);
+    expect(notifier.sent.map((sent) => sent.message)).toEqual(["Not published: Greeting → factory publish 42"]);
     expect(await git(target.remoteDir, "rev-parse", BRANCH)).toBe(await git(target.repoDir, "rev-parse", BRANCH));
     expect(await git(target.remoteDir, "branch", "--list", EVIDENCE_BRANCH)).toBe("");
     const saved = JSON.parse(await readFile(report.runLogPath, "utf8"));
-    expect(saved.evidence.failure).toContain("evidence refused");
+    expect(saved.result).toBe("ready");
+    expect(saved.publicationFailure.message).toContain("evidence refused");
   });
 
   it("should add a commit on top of the unpushed one when the next run publishes again", async () => {
@@ -197,21 +196,21 @@ describe("a failure to publish the evidence branch", () => {
 
     const report = await second.run();
 
-    expect(report.log.evidence?.failure).toBeUndefined();
+    expect(report.log.publicationFailure).toBeUndefined();
     expect(report.result).toBe("ready");
     expect((await git(target.remoteDir, "rev-list", "--count", EVIDENCE_BRANCH))).toBe("2");
   });
 
-  it("should be recorded when the address of the repository cannot be read, with the commit already pushed", async () => {
+  it("should be a publication failure when the address of the repository cannot be read, with the commit already pushed", async () => {
     const target = await withAttachments();
     target.github.repositoryUrlFailure = "gh is not logged in";
     const { run } = harness(target, writes("png-of-the-greeting\n"));
 
     const report = await run();
 
-    expect(report.result).toBe("draft");
-    expect(report.log.evidence).toMatchObject({ branch: EVIDENCE_BRANCH, failure: "gh is not logged in" });
-    expect(target.github.pullRequests[0]?.body).toContain("gh is not logged in");
+    expect(report.result).toBe("ready");
+    expect(report.log.publicationFailure).toMatchObject({ phase: "evidence-push", message: "gh is not logged in" });
+    expect(target.github.pullRequests).toEqual([]);
     expect(await git(target.remoteDir, "branch", "--list", EVIDENCE_BRANCH)).toContain(EVIDENCE_BRANCH);
   });
 });
@@ -226,7 +225,7 @@ describe("the push destination", () => {
 
     const report = await run();
 
-    expect(report.log.evidence?.failure).toBeUndefined();
+    expect(report.log.publicationFailure).toBeUndefined();
     expect(await git(target.remoteDir, "rev-parse", BRANCH)).toBe(await git(target.repoDir, "rev-parse", BRANCH));
     expect(await git(target.remoteDir, "rev-parse", EVIDENCE_BRANCH)).toBe(report.log.evidence?.commit);
     expect(await git(target.repoDir, "remote", "get-url", "origin")).toBe(unreachable);

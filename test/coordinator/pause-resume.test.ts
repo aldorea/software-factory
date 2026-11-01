@@ -76,7 +76,7 @@ describe("factory run at the plan limit", () => {
     expect(body).toContain("the plan limit of claude-code was reached: 5-hour limit reached");
     expect(body).toContain(`It resets at ${RESETS_AT.toISOString()}`);
     expect(notifier.sent[0]?.message).toContain(`resets at ${RESETS_AT.toISOString()}`);
-    expect(notifier.sent[0]?.url).toBe(report.pullRequest.url);
+    expect(notifier.sent[0]?.url).toBe("https://github.test/pull/100");
   });
 
   it("should let a running worker finish its attempt but start no new attempt or worker once the run pauses", async () => {

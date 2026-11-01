@@ -146,7 +146,14 @@ export interface EvidenceBranchRecord {
   branch: string;
   commit?: string;
   repositoryUrl?: string;
-  failure?: string;
+}
+
+export type PublicationPhase = "integration-push" | "evidence-push" | "pull-request";
+
+export interface PublicationFailureRecord {
+  phase: PublicationPhase;
+  message: string;
+  at: string;
 }
 
 export interface PullRequestRecord {
@@ -231,6 +238,7 @@ export interface RunLog {
   block?: RunBlockRecord;
   evidence?: EvidenceBranchRecord;
   pullRequest?: PullRequestRecord;
+  publicationFailure?: PublicationFailureRecord;
 }
 
 export type ParsedRunLog = { ok: true; log: RunLog } | { ok: false; problem: string };
