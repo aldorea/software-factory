@@ -176,6 +176,34 @@ describe("readiness of factory run", () => {
   });
 });
 
+describe("readiness of factory publish", () => {
+  it("should pass with only gh and the push, and ask for no Docker, worker image or credential, because publish launches no agent", () => {
+    const broken = facts({ probes: { docker: "Docker is not running", workerImage: "worker:dev not built" }, roles: {}, credentials: {} });
+
+    expect(failures("publish", broken)).toEqual([]);
+    expect(readiness("publish", broken).map((result) => result.text)).toEqual([
+      "gh is signed in",
+      "the GitHub repo of origin is reachable with the gh session",
+    ]);
+  });
+
+  it("should fail with gh auth status when the GitHub repo of origin cannot be reached with the gh session", () => {
+    const problem = "cannot reach github.com/aldorea/askwell with the gh session";
+
+    expect(failures("publish", facts({ probes: { push: problem } }))).toEqual([{ kind: "fail", text: problem, command: "gh auth status" }]);
+  });
+
+  it("should fail with gh auth login when gh has no session, without the push check", () => {
+    const given = facts({ probes: { gh: "gh is not signed in", push: "cannot reach github.com/a/b with the gh session" } });
+
+    expect(failures("publish", given)).toEqual([{ kind: "fail", text: "gh is not signed in", command: "gh auth login" }]);
+  });
+
+  it("should need only the gh and push probes, so that publish never reads the Docker daemon", () => {
+    expect(neededProbes("publish").sort()).toEqual(["gh", "push"]);
+  });
+});
+
 describe("readiness results", () => {
   it("should report a passed check as ok, so that a doctor can list what is fine", () => {
     expect(readiness("refine", READY).map((result) => result.kind)).toEqual(["ok", "ok", "ok"]);
