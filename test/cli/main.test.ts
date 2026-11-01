@@ -17,7 +17,7 @@ import type { ActivityEvent } from "../../src/workers/types.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { writeRunningRun } from "../coordinator/running-run.ts";
 import { FakeClock } from "../fakes/clock.ts";
-import { FakeGitHub } from "../fakes/github.ts";
+import { FakeGitHub, originOf } from "../fakes/github.ts";
 import { FakeImageDocker } from "../fakes/image-docker.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
@@ -102,7 +102,7 @@ async function mainRepo(): Promise<string> {
 
 function cli(
   cwd: string,
-  github: GitHub = new FakeGitHub([{ number: 42, title: "x", body: issueBody }]),
+  github: GitHub = new FakeGitHub([{ number: 42, title: "x", body: issueBody }], originOf(cwd)),
   script?: AttemptScript,
 ) {
   const out: string[] = [];
@@ -906,7 +906,7 @@ describe("factory CLI: the default branch of the target repo", () => {
     await bareRemote(repoDir, "trunk");
     await git(repoDir, "branch", "trunk");
     await git(repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk");
-    const github = new FakeGitHub([{ number: 42, title: "x", body: issueBody }]);
+    const github = new FakeGitHub([{ number: 42, title: "x", body: issueBody }], originOf(repoDir));
     const { env } = cli(repoDir, github);
     expect(await main(["approve", "42"], env)).toBe(0);
 

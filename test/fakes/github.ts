@@ -1,4 +1,13 @@
-import type { GitHub, Issue, NewPullRequest, PullRequest, PullRequestUpdate } from "../../src/github/github.ts";
+import { execFileSync } from "node:child_process";
+import type { GitHub, Issue, NewPullRequest, PullRequest, PullRequestUpdate, PushDestination } from "../../src/github/github.ts";
+
+export function originOf(repoDir: string): string | undefined {
+  try {
+    return execFileSync("git", ["-C", repoDir, "remote", "get-url", "origin"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return undefined;
+  }
+}
 
 export interface FakePullRequest extends PullRequest {
   head: string;
@@ -11,8 +20,16 @@ export class FakeGitHub implements GitHub {
   readonly issues = new Map<number, Issue>();
   readonly pullRequests: FakePullRequest[] = [];
 
-  constructor(issues: Issue[] = []) {
+  remote: string | undefined;
+
+  constructor(issues: Issue[] = [], remote?: string) {
     for (const issue of issues) this.issues.set(issue.number, issue);
+    this.remote = remote;
+  }
+
+  async pushDestination(): Promise<PushDestination> {
+    if (this.remote === undefined) throw new Error("FakeGitHub has no bare repo to push to");
+    return { url: this.remote, gitArgs: [] };
   }
 
   async readIssue(issue: number): Promise<Issue> {

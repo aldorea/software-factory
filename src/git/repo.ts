@@ -101,6 +101,3 @@ export async function deleteBranch(repoDir: string, branch: string): Promise<voi
   await execOk("git", ["-C", repoDir, "branch", "-D", branch]);
 }
 
-export async function pushBranch(repoDir: string, remote: string, branch: string): Promise<void> {
-  await execOk("git", ["-C", repoDir, "push", "-q", remote, `refs/heads/${branch}:refs/heads/${branch}`]);
-}

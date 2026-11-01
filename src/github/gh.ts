@@ -1,6 +1,6 @@
 import type { ExecResult } from "../workers/types.ts";
 import { exec } from "../workers/sh.ts";
-import type { GitHub, Issue, NewPullRequest, PullRequest, PullRequestUpdate } from "./github.ts";
+import type { GitHub, Issue, NewPullRequest, PullRequest, PullRequestUpdate, PushDestination } from "./github.ts";
 
 export interface GhOptions {
   repoDir: string;
@@ -66,6 +66,13 @@ export function ghGitHub(options: GhOptions): GitHub {
     },
     async repositoryUrl(): Promise<string> {
       return (JSON.parse(await gh(["repo", "view", "--json", "url"])) as { url: string }).url;
+    },
+    async pushDestination(): Promise<PushDestination> {
+      const { nameWithOwner } = JSON.parse(await gh(["repo", "view", "--json", "nameWithOwner"])) as { nameWithOwner: string };
+      return {
+        url: `https://github.com/${nameWithOwner}.git`,
+        gitArgs: ["-c", "credential.helper=", "-c", `credential.helper=!${command} auth git-credential`],
+      };
     },
     async findPullRequest(head: string, base: string): Promise<PullRequest | null> {
       const found = JSON.parse(

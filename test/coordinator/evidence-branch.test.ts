@@ -215,3 +215,21 @@ describe("a failure to publish the evidence branch", () => {
     expect(await git(target.remoteDir, "branch", "--list", EVIDENCE_BRANCH)).toContain(EVIDENCE_BRANCH);
   });
 });
+
+describe("the push destination", () => {
+  it("should be the one of the GitHub port for the integration branch and the evidence branch, whatever origin says, and leave origin and the git configuration unchanged", async () => {
+    const target = await withAttachments();
+    const unreachable = "git@github.com:aldorea/unreachable.git";
+    await git(target.repoDir, "remote", "set-url", "origin", unreachable);
+    const configBefore = await readFile(join(target.repoDir, ".git", "config"), "utf8");
+    const { run } = harness(target, writes("png-of-the-greeting\n"));
+
+    const report = await run();
+
+    expect(report.log.evidence?.failure).toBeUndefined();
+    expect(await git(target.remoteDir, "rev-parse", BRANCH)).toBe(await git(target.repoDir, "rev-parse", BRANCH));
+    expect(await git(target.remoteDir, "rev-parse", EVIDENCE_BRANCH)).toBe(report.log.evidence?.commit);
+    expect(await git(target.repoDir, "remote", "get-url", "origin")).toBe(unreachable);
+    expect(await readFile(join(target.repoDir, ".git", "config"), "utf8")).toBe(configBefore);
+  });
+});

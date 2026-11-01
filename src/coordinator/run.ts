@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { pushBranch, REMOTE } from "../git/repo.ts";
+import { pushBranch } from "../git/transport.ts";
 import type { PullRequest } from "../github/github.ts";
 import { emptyUsage } from "../workers/agent-adapter.ts";
 import { WorkerLayerError } from "../workers/failures.ts";
@@ -128,7 +128,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
   log.endedAt = ports.clock.now().toISOString();
   await save();
 
-  await pushBranch(request.repoDir, REMOTE, branch);
+  await pushBranch(request.repoDir, await ports.github.pushDestination(), branch);
   const text = renderPullRequest(issue, log);
   const draft = log.result !== "ready";
   const existing = await ports.github.findPullRequest(branch, defaultBranch);
@@ -155,8 +155,9 @@ async function publishEvidenceBranch(context: RunContext): Promise<void> {
   const record: EvidenceBranchRecord = { branch: evidenceBranchName(request.issue) };
   log.evidence = record;
   try {
+    const destination = await context.ports.github.pushDestination();
     record.commit = await context.gitLock.exclusive(() =>
-      publishEvidence({ repoDir: request.repoDir, remote: REMOTE, issue: request.issue, runId: log.runId, files }),
+      publishEvidence({ repoDir: request.repoDir, destination, issue: request.issue, runId: log.runId, files }),
     );
     record.repositoryUrl = await context.ports.github.repositoryUrl();
   } catch (error) {
