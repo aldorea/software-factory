@@ -123,6 +123,7 @@ function cli(
     gh: async () => null,
     claudeSession: async () => null,
     originHead: async () => null,
+    push: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;

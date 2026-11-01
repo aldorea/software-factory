@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { fetchBranch, pushBranch, pushBranchAttempt } from "../../src/git/transport.ts";
+import { fetchBranch, lsRemote, pushBranch, pushBranchAttempt } from "../../src/git/transport.ts";
 import type { PushDestination } from "../../src/github/github.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { tempDirs } from "../temp-dirs.ts";
@@ -135,5 +135,79 @@ describe("fetchBranch", () => {
     expect((await execOk("git", ["-C", repo, "rev-parse", "FETCH_HEAD"])).trim()).toBe(
       (await execOk("git", ["-C", repo, "rev-parse", "main"])).trim(),
     );
+  });
+});
+
+describe("lsRemote", () => {
+  it("should list the refs of the destination whatever the remotes of the repo say", async () => {
+    const repo = await repoWithBranch();
+    const bare = await bareRepo();
+    await execOk("git", ["-C", repo, "remote", "add", "origin", "/nonexistent/origin.git"]);
+    const destination: PushDestination = { url: bare, gitArgs: [] };
+    await pushBranch(repo, destination, "main");
+
+    const listed = await lsRemote(repo, destination);
+
+    expect(listed.exitCode).toBe(0);
+    expect(listed.stdout).toContain((await execOk("git", ["-C", repo, "rev-parse", "main"])).trim());
+  });
+
+  it("should exit 0 for an empty destination, because reaching it is what the check asks", async () => {
+    const repo = await repoWithBranch();
+
+    expect((await lsRemote(repo, { url: await bareRepo(), gitArgs: [] })).exitCode).toBe(0);
+  });
+
+  it("should fail at once with terminal prompts disabled when the server asks for a credential nobody gave, instead of waiting for input", async () => {
+    const repo = await repoWithBranch();
+    const url = await unauthorizedServer();
+    const started = Date.now();
+
+    const listed = await lsRemote(repo, { url, gitArgs: ["-c", "credential.helper="] });
+
+    expect(listed.exitCode).not.toBe(0);
+    expect(listed.stderr).toContain("terminal prompts disabled");
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it("should answer the credential request with the helper of the destination alone, with GIT_TERMINAL_PROMPT=0 and GCM_INTERACTIVE=never in its environment", async () => {
+    const repo = await repoWithBranch();
+    const scripts = await temp.make("transport-ls-helpers-");
+    const record = join(scripts, "env.txt");
+    const staleRecord = join(scripts, "stale.txt");
+    const helper = await script(
+      scripts,
+      "gh-helper.sh",
+      `if [ "$1" = get ]; then\n  echo "$GIT_TERMINAL_PROMPT $GCM_INTERACTIVE" > ${record}\n  echo username=gh-user\n  echo password=gh-token\nfi`,
+    );
+    const stale = await script(
+      scripts,
+      "stale-helper.sh",
+      `if [ "$1" = get ]; then\n  echo called > ${staleRecord}\n  echo username=stale\n  echo password=stale\nfi`,
+    );
+    await execOk("git", ["-C", repo, "config", "credential.helper", `!${stale}`]);
+    const seen: IncomingMessage[] = [];
+    const url = await unauthorizedServer(seen);
+
+    await lsRemote(repo, { url, gitArgs: ["-c", "credential.helper=", "-c", `credential.helper=!${helper}`] });
+
+    expect(await readFile(record, "utf8")).toBe("0 never\n");
+    await expect(readFile(staleRecord, "utf8")).rejects.toThrow(/ENOENT/);
+    const authorization = seen.map((request) => request.headers.authorization).find((value) => value !== undefined);
+    expect(authorization).toBe(`Basic ${Buffer.from("gh-user:gh-token").toString("base64")}`);
+  });
+
+  it("should stop waiting for a server that never answers after the timeout and report a failure", async () => {
+    const repo = await repoWithBranch();
+    const silent = createServer(() => undefined);
+    servers.push(silent);
+    await new Promise<void>((ready) => silent.listen(0, "127.0.0.1", ready));
+    const url = `http://127.0.0.1:${(silent.address() as AddressInfo).port}/aldorea/repo.git`;
+    const started = Date.now();
+
+    const listed = await lsRemote(repo, { url, gitArgs: [] }, { timeoutMs: 500 });
+
+    expect(listed.exitCode).not.toBe(0);
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 });

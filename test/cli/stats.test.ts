@@ -32,6 +32,7 @@ function cli(cwd: string) {
     gh: async () => null,
     claudeSession: async () => null,
     originHead: async () => null,
+    push: async () => null,
     launch: async () => 0,
     images: new FakeImageDocker(),
     signal: new AbortController().signal,

@@ -56,6 +56,7 @@ export interface CliEnv {
   gh(): Promise<string | null>;
   claudeSession(): Promise<string | null>;
   originHead(repoDir: string): Promise<string | null>;
+  push(repoDir: string): Promise<string | null>;
   ask?: (
     entries: RoleEntry[],
     annotate: Annotate,

@@ -10,6 +10,7 @@ export function envProbes(repoDir: string, env: CliEnv, image: string | null = n
     gh: () => env.gh(),
     claudeSession: () => env.claudeSession(),
     originHead: () => env.originHead(repoDir),
+    push: () => env.push(repoDir),
     workerImage: () => workerImageProblem(image, env.images),
     node: () => nodeProblemOf(env.factoryRoot, process.versions.node),
     config: () => loadConfig(repoDir).then(() => null, (error: unknown) => (error as Error).message),

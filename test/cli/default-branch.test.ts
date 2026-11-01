@@ -108,6 +108,7 @@ function cli(cwd: string) {
     gh: async () => null,
     claudeSession: async () => null,
     originHead: (repoDir) => originHeadProblem(repoDir),
+    push: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
