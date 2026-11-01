@@ -67,6 +67,7 @@ async function session(options: Session = {}) {
     gh: async () => null,
     claudeSession: async () => null,
     originHead: async () => null,
+    push: async () => null,
     images: new FakeImageDocker(),
     launch: async () => 0,
     signal: new AbortController().signal,

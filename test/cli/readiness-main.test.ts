@@ -8,6 +8,7 @@ import type { AuthInput } from "../../src/cli/auth.ts";
 import type { MenuCredentials, RoleEntry } from "../../src/cli/role-menu.ts";
 import type { RoleChoice } from "../../src/config/config.ts";
 import { originHeadProblem } from "../../src/git/repo.ts";
+import { pushProblem } from "../../src/git/push-probe.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
@@ -95,6 +96,7 @@ function cli(cwd: string, overrides: Partial<CliEnv> = {}) {
     gh: async () => null,
     claudeSession: async () => null,
     originHead: (repoDir) => originHeadProblem(repoDir),
+    push: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
@@ -260,6 +262,36 @@ describe("readiness when factory run starts", () => {
       "✗ CLAUDE_CODE_OAUTH_TOKEN not set; roles.workers and roles.tester use claude-code → factory auth claude-code",
       "✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode",
     ]);
+  });
+
+  it("should stop factory run before any worker when the GitHub repo of origin cannot be reached, naming the fix", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err, runner } = cli(dir, { push: async () => "cannot reach github.com/aldorea/askwell with the gh session" });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err).toEqual(["✗ cannot reach github.com/aldorea/askwell with the gh session → gh auth status"]);
+    expect(runner.workers).toEqual([]);
+  });
+
+  it("should stop factory run with the reason when origin is not a GitHub repo, with no Docker and no subscription", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err, runner } = cli(dir, { push: (repoDir) => pushProblem(repoDir, new FakeGitHub([])) });
+
+    expect(await main(["run", "42"], env)).toBe(1);
+
+    expect(err).toHaveLength(1);
+    expect(err[0]).toMatch(/^✗ origin is not a GitHub repo: \/.* → gh auth status$/);
+    expect(runner.workers).toEqual([]);
+  });
+
+  it("should not check the push of factory refine, which pushes nothing", async () => {
+    const dir = await repo({ originHead: true });
+    const { env, err } = cli(dir, { push: async () => "cannot reach github.com/aldorea/askwell with the gh session" });
+
+    await main(["refine", "42", ...CLAUDE_REFINEMENT], env);
+
+    expect(err).toEqual([]);
   });
 
   it("should check again after the menu, so that an agent picked there with no credential stops the run before any worker", async () => {

@@ -48,6 +48,7 @@ function cli(cwd: string, images: FakeImageDocker, overrides: Partial<CliEnv> = 
     gh: async () => null,
     claudeSession: async () => null,
     originHead: async () => null,
+    push: async () => null,
     launch: async () => 0,
     images,
     signal: new AbortController().signal,

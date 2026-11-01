@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readiness, readinessLines, type ReadinessFacts } from "../../src/cli/readiness.ts";
 
 const READY: ReadinessFacts = {
-  probes: { docker: null, gh: null, claudeSession: null, originHead: null, workerImage: null, node: null, config: null },
+  probes: { docker: null, gh: null, claudeSession: null, originHead: null, workerImage: null, push: null, node: null, config: null },
   roles: {
     workers: { agent: "claude-code", model: "sonnet" },
     verifier: { agent: "claude-code", model: "opus" },
@@ -27,6 +27,7 @@ describe("readiness of factory doctor", () => {
       { kind: "ok", text: "Node is at the floor of engines in package.json" },
       { kind: "ok", text: "Docker is running" },
       { kind: "ok", text: "gh is signed in" },
+      { kind: "ok", text: "the GitHub repo of origin is reachable with the gh session" },
       { kind: "ok", text: "the Claude Code session of the host is signed in" },
       { kind: "ok", text: ".factory/config.ts loads" },
       { kind: "ok", text: ".factory/.env has every value of .factory/.env.example" },
@@ -164,6 +165,7 @@ describe("readiness of factory doctor", () => {
     expect(readiness("run", READY).map((result) => result.text)).toEqual([
       "Docker is running",
       "gh is signed in",
+      "the GitHub repo of origin is reachable with the gh session",
       "CLAUDE_CODE_OAUTH_TOKEN is set for claude-code",
       "the worker image is built from the current base image",
     ]);

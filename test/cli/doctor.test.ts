@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
 import { originHeadProblem } from "../../src/git/repo.ts";
+import { pushProblem } from "../../src/git/push-probe.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
@@ -82,6 +83,7 @@ async function cli(cwd: string, overrides: Partial<CliEnv> = {}) {
     gh: async () => null,
     claudeSession: async () => null,
     originHead: (repoDir) => originHeadProblem(repoDir),
+    push: async () => null,
     launch: async (launch) => {
       launches.push(launch);
       return 0;
@@ -112,6 +114,7 @@ describe("factory doctor", () => {
       "✓ Node is at the floor of engines in package.json",
       "✓ Docker is running",
       "✓ gh is signed in",
+      "✓ the GitHub repo of origin is reachable with the gh session",
       "✓ the Claude Code session of the host is signed in",
       "✓ .factory/config.ts loads",
       "✓ .factory/.env has every value of .factory/.env.example",
@@ -146,7 +149,29 @@ describe("factory doctor", () => {
       "✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode",
       "✗ worker:dev built from an older base image → factory image",
     ]);
-    expect(out.filter((line) => line.startsWith("✓"))).toHaveLength(8);
+    expect(out.filter((line) => line.startsWith("✓"))).toHaveLength(9);
+  });
+
+  it("should list the push problem with its fix when the GitHub repo of origin cannot be reached", async () => {
+    const dir = await repo();
+    const { env, out } = await cli(dir, { push: async () => "cannot reach github.com/aldorea/askwell with the gh session" });
+
+    expect(await main(["doctor"], env)).toBe(1);
+
+    expect(out.filter((line) => line.startsWith("✗"))).toEqual([
+      "✗ cannot reach github.com/aldorea/askwell with the gh session → gh auth status",
+    ]);
+  });
+
+  it("should fail closed with the reason when origin is not a GitHub repo", async () => {
+    const dir = await repo();
+    const { env, out } = await cli(dir, { push: (repoDir) => pushProblem(repoDir, new FakeGitHub([])) });
+
+    expect(await main(["doctor"], env)).toBe(1);
+
+    const failed = out.filter((line) => line.startsWith("✗"));
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatch(/^✗ origin is not a GitHub repo: \/.* → gh auth status$/);
   });
 
   it("should not check the credential of the refinement, because it runs on the host session", async () => {
