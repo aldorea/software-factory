@@ -1,10 +1,11 @@
+import { spawnSync } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { classifyFailure } from "../../src/coordinator/retry.ts";
-import { fetchBranch, lsRemote, pushBranch, pushBranchAttempt } from "../../src/git/transport.ts";
+import { fetchBranch, lsRemote, pushBranchAttempt } from "../../src/git/transport.ts";
 import type { PushDestination } from "../../src/github/github.ts";
 import { execOk } from "../../src/workers/sh.ts";
 import { tempDirs } from "../temp-dirs.ts";
@@ -43,6 +44,32 @@ async function unauthorizedServer(seen: IncomingMessage[] = []): Promise<string>
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}/aldorea/repo.git`;
 }
 
+async function refusingPostServer(bare: string, status: number): Promise<string> {
+  const server = createServer((request, response) => {
+    if (request.method === "GET") {
+      const advertised = spawnSync("git", ["receive-pack", "--stateless-rpc", "--advertise-refs", bare]).stdout;
+      const service = "# service=git-receive-pack\n";
+      const header = `${(service.length + 4).toString(16).padStart(4, "0")}${service}0000`;
+      response.writeHead(200, { "Content-Type": "application/x-git-receive-pack-advertisement" });
+      response.end(Buffer.concat([Buffer.from(header), advertised]));
+      return;
+    }
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(status);
+      response.end();
+    });
+  });
+  servers.push(server);
+  await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}/aldorea/repo.git`;
+}
+
+async function pushed(repo: string, destination: PushDestination, branch: string): Promise<void> {
+  const attempt = await pushBranchAttempt(repo, destination, branch);
+  expect(attempt.exitCode).toBe(0);
+}
+
 async function script(dir: string, name: string, body: string): Promise<string> {
   const path = join(dir, name);
   await writeFile(path, `#!/bin/sh\n${body}\n`);
@@ -50,14 +77,14 @@ async function script(dir: string, name: string, body: string): Promise<string> 
   return path;
 }
 
-describe("pushBranch", () => {
+describe("pushBranchAttempt", () => {
   it("should push the branch to the url of the destination, whatever the remotes of the repo say", async () => {
     const repo = await repoWithBranch();
     const bare = await bareRepo();
     await execOk("git", ["-C", repo, "remote", "add", "origin", "/nonexistent/origin.git"]);
     const destination: PushDestination = { url: bare, gitArgs: [] };
 
-    await pushBranch(repo, destination, "main");
+    await pushed(repo, destination, "main");
 
     expect(await execOk("git", ["-C", bare, "rev-parse", "main"])).toBe(await execOk("git", ["-C", repo, "rev-parse", "main"]));
   });
@@ -68,7 +95,7 @@ describe("pushBranch", () => {
     await execOk("git", ["-C", repo, "remote", "add", "origin", "git@github.com:aldorea/repo.git"]);
     const before = await readFile(join(repo, ".git", "config"), "utf8");
 
-    await pushBranch(repo, { url: bare, gitArgs: ["-c", "credential.helper="] }, "main");
+    await pushed(repo, { url: bare, gitArgs: ["-c", "credential.helper="] }, "main");
 
     expect(await readFile(join(repo, ".git", "config"), "utf8")).toBe(before);
   });
@@ -76,9 +103,10 @@ describe("pushBranch", () => {
   it("should fail with the reason of git when the push is rejected", async () => {
     const repo = await repoWithBranch();
 
-    await expect(pushBranch(repo, { url: "/nonexistent/origin.git", gitArgs: [] }, "main")).rejects.toThrow(
-      /does not appear to be a git repository/,
-    );
+    const attempt = await pushBranchAttempt(repo, { url: "/nonexistent/origin.git", gitArgs: [] }, "main");
+
+    expect(attempt.exitCode).not.toBe(0);
+    expect(attempt.stderr).toMatch(/does not appear to be a git repository/);
   });
 
   it("should fail at once with terminal prompts disabled when the server asks for a credential nobody gave, instead of waiting for input", async () => {
@@ -144,6 +172,19 @@ describe("the classification of a failed push", () => {
     expect(classifyFailure(attempt.stderr, attempt.exitCode)).toBe("other");
   });
 
+  it("should call a push that the server refuses with HTTP 400 another failure, even though git ends with the remote end hung up unexpectedly", async () => {
+    const repo = await repoWithBranch();
+    const bare = await bareRepo();
+    const url = await refusingPostServer(bare, 400);
+
+    const attempt = await pushBranchAttempt(repo, { url, gitArgs: [] }, "main");
+
+    expect(attempt.exitCode).not.toBe(0);
+    expect(attempt.stderr).toContain("HTTP 400");
+    expect(attempt.stderr).toContain("the remote end hung up unexpectedly");
+    expect(classifyFailure(attempt.stderr, attempt.exitCode)).toBe("other");
+  });
+
   it("should call a push that a hook of the remote refuses another failure", async () => {
     const repo = await repoWithBranch();
     const bare = await bareRepo();
@@ -161,16 +202,38 @@ describe("fetchBranch", () => {
     const repo = await repoWithBranch();
     const bare = await bareRepo();
     const destination: PushDestination = { url: bare, gitArgs: [] };
-    await pushBranch(repo, destination, "main");
+    await pushed(repo, destination, "main");
 
     const missing = await fetchBranch(repo, destination, "absent");
     const found = await fetchBranch(repo, destination, "main");
 
-    expect(found).toBe(true);
-    expect(missing).toBe(false);
-    expect((await execOk("git", ["-C", repo, "rev-parse", "FETCH_HEAD"])).trim()).toBe(
-      (await execOk("git", ["-C", repo, "rev-parse", "main"])).trim(),
-    );
+    const tip = (await execOk("git", ["-C", repo, "rev-parse", "main"])).trim();
+    expect(found).toEqual({ kind: "found", commit: tip });
+    expect(missing).toEqual({ kind: "absent" });
+    expect((await execOk("git", ["-C", repo, "rev-parse", "FETCH_HEAD"])).trim()).toBe(tip);
+  });
+
+  it("should say that the fetch failed, with the real stderr of git, when the destination cannot be reached, and not that the branch is absent", async () => {
+    const repo = await repoWithBranch();
+    const closed = createServer();
+    await new Promise<void>((ready) => closed.listen(0, "127.0.0.1", ready));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise((done) => closed.close(done));
+
+    const outcome = await fetchBranch(repo, { url: `http://127.0.0.1:${port}/aldorea/repo.git`, gitArgs: [] }, "main");
+
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind !== "failed") return;
+    expect(outcome.exitCode).not.toBe(0);
+    expect(classifyFailure(outcome.stderr, outcome.exitCode)).toBe("network");
+  });
+
+  it("should say that the fetch failed when the destination is not a repository, and not that the branch is absent", async () => {
+    const repo = await repoWithBranch();
+
+    const outcome = await fetchBranch(repo, { url: "/nonexistent/origin.git", gitArgs: [] }, "main");
+
+    expect(outcome).toMatchObject({ kind: "failed", stderr: expect.stringMatching(/does not appear to be a git repository/) });
   });
 });
 
@@ -180,7 +243,7 @@ describe("lsRemote", () => {
     const bare = await bareRepo();
     await execOk("git", ["-C", repo, "remote", "add", "origin", "/nonexistent/origin.git"]);
     const destination: PushDestination = { url: bare, gitArgs: [] };
-    await pushBranch(repo, destination, "main");
+    await pushed(repo, destination, "main");
 
     const listed = await lsRemote(repo, destination);
 

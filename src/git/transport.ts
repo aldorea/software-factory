@@ -1,10 +1,15 @@
 import type { PushDestination } from "../github/github.ts";
-import { exec } from "../workers/sh.ts";
+import { exec, execOk } from "../workers/sh.ts";
 import type { ExecResult } from "../workers/types.ts";
 
 export const NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" };
 
 const LS_REMOTE_TIMEOUT_MS = 30_000;
+
+export type FetchOutcome =
+  | { kind: "found"; commit: string }
+  | { kind: "absent" }
+  | { kind: "failed"; exitCode: number; stderr: string };
 
 export async function pushBranchAttempt(repoDir: string, destination: PushDestination, branch: string): Promise<ExecResult> {
   return exec(
@@ -12,11 +17,6 @@ export async function pushBranchAttempt(repoDir: string, destination: PushDestin
     ["-C", repoDir, ...destination.gitArgs, "push", "-q", destination.url, `refs/heads/${branch}:refs/heads/${branch}`],
     { env: NO_PROMPT_ENV },
   );
-}
-
-export async function pushBranch(repoDir: string, destination: PushDestination, branch: string): Promise<void> {
-  const pushed = await pushBranchAttempt(repoDir, destination, branch);
-  if (pushed.exitCode !== 0) throw new Error(`git push ${branch} failed (${pushed.exitCode}): ${pushed.stderr.trim()}`);
 }
 
 export async function lsRemote(
@@ -34,11 +34,17 @@ export async function lsRemote(
   }
 }
 
-export async function fetchBranch(repoDir: string, destination: PushDestination, branch: string): Promise<boolean> {
-  const fetched = await exec(
-    "git",
-    ["-C", repoDir, ...destination.gitArgs, "fetch", "--quiet", destination.url, `refs/heads/${branch}`],
-    { env: NO_PROMPT_ENV },
-  );
-  return fetched.exitCode === 0;
+export async function fetchBranch(repoDir: string, destination: PushDestination, branch: string): Promise<FetchOutcome> {
+  const ref = `refs/heads/${branch}`;
+  const listed = await exec("git", ["-C", repoDir, ...destination.gitArgs, "ls-remote", destination.url, ref], {
+    env: NO_PROMPT_ENV,
+  });
+  if (listed.exitCode !== 0) return { kind: "failed", exitCode: listed.exitCode, stderr: listed.stderr };
+  const present = listed.stdout.split("\n").some((line) => line.split("\t")[1]?.trim() === ref);
+  if (!present) return { kind: "absent" };
+  const fetched = await exec("git", ["-C", repoDir, ...destination.gitArgs, "fetch", "--quiet", destination.url, ref], {
+    env: NO_PROMPT_ENV,
+  });
+  if (fetched.exitCode !== 0) return { kind: "failed", exitCode: fetched.exitCode, stderr: fetched.stderr };
+  return { kind: "found", commit: (await execOk("git", ["-C", repoDir, "rev-parse", "FETCH_HEAD"])).trim() };
 }

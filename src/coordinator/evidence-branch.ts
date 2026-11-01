@@ -1,8 +1,6 @@
 import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { fetchBranch } from "../git/transport.ts";
-import type { PushDestination } from "../github/github.ts";
 import { exec, execOk } from "../workers/sh.ts";
 
 export function evidenceBranchName(issue: number): string {
@@ -37,14 +35,14 @@ export function evidenceFiles(runId: string, runDir: string, criteria: Criterion
 
 export interface EvidencePublication {
   repoDir: string;
-  destination: PushDestination;
+  remoteTip: string | null;
   issue: number;
   runId: string;
   files: EvidenceFile[];
 }
 
 export async function commitEvidence(publication: EvidencePublication): Promise<string> {
-  const { repoDir, destination, issue, runId, files } = publication;
+  const { repoDir, remoteTip, issue, runId, files } = publication;
   const branch = evidenceBranchName(issue);
   const scratch = await mkdtemp(join(tmpdir(), "factory-evidence-"));
   try {
@@ -56,7 +54,7 @@ export async function commitEvidence(publication: EvidencePublication): Promise<
     }
     const gitDir = (await execOk("git", ["-C", repoDir, "rev-parse", "--absolute-git-dir"])).trim();
     const options = { cwd: stage, env: { GIT_INDEX_FILE: join(scratch, "index") } };
-    const parent = await parentCommit(repoDir, destination, branch);
+    const parent = await parentCommit(repoDir, remoteTip, branch);
     if (parent !== null) await execOk("git", ["--git-dir", gitDir, "read-tree", parent], options);
     await execOk("git", ["--git-dir", gitDir, "--work-tree", stage, "add", "--force", "--no-all", "--", "."], options);
     const tree = (await execOk("git", ["--git-dir", gitDir, "write-tree"], options)).trim();
@@ -74,10 +72,8 @@ export async function commitEvidence(publication: EvidencePublication): Promise<
   }
 }
 
-async function parentCommit(repoDir: string, destination: PushDestination, branch: string): Promise<string | null> {
+async function parentCommit(repoDir: string, remoteTip: string | null, branch: string): Promise<string | null> {
   const local = await exec("git", ["-C", repoDir, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`]);
-  const fetched = await fetchBranch(repoDir, destination, branch);
-  const remoteTip = fetched ? (await execOk("git", ["-C", repoDir, "rev-parse", "FETCH_HEAD"])).trim() : null;
   const localTip = local.exitCode === 0 ? local.stdout.trim() : null;
   if (localTip === null || remoteTip === null) return localTip ?? remoteTip;
   const ahead = await exec("git", ["-C", repoDir, "merge-base", "--is-ancestor", remoteTip, localTip]);

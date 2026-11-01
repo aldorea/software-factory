@@ -21,6 +21,8 @@ export class FakeGitHub implements GitHub {
   readonly pullRequests: FakePullRequest[] = [];
 
   remote: string | undefined;
+  gitArgs: string[] = [];
+  nextRemotes: string[] = [];
 
   constructor(issues: Issue[] = [], remote?: string) {
     for (const issue of issues) this.issues.set(issue.number, issue);
@@ -28,8 +30,9 @@ export class FakeGitHub implements GitHub {
   }
 
   async pushDestination(): Promise<PushDestination> {
-    if (this.remote === undefined) throw new Error("FakeGitHub has no bare repo to push to");
-    return { url: this.remote, gitArgs: [] };
+    const remote = this.nextRemotes.shift() ?? this.remote;
+    if (remote === undefined) throw new Error("FakeGitHub has no bare repo to push to");
+    return { url: remote, gitArgs: this.gitArgs };
   }
 
   async readIssue(issue: number): Promise<Issue> {

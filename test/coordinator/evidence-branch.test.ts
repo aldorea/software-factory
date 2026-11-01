@@ -201,6 +201,43 @@ describe("a failure to publish the evidence branch", () => {
     expect((await git(target.remoteDir, "rev-list", "--count", EVIDENCE_BRANCH))).toBe("2");
   });
 
+  it("should fail with the message of git, and build no orphan commit, when the evidence branch of the remote cannot be fetched, because a push of an unrelated commit would be refused as non-fast-forward", async () => {
+    const target = await withAttachments();
+    target.github.nextRemotes = [target.remoteDir];
+    target.github.remote = "/nonexistent/evidence.git";
+    const { run, waits } = harness(target, writes("png-of-the-greeting\n"));
+
+    const report = await run();
+
+    expect(report.result).toBe("ready");
+    expect(report.publication).toMatchObject({
+      kind: "failed",
+      phase: "evidence-push",
+      message: expect.stringContaining(`git fetch ${EVIDENCE_BRANCH} failed`),
+    });
+    expect(report.publication).not.toMatchObject({ message: expect.stringContaining("non-fast-forward") });
+    expect(waits).toEqual([]);
+    expect(await git(target.repoDir, "branch", "--list", EVIDENCE_BRANCH)).toBe("");
+    expect(target.github.pullRequests).toEqual([]);
+  });
+
+  it("should retry the fetch of the evidence branch when it fails on the network, and give up with the message of git after 5, 15 and 45 seconds", async () => {
+    const target = await withAttachments();
+    target.github.nextRemotes = [target.remoteDir];
+    target.github.remote = "http://127.0.0.1:1/aldorea/repo.git";
+    const { run, waits } = harness(target, writes("png-of-the-greeting\n"));
+
+    const report = await run();
+
+    expect(waits).toEqual([5_000, 15_000, 45_000]);
+    expect(report.publication).toMatchObject({
+      kind: "failed",
+      phase: "evidence-push",
+      message: expect.stringContaining(`git fetch ${EVIDENCE_BRANCH} failed`),
+    });
+    expect(await git(target.repoDir, "branch", "--list", EVIDENCE_BRANCH)).toBe("");
+  });
+
   it("should be a publication failure when the address of the repository cannot be read, with the commit already pushed", async () => {
     const target = await withAttachments();
     target.github.repositoryUrlFailure = "gh is not logged in";

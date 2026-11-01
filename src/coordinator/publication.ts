@@ -1,6 +1,5 @@
 import type { GitHub, Issue, PullRequest, PushDestination } from "../github/github.ts";
-import { pushBranchAttempt } from "../git/transport.ts";
-import type { ExecResult } from "../workers/types.ts";
+import { fetchBranch, pushBranchAttempt } from "../git/transport.ts";
 import { commitEvidence, evidenceBranchName, evidenceFiles } from "./evidence-branch.ts";
 import type { Clock, Notification } from "./ports.ts";
 import { renderPullRequest } from "./pull-request.ts";
@@ -24,9 +23,7 @@ export interface Publication {
   save(): Promise<void>;
 }
 
-export type StepOutcome<T = void> = Attempt<T>;
-
-export const WORKFLOW_SCOPE_FIX = "gh auth refresh -s workflow";
+const WORKFLOW_SCOPE_FIX = "gh auth refresh -s workflow";
 
 const PHASE_LABELS: Record<PublicationPhase, string> = {
   "integration-push": "the integration push",
@@ -72,8 +69,18 @@ export async function publishRun(publication: Publication): Promise<PublicationR
   return { kind: "published", pullRequest: pullRequest.value };
 }
 
+const DONE: Attempt<void> = { ok: true, value: undefined };
+
+async function guarded<T>(attempt: () => Promise<Attempt<T>>): Promise<Attempt<T>> {
+  try {
+    return await attempt();
+  } catch (error) {
+    return thrown(error);
+  }
+}
+
 function retrying<T>(publication: Publication, attempt: () => Promise<Attempt<T>>): Promise<Attempt<T>> {
-  return withRetries(attempt, {
+  return withRetries(() => guarded(attempt), {
     sleep: publication.sleep ?? sleepFor,
     onRetry: ({ retry, retries, waitMs, message }) =>
       publication.progress?.(`publication: retry ${retry} of ${retries} in ${waitMs / 1000}s: ${message.split("\n")[0]}`),
@@ -85,73 +92,71 @@ function thrown(error: unknown): Attempt<never> {
   return { ok: false, message, failure: classifyFailure(message, 1) };
 }
 
-function pushFailure(branch: string, pushed: ExecResult): Attempt<never> {
-  const stderr = pushed.stderr
+function gitFailure(action: string, failed: { exitCode: number; stderr: string }): Attempt<never> {
+  const stderr = failed.stderr
     .split("\n")
     .map((line) => line.trimEnd())
     .join("\n")
     .trim();
-  const message = `git push ${branch} failed (${pushed.exitCode}): ${stderr}`;
-  const lacksScope = /without `?workflow`? scope/i.test(pushed.stderr);
+  const message = `${action} failed (${failed.exitCode}): ${stderr}`;
+  const lacksScope = /without `?workflow`? scope/i.test(failed.stderr);
   return {
     ok: false,
     message: lacksScope ? `${message}\n→ ${WORKFLOW_SCOPE_FIX}` : message,
-    failure: classifyFailure(pushed.stderr, pushed.exitCode),
+    failure: classifyFailure(failed.stderr, failed.exitCode),
   };
 }
 
 async function pushAttempt(repoDir: string, destination: PushDestination, branch: string): Promise<Attempt<void>> {
   const pushed = await pushBranchAttempt(repoDir, destination, branch);
-  return pushed.exitCode === 0 ? { ok: true, value: undefined } : pushFailure(branch, pushed);
+  return pushed.exitCode === 0 ? DONE : gitFailure(`git push ${branch}`, pushed);
 }
 
-export function pushIntegrationBranch(publication: Publication): Promise<StepOutcome> {
+async function fetchAttempt(repoDir: string, destination: PushDestination, branch: string): Promise<Attempt<string | null>> {
+  const fetched = await fetchBranch(repoDir, destination, branch);
+  if (fetched.kind === "failed") return gitFailure(`git fetch ${branch}`, fetched);
+  return { ok: true, value: fetched.kind === "found" ? fetched.commit : null };
+}
+
+function pushIntegrationBranch(publication: Publication): Promise<Attempt<void>> {
   const { repoDir, github, log } = publication;
-  return retrying(publication, async () => {
-    try {
-      return await pushAttempt(repoDir, await github.pushDestination(), log.integrationBranch);
-    } catch (error) {
-      return thrown(error);
-    }
-  });
+  return retrying(publication, async () => pushAttempt(repoDir, await github.pushDestination(), log.integrationBranch));
 }
 
-export async function pushEvidenceBranch(publication: Publication): Promise<StepOutcome> {
+async function pushEvidenceBranch(publication: Publication): Promise<Attempt<void>> {
   const { repoDir, github, log, runDir, save } = publication;
   delete log.evidence;
   const tested = (log.verification?.tester?.verdicts ?? []).map((verdict) => ({ id: verdict.id, attachments: verdict.evidence }));
   const files = evidenceFiles(log.runId, runDir, [...(log.verification?.humanCriteria ?? []), ...tested]);
-  if (files.length === 0) return { ok: true, value: undefined };
+  if (files.length === 0) return DONE;
   const record: EvidenceBranchRecord = { branch: evidenceBranchName(log.issue) };
   log.evidence = record;
   try {
-    const destination = await github.pushDestination();
-    const commit = await commitEvidence({ repoDir, destination, issue: log.issue, runId: log.runId, files });
-    const pushed = await retrying(publication, () => pushAttempt(repoDir, destination, record.branch));
-    if (!pushed.ok) return pushed;
-    record.commit = commit;
-    record.repositoryUrl = await github.repositoryUrl();
-    return { ok: true, value: undefined };
-  } catch (error) {
-    return thrown(error);
+    return await guarded(async () => {
+      const destination = await github.pushDestination();
+      const remoteTip = await retrying(publication, () => fetchAttempt(repoDir, destination, record.branch));
+      if (!remoteTip.ok) return remoteTip;
+      const commit = await commitEvidence({ repoDir, remoteTip: remoteTip.value, issue: log.issue, runId: log.runId, files });
+      const pushed = await retrying(publication, () => pushAttempt(repoDir, destination, record.branch));
+      if (!pushed.ok) return pushed;
+      record.commit = commit;
+      record.repositoryUrl = await github.repositoryUrl();
+      return DONE;
+    });
   } finally {
     await save();
   }
 }
 
-export function openPullRequest(publication: Publication): Promise<StepOutcome<PullRequest>> {
+function openPullRequest(publication: Publication): Promise<Attempt<PullRequest>> {
   const { github, issue, defaultBranch, log } = publication;
   return retrying(publication, async () => {
-    try {
-      const text = renderPullRequest(issue, log);
-      const draft = log.result !== "ready";
-      const existing = await github.findPullRequest(log.integrationBranch, defaultBranch);
-      const pullRequest = existing
-        ? await github.updatePullRequest(existing.number, { ...text, draft })
-        : await github.createPullRequest({ ...text, head: log.integrationBranch, base: defaultBranch, draft });
-      return { ok: true, value: pullRequest };
-    } catch (error) {
-      return thrown(error);
-    }
+    const text = renderPullRequest(issue, log);
+    const draft = log.result !== "ready";
+    const existing = await github.findPullRequest(log.integrationBranch, defaultBranch);
+    const pullRequest = existing
+      ? await github.updatePullRequest(existing.number, { ...text, draft })
+      : await github.createPullRequest({ ...text, head: log.integrationBranch, base: defaultBranch, draft });
+    return { ok: true, value: pullRequest };
   });
 }

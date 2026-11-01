@@ -15,8 +15,9 @@ describe("classifyFailure", () => {
     "fatal: unable to access 'https://github.com/aldorea/repo.git/': Recv failure: Connection reset by peer",
     "fatal: unable to access 'https://github.com/aldorea/repo.git/': OpenSSL SSL_read: Connection reset by peer, errno 54",
     "fatal: unable to access 'http://127.0.0.1:1/aldorea/repo.git/': Failed to connect to 127.0.0.1 port 1 after 0 ms: Couldn't connect to server",
-    "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\nfatal: the remote end hung up unexpectedly",
-    "send-pack: unexpected disconnect while reading sideband packet\nfatal: the remote end hung up unexpectedly",
+    "error: RPC failed; curl 56 Recv failure: Connection reset by peer\nfatal: the remote end hung up unexpectedly",
+    "error: RPC failed; curl 18 transfer closed with outstanding read data remaining\nsend-pack: unexpected disconnect while reading sideband packet\nfatal: the remote end hung up unexpectedly",
+    "fatal: unable to access 'https://github.com/aldorea/repo.git/': OpenSSL SSL_write: Broken pipe, errno 32",
     "gh pr create failed (1): error connecting to api.github.com",
     'gh api failed (1): Get "https://api.github.com/repos/aldorea/repo/pulls": dial tcp: lookup api.github.com: no such host',
     'gh api failed (1): Post "https://api.github.com/repos/aldorea/repo/pulls": dial tcp 140.82.121.5:443: i/o timeout',
@@ -34,6 +35,10 @@ describe("classifyFailure", () => {
     "To https://github.com/aldorea/repo.git\n ! [rejected]        factory/42 -> factory/42 (non-fast-forward)",
     "fatal: unable to access 'https://github.com/aldorea/missing.git/': The requested URL returned error: 404",
     "gh pr create failed (1): GraphQL: Validation Failed (createPullRequest)",
+    "error: RPC failed; HTTP 400 curl 22 The requested URL returned error: 400\nfatal: the remote end hung up unexpectedly",
+    "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\nfatal: the remote end hung up unexpectedly",
+    "error: RPC failed; HTTP 400 curl 22 The requested URL returned error: 400\nsend-pack: unexpected disconnect while reading sideband packet\nfatal: the remote end hung up unexpectedly",
+    "fatal: the remote end hung up unexpectedly",
     "",
   ];
 
