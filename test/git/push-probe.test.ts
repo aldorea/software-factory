@@ -36,6 +36,7 @@ async function listeningServer(handler: Parameters<typeof createServer>[1]): Pro
 
 const ORIGIN = "git@github.com:aldorea/askwell.git";
 const UNREACHABLE = "cannot reach github.com/aldorea/askwell with the gh session";
+const UNREACHABLE_BECAUSE = /^cannot reach github\.com\/aldorea\/askwell with the gh session: \S/;
 
 describe("githubRepoOfRemote", () => {
   it.each([
@@ -99,13 +100,40 @@ describe("pushProblem", () => {
     const { url, server } = await listeningServer(() => undefined);
     await new Promise((done) => server.close(done));
 
-    expect(await pushProblem(repo, new FakeGitHub([], url))).toBe(UNREACHABLE);
+    const problem = await pushProblem(repo, new FakeGitHub([], url));
+
+    expect(problem).toMatch(UNREACHABLE_BECAUSE);
+    expect(problem).toContain("127.0.0.1");
   });
 
   it("should say that it cannot reach the repo when gh cannot name the destination", async () => {
     const repo = await repoWithOrigin(ORIGIN);
 
-    expect(await pushProblem(repo, new FakeGitHub([]))).toBe(UNREACHABLE);
+    expect(await pushProblem(repo, new FakeGitHub([]))).toBe(`${UNREACHABLE}: FakeGitHub has no bare repo to push to`);
+  });
+
+  it("should name the repo the push goes to, not the one of origin, and give the reason of git after it", async () => {
+    const repo = await repoWithOrigin(ORIGIN);
+    const { url, server } = await listeningServer(() => undefined);
+    await new Promise((done) => server.close(done));
+    const github = new FakeGitHub([], "https://github.com/other/fork.git");
+    github.gitArgs = ["-c", `url.${url.replace(/aldorea\/askwell\.git$/, "")}.insteadOf=https://github.com/`];
+
+    const problem = await pushProblem(repo, github);
+
+    expect(problem).toMatch(/^cannot reach github\.com\/other\/fork with the gh session: .*127\.0\.0\.1/);
+    expect(problem).not.toContain("askwell");
+  });
+
+  it("should not leak a credential of the url of the destination in the reason", async () => {
+    const repo = await repoWithOrigin(ORIGIN);
+    const { url, server } = await listeningServer(() => undefined);
+    await new Promise((done) => server.close(done));
+
+    const problem = await pushProblem(repo, new FakeGitHub([], url.replace("http://", "http://gh-user:s3cr3t-token@")));
+
+    expect(problem).toMatch(UNREACHABLE_BECAUSE);
+    expect(problem).not.toContain("s3cr3t-token");
   });
 
   it("should fail at once instead of waiting for a credential when the server answers 401", async () => {
@@ -116,7 +144,10 @@ describe("pushProblem", () => {
     });
     const started = Date.now();
 
-    expect(await pushProblem(repo, new FakeGitHub([], url))).toBe(UNREACHABLE);
+    const problem = await pushProblem(repo, new FakeGitHub([], url));
+
+    expect(problem).toMatch(UNREACHABLE_BECAUSE);
+    expect(problem).toContain("terminal prompts disabled");
     expect(Date.now() - started).toBeLessThan(10_000);
   });
 
@@ -125,7 +156,10 @@ describe("pushProblem", () => {
     const { url } = await listeningServer(() => undefined);
     const started = Date.now();
 
-    expect(await pushProblem(repo, new FakeGitHub([], url), { timeoutMs: 500 })).toBe(UNREACHABLE);
+    const problem = await pushProblem(repo, new FakeGitHub([], url), { timeoutMs: 500 });
+
+    expect(problem).toMatch(UNREACHABLE_BECAUSE);
+    expect(problem).toContain("timed out");
     expect(Date.now() - started).toBeLessThan(10_000);
   });
 });

@@ -38,6 +38,15 @@ describe("ghGitHub pushDestination", () => {
     expect(JSON.stringify(destination)).not.toMatch(/token|@github\.com|ghp_|gho_/);
   });
 
+  it.each(["/usr/local/bin/gh; touch /tmp/pwned", "gh $(touch /tmp/pwned)", "/opt/my tools/gh", "gh`id`", "gh|cat", "", "/bin/gh'"])(
+    "should refuse the gh command %j, because git runs the credential helper through a shell and nothing may be injected",
+    async (command) => {
+      const dir = await temp.make("gh-unsafe-");
+
+      await expect(ghGitHub({ repoDir: dir, command }).pushDestination()).rejects.toThrow(/is not a plain path/);
+    },
+  );
+
   it("should fail with the message of gh when gh cannot tell the repo", async () => {
     const { repoDir, command } = await stubGh(`echo "no git remotes found" >&2\nexit 1`);
 

@@ -27,6 +27,18 @@ async function originUrl(repoDir: string): Promise<string | null> {
   return url.exitCode === 0 ? url.stdout.trim() : null;
 }
 
+function reasonOf(message: string): string {
+  const first = message
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line !== "");
+  return first === undefined ? "" : `: ${first.replace(/\/\/[^/@\s]+@/g, "//")}`;
+}
+
+function unreachable(repo: GithubRepo, message: string): string {
+  return `cannot reach github.com/${repo.owner}/${repo.repo} with the gh session${reasonOf(message)}`;
+}
+
 export async function pushProblem(
   repoDir: string,
   github: GitHub,
@@ -36,13 +48,12 @@ export async function pushProblem(
   if (origin === null) return `the repo has no ${REMOTE} remote`;
   const named = githubRepoOfRemote(origin);
   if (named === null) return `${REMOTE} is not a GitHub repo: ${origin}`;
-  const unreachable = `cannot reach github.com/${named.owner}/${named.repo} with the gh session`;
   let destination: PushDestination;
   try {
     destination = await github.pushDestination();
-  } catch {
-    return unreachable;
+  } catch (error) {
+    return unreachable(named, (error as Error).message);
   }
   const listed = await lsRemote(repoDir, destination, options);
-  return listed.exitCode === 0 ? null : unreachable;
+  return listed.exitCode === 0 ? null : unreachable(githubRepoOfRemote(destination.url) ?? named, listed.stderr);
 }

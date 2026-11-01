@@ -30,7 +30,10 @@ export async function lsRemote(
       timeoutMs: options.timeoutMs ?? LS_REMOTE_TIMEOUT_MS,
     });
   } catch (error) {
-    return { exitCode: 1, stdout: "", stderr: (error as Error).message };
+    const timedOut = (error as { killed?: boolean }).killed === true;
+    const timeoutMs = options.timeoutMs ?? LS_REMOTE_TIMEOUT_MS;
+    const stderr = timedOut ? `git ls-remote timed out after ${timeoutMs / 1000}s` : (error as Error).message;
+    return { exitCode: 1, stdout: "", stderr };
   }
 }
 

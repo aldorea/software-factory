@@ -15,6 +15,8 @@ interface GhPullRequest {
 
 const PR_FIELDS = "number,url,isDraft";
 
+const SAFE_COMMAND = /^[A-Za-z0-9_./+-]+$/;
+
 function toPullRequest(data: GhPullRequest): PullRequest {
   return { number: data.number, url: data.url, draft: data.isDraft };
 }
@@ -68,6 +70,9 @@ export function ghGitHub(options: GhOptions): GitHub {
       return (JSON.parse(await gh(["repo", "view", "--json", "url"])) as { url: string }).url;
     },
     async pushDestination(): Promise<PushDestination> {
+      if (!SAFE_COMMAND.test(command)) {
+        throw new Error(`gh command ${JSON.stringify(command)} is not a plain path, so git cannot run it as the credential helper`);
+      }
       const { nameWithOwner } = JSON.parse(await gh(["repo", "view", "--json", "nameWithOwner"])) as { nameWithOwner: string };
       return {
         url: `https://github.com/${nameWithOwner}.git`,
