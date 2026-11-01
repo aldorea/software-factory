@@ -1,6 +1,6 @@
 import { attemptAbandoned, runStatus } from "../coordinator/abandoned.ts";
 import type { RunEntry } from "../coordinator/run-history.ts";
-import type { AgentChangeRecord, EvidenceBranchRecord, RunBlockRecord, RunLog } from "../coordinator/run-log.ts";
+import { isUnpublished, type AgentChangeRecord, type EvidenceBranchRecord, type RunBlockRecord, type RunLog } from "../coordinator/run-log.ts";
 import type { RoleChoice } from "../config/config.ts";
 import { checkItem } from "./evidence-view.ts";
 import { anchor, badge, bullets, escapeHtml, page, titledList } from "./html.ts";
@@ -81,8 +81,9 @@ function evidenceBranchLink(evidence: EvidenceBranchRecord): string {
   return anchor(`${evidence.repositoryUrl}/tree/${path}`, evidence.branch);
 }
 
-function publicationSection({ publicationFailure, issue }: RunLog): string {
-  if (publicationFailure === undefined) return "";
+function publicationSection(log: RunLog): string {
+  if (!isUnpublished(log)) return "";
+  const { publicationFailure, issue } = log;
   return [
     "<h2>Sin publicar</h2>",
     `<p>Fase: ${escapeHtml(publicationFailure.phase)}</p>`,

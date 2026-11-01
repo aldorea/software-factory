@@ -47,6 +47,7 @@ export interface CliEnv {
   cwd: string;
   factoryRoot: string;
   clock: Clock;
+  sleep?: (ms: number) => Promise<void>;
   github(repoDir: string): GitHub;
   runner(): WorkerRunner;
   verifier(config: ResolvedConfig, role: RoleChoice): Verifier;
@@ -255,6 +256,7 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
         github: env.github(repoDir),
         notifier: env.notifier,
         clock: env.clock,
+        ...(env.sleep ? { sleep: env.sleep } : {}),
         progress: view ? (line) => view.progress(line) : (line) => env.out(renderProgress(line, env.clock.now(), false)),
         activity: view ? (entry) => view.activity(entry) : (entry) => env.out(activityLine(entry)),
         ...(view ? { snapshot: (log) => view.snapshot(log) } : {}),

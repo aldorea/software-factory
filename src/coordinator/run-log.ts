@@ -241,7 +241,11 @@ export interface RunLog {
   publicationFailure?: PublicationFailureRecord;
 }
 
-export type ParsedRunLog = { ok: true; log: RunLog } | { ok: false; problem: string };
+export function isUnpublished(log: RunLog): log is RunLog & { publicationFailure: PublicationFailureRecord } {
+  return log.publicationFailure !== undefined;
+}
+
+export type ParsedRunLog ={ ok: true; log: RunLog } | { ok: false; problem: string };
 
 export function parseRunLog(text: string): ParsedRunLog {
   let data: unknown;

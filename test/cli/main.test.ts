@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InteractiveLaunch } from "../../src/cli/launch.ts";
 import { main, type CliEnv } from "../../src/cli/main.ts";
@@ -634,6 +634,27 @@ describe("factory publish", () => {
     expect(session.notifier.sent).toEqual([
       { title: "factory run #42", message: "Ready for review: x", url: "https://github.test/pull/100" },
     ]);
+  });
+
+  it("should show each retry of a push that failed on the network, wait as the env says and publish the run", async () => {
+    const { repoDir, github, session, hook } = await unpublishedRun();
+    const counter = join(dirname(hook), "..", "failures");
+    await writeFile(
+      hook,
+      `#!/bin/sh\nfailures=$(cat ${counter} 2>/dev/null || echo 0)\nif [ "$failures" -lt 1 ]; then echo 1 > ${counter}; echo "ssh: connect to host github.com port 22: Operation timed out" >&2; exit 1; fi\n`,
+    );
+    const waits: number[] = [];
+    session.env.sleep = async (ms) => void waits.push(ms);
+    session.out.length = 0;
+
+    expect(await main(["publish", "42"], session.env)).toBe(0);
+
+    expect(waits).toEqual([5_000]);
+    expect(session.out).toContain(
+      `publication: retry 1 of 3 in 5s: git push ${BRANCH} failed (1): remote: ssh: connect to host github.com port 22: Operation timed out`,
+    );
+    expect((await lastRunLog(repoDir)).publicationFailure).toBeUndefined();
+    expect(github.pullRequests.map((pr) => pr.head)).toEqual([BRANCH]);
   });
 
   it("should update the existing pull request when it runs again, instead of opening a second one", async () => {

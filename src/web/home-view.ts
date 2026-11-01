@@ -1,4 +1,5 @@
 import { runStatus } from "../coordinator/abandoned.ts";
+import { isUnpublished } from "../coordinator/run-log.ts";
 import type { RunEntry } from "../coordinator/run-history.ts";
 import { anchor, badge, escapeHtml, link, page, titledList } from "./html.ts";
 import { relativeTime } from "./relative-time.ts";
@@ -15,7 +16,7 @@ export interface HomeData {
 }
 
 function pullRequestCell(entry: RunEntry): string {
-  if (entry.log.publicationFailure !== undefined) return badge("not published");
+  if (isUnpublished(entry.log)) return badge("not published");
   const pullRequest = entry.log.pullRequest;
   if (pullRequest === undefined) return "";
   return anchor(pullRequest.url, `#${pullRequest.number}`);

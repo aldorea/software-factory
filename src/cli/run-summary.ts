@@ -1,4 +1,4 @@
-import type { RunLog, SubtaskRecord } from "../coordinator/run-log.ts";
+import { isUnpublished, type RunLog, type SubtaskRecord } from "../coordinator/run-log.ts";
 import { notPublishedMessage } from "../coordinator/publication.ts";
 import { countedTokens, formatDuration } from "../coordinator/stop-rules.ts";
 import { strong } from "./setup-render.ts";
@@ -23,7 +23,7 @@ export function runSummary(log: RunLog, issueTitle: string, color: boolean): str
 }
 
 function publicationLine(log: RunLog, issueTitle: string, color: boolean): string[] {
-  if (log.publicationFailure !== undefined) return [strong(RED, notPublishedMessage(issueTitle, log.issue), color)];
+  if (isUnpublished(log)) return [strong(RED, notPublishedMessage(issueTitle, log.issue), color)];
   return log.pullRequest !== undefined ? [`Pull request: ${log.pullRequest.url}`] : [];
 }
 
