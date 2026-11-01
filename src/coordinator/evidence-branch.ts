@@ -1,7 +1,7 @@
 import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { fetchBranch, pushBranch } from "../git/transport.ts";
+import { fetchBranch } from "../git/transport.ts";
 import type { PushDestination } from "../github/github.ts";
 import { exec, execOk } from "../workers/sh.ts";
 
@@ -43,7 +43,7 @@ export interface EvidencePublication {
   files: EvidenceFile[];
 }
 
-export async function publishEvidence(publication: EvidencePublication): Promise<string> {
+export async function commitEvidence(publication: EvidencePublication): Promise<string> {
   const { repoDir, destination, issue, runId, files } = publication;
   const branch = evidenceBranchName(issue);
   const scratch = await mkdtemp(join(tmpdir(), "factory-evidence-"));
@@ -68,7 +68,6 @@ export async function publishEvidence(publication: EvidencePublication): Promise
       )
     ).trim();
     await execOk("git", ["-C", repoDir, "update-ref", `refs/heads/${branch}`, commit]);
-    await pushBranch(repoDir, destination, branch);
     return commit;
   } finally {
     await rm(scratch, { recursive: true, force: true });

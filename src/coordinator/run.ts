@@ -133,6 +133,8 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     runDir,
     github: ports.github,
     clock: ports.clock,
+    sleep: ports.sleep,
+    progress: ports.progress,
     save,
   });
   await ports.notifier.notify(publicationNotification(issue, log, publication));

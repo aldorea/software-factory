@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { classifyFailure } from "../../src/coordinator/retry.ts";
 import { fetchBranch, lsRemote, pushBranch, pushBranchAttempt } from "../../src/git/transport.ts";
 import type { PushDestination } from "../../src/github/github.ts";
 import { execOk } from "../../src/workers/sh.ts";
@@ -117,6 +118,41 @@ describe("pushBranch", () => {
     await expect(readFile(staleRecord, "utf8")).rejects.toThrow(/ENOENT/);
     const authorization = seen.map((request) => request.headers.authorization).find((value) => value !== undefined);
     expect(authorization).toBe(`Basic ${Buffer.from("gh-user:gh-token").toString("base64")}`);
+  });
+});
+
+describe("the classification of a failed push", () => {
+  it("should call a push to a closed port of 127.0.0.1 a network failure, with the real stderr of git", async () => {
+    const repo = await repoWithBranch();
+    const closed = createServer();
+    await new Promise<void>((ready) => closed.listen(0, "127.0.0.1", ready));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise((done) => closed.close(done));
+
+    const attempt = await pushBranchAttempt(repo, { url: `http://127.0.0.1:${port}/aldorea/repo.git`, gitArgs: [] }, "main");
+
+    expect(attempt.exitCode).not.toBe(0);
+    expect(classifyFailure(attempt.stderr, attempt.exitCode)).toBe("network");
+  });
+
+  it("should call a push that the server answers with 401 another failure, because retrying cannot give a credential", async () => {
+    const repo = await repoWithBranch();
+    const url = await unauthorizedServer();
+
+    const attempt = await pushBranchAttempt(repo, { url, gitArgs: ["-c", "credential.helper="] }, "main");
+
+    expect(classifyFailure(attempt.stderr, attempt.exitCode)).toBe("other");
+  });
+
+  it("should call a push that a hook of the remote refuses another failure", async () => {
+    const repo = await repoWithBranch();
+    const bare = await bareRepo();
+    await script(join(bare, "hooks"), "pre-receive", 'echo "push refused" >&2\nexit 1');
+
+    const attempt = await pushBranchAttempt(repo, { url: bare, gitArgs: [] }, "main");
+
+    expect(attempt.exitCode).not.toBe(0);
+    expect(classifyFailure(attempt.stderr, attempt.exitCode)).toBe("other");
   });
 });
 

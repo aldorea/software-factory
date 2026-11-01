@@ -122,10 +122,11 @@ export function harness(target: Target, script: AttemptScript, faults: WorkerFau
   };
   const verifier = new FakeVerifier();
   const progress: string[] = [];
+  const waits: number[] = [];
   const activity: ActivityEntry[] = [];
   const run = () =>
-    runIssue(request, { runner, verifier, github: target.github, notifier, clock, progress: (line) => progress.push(line), activity: (entry) => activity.push(entry) });
-  return { runner, verifier, notifier, clock, progress, activity, run };
+    runIssue(request, { runner, verifier, github: target.github, notifier, clock, progress: (line) => progress.push(line), sleep: async (ms) => void waits.push(ms), activity: (entry) => activity.push(entry) });
+  return { runner, verifier, notifier, clock, progress, waits, activity, run };
 }
 
 export const writesHello: AttemptScript = () => ({ files: { "src/greeting.txt": "hello\n" }, commit: "Write the greeting" });
