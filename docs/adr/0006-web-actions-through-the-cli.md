@@ -10,7 +10,8 @@ The server binds `127.0.0.1` only and accepts a `POST` only with the `Origin` of
 
 - **Keep the web read-only and show each command to copy.** Rejected: the developer wants one place to follow and act on the factory; copying a command to a terminal is the step the web should remove.
 - **Call the coordinator in the process of the server.** Rejected: the server would hold the `gh` session and the push, a crash of the server would kill the run, and the rules that the CLI checks would need a second copy.
-- **Emulate a terminal in the page to run `factory refine` and the menus.** Rejected: it needs a native runtime dependency (a pseudo-terminal) and a script in the page. The menus become forms that send the same flags, and the refinement opens a Terminal window.
+- **Emulate a terminal in the page to run `factory refine` and the menus.** Rejected: it needs a native runtime dependency (a pseudo-terminal) and a script in the page. The menus become forms that send the same flags, and the refinement becomes a conversation turn by turn, one `factory refine <n> --turn` per answer, which runs `claude -p --resume`.
+- **Open a Terminal window for `factory refine`.** Rejected: the developer wants to refine from the web too, and a window of another app is not the web.
 - **Only the `Host` check, as for the read-only pages.** Rejected: it stops DNS rebinding but not a form that another page sends to `127.0.0.1`.
 
 ## Consequences
@@ -18,4 +19,6 @@ The server binds `127.0.0.1` only and accepts a `POST` only with the `Origin` of
 - The design of the web view changes: it is no longer read-only, and it shows the live activity of an attempt, as the CLI does.
 - The output of each web action is a new file under `.factory/web/` of the target repo, outside git.
 - A run started in a terminal is stopped in its terminal; the web stops only what it started.
+- In a turn of the refinement nobody can approve a tool, so the refinement from the web runs with a fixed list of allowed tools, checked in code. A refinement that needs another tool must change the list, and the list is part of the design.
+- The refinement skill must work turn by turn: each turn ends with a message that the developer answers, as each round of questions already does.
 - A credential travels from the browser to the server in the body of a `POST` on `127.0.0.1`, and from the server to `factory auth` on its standard input.
