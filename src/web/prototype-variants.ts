@@ -1,6 +1,7 @@
 // PROTOTYPE (throwaway, branch prototype/web-run-causes): three variants of the run page and of the home page,
 // switchable with ?variant=A|B|C. Answers "what should the cause summary and the live activity look like?".
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { attemptAbandoned, lastChange, runStatus } from "../coordinator/abandoned.ts";
 import type { RunEntry } from "../coordinator/run-history.ts";
 import { isUnpublished, type AttemptRecord, type CheckRecord, type RunLog, type SubtaskRecord } from "../coordinator/run-log.ts";
@@ -36,15 +37,12 @@ function lastAttempt(subtask: SubtaskRecord): AttemptRecord | undefined {
 function subtaskCause(subtask: SubtaskRecord, issue: number, logUrl: LogUrl): Cause {
   const type = subtask.blockType ?? subtask.block?.type ?? "blocked";
   const reason = subtask.reason ?? subtask.block?.reason ?? "sin motivo";
-  const attempt = lastAttempt(subtask);
-  const url = attempt ? logUrl(attempt.logPath) : null;
   const scope = type === "scope";
   return {
     tone: "bad",
     where: `Subtarea ${subtask.id}`,
     what: `bloqueada (${type})`,
     detail: subtask.block?.lastFailure ?? reason,
-    ...(url ? { evidence: { url, text: `log del intento ${attempt?.number}` } } : {}),
     ...(scope
       ? { nextNote: "Revisa los scope paths de la spec o autoriza el fichero; después vuelve a lanzar el run." }
       : { next: `factory run ${issue}` }),
@@ -72,17 +70,15 @@ export function runCauses(entry: RunEntry, now: Date, logUrl: LogUrl): Cause[] {
   const verification = log.verification;
   if (verification && !verification.passed) {
     for (const check of failingChecks(verification.checks, logUrl)) {
-      causes.push({ tone: "bad", where: "Integrated verification", what: "falla un check", detail: check.text, ...(check.url ? { evidence: { url: check.url, text: "salida completa" } } : {}), next: `factory run ${log.issue}` });
+      causes.push({ tone: "bad", where: "Integrated verification", what: "falla un check", detail: check.text, evidence: { url: "#checks", text: "ver la salida" }, next: `factory run ${log.issue}` });
     }
     for (const criterion of verification.criteria.filter((item) => !item.passed)) {
-      const url = logUrl(criterion.outputLog);
-      causes.push({ tone: "bad", where: "Integrated verification", what: `falla el criterio ${criterion.id}`, ...(url ? { evidence: { url, text: "salida completa" } } : {}), next: `factory run ${log.issue}` });
+      causes.push({ tone: "bad", where: "Integrated verification", what: `falla el criterio ${criterion.id}`, evidence: { url: `#${criterion.id}`, text: `ver la salida de ${criterion.id}` }, next: `factory run ${log.issue}` });
     }
     const tester = verification.tester;
-    const testerUrl = tester ? logUrl(tester.logPath) : null;
-    if (tester?.error) causes.push({ tone: "bad", where: "Acceptance tester", what: "error", detail: tester.error, ...(testerUrl ? { evidence: { url: testerUrl, text: "log del tester" } } : {}), next: `factory run ${log.issue}` });
+    if (tester?.error) causes.push({ tone: "bad", where: "Acceptance tester", what: "error", detail: tester.error, evidence: { url: "#tester", text: "ver las evidencias del tester" }, next: `factory run ${log.issue}` });
     for (const verdict of tester?.verdicts.filter((item) => !item.passed) ?? []) {
-      causes.push({ tone: "bad", where: "Acceptance tester", what: `falla ${verdict.id}`, detail: verdict.observation, ...(testerUrl ? { evidence: { url: testerUrl, text: "log del tester" } } : {}), next: `factory run ${log.issue}` });
+      causes.push({ tone: "bad", where: "Acceptance tester", what: `falla ${verdict.id}`, detail: verdict.observation, evidence: { url: `#${verdict.id}`, text: `ver las evidencias de ${verdict.id}` }, next: `factory run ${log.issue}` });
     }
   }
   if (causes.length === 0 && log.result === "draft" && log.criteria.human.length > 0) {
@@ -152,6 +148,11 @@ details{background:var(--card);border:1px solid var(--line);border-radius:8px;pa
 .tl .when{font-size:.75rem;color:var(--muted)}
 .cards{display:grid;gap:.6rem}.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem}
 .row{display:flex;gap:.75rem;align-items:baseline;padding:.35rem 0;border-bottom:1px solid var(--line)}.row .muted{color:var(--muted);font-size:.85rem}
+pre.out{font:12.5px/1.5 ui-monospace,monospace;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.6rem .8rem;overflow:auto;max-height:28rem;white-space:pre}
+pre.out .bad{color:var(--bad);font-weight:600}pre.out .ok{color:var(--ok)}pre.out .hl{background:var(--bad-bg);display:inline-block;width:100%}pre.out .em{font-weight:700}pre.out .dim{color:var(--muted)}
+.crit{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem;margin:.5rem 0}.crit .head{margin-bottom:.25rem}.muted{color:var(--muted)}.obs{font-style:italic}
+.shots{display:flex;flex-wrap:wrap;gap:.6rem;margin:.5rem 0}.shot{margin:0;width:15rem}.shot img,.shot video{width:100%;border:1px solid var(--line);border-radius:6px}.shot figcaption{font-size:.75rem;color:var(--muted)}
+details.file{padding:.2rem .6rem}details.file summary{font-weight:400;font-size:.9rem}
 .proto-bar{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:#111;color:#fff;border-radius:999px;padding:.4rem .6rem;display:flex;gap:.6rem;align-items:center;box-shadow:0 4px 18px #0006;font:13px system-ui;z-index:9}
 .proto-bar a{color:#fff;padding:0 .5rem;font-size:1.1rem}
 @media (max-width:50rem){.grid{grid-template-columns:1fr}.side{position:static}}
@@ -190,7 +191,7 @@ function activityBlock(activity: Activity | null, now: Date): string {
   return [
     `<h2>Ahora</h2>`,
     note,
-    `<p><strong>${escapeHtml(activity.label)}</strong> · ${escapeHtml(activity.agent)} ${activity.logUrl ? `· ${link(activity.logUrl, "log crudo")}` : ""}</p>`,
+    `<p><strong>${escapeHtml(activity.label)}</strong> · ${escapeHtml(activity.agent)}</p>`,
     `<div class="live"><span>${escapeHtml(started)}</span><span>${escapeHtml(silent)}</span></div>`,
     feed(activity),
   ].join("\n");
@@ -203,20 +204,24 @@ function header(log: RunLog, status: string, entry: RunEntry, now: Date): string
 
 function subtaskSummary(subtask: SubtaskRecord, entry: RunEntry, now: Date, logUrl: LogUrl): string {
   const attempts = subtask.attempts
-    .map((attempt) => `<li>Intento ${attempt.number} · ${escapeHtml(attempt.agent.model)} · ${badge(attemptAbandoned(attempt, entry, now) ? "abandoned" : attempt.outcome)} · ${countedTokens(attempt.usage)} tokens ${logUrl(attempt.logPath) ? `· ${link(logUrl(attempt.logPath) as string, "log")}` : ""}</li>`)
+    .map((attempt) => `<li>Intento ${attempt.number} · ${escapeHtml(attempt.agent.model)} · ${badge(attemptAbandoned(attempt, entry, now) ? "abandoned" : attempt.outcome)} · ${countedTokens(attempt.usage)} tokens${attempt.failure ? `<br><span style="color:var(--bad)">${escapeHtml(attempt.failure.description)}</span>` : ""}</li>`)
     .join("");
   const open = subtask.state !== "merged" ? " open" : "";
   return `<details${open}><summary>${escapeHtml(subtask.id)} ${badge(subtask.state)} <span style="color:var(--muted);font-weight:400">· ${subtask.attempts.length} intentos · criterios ${escapeHtml(subtask.criteria.join(", "))}</span></summary><ul>${attempts}</ul><p>${subtask.gateRejections} rechazos del gate · ${subtask.verifierRejections} del independent verifier</p></details>`;
 }
 
-function variantA(entry: RunEntry, now: Date, logUrl: LogUrl, causes: Cause[], activity: Activity | null): string {
+function variantA(entry: RunEntry, now: Date, logUrl: LogUrl, causes: Cause[], activity: Activity | null, evidence: EvidenceFiles): string {
   const { log } = entry;
   const status = runStatus(entry, now);
   const why = causes.length === 0 ? "" : [`<h2>Por qué está así</h2>`, ...causes.map(causeCard)].join("\n");
-  const verification = log.verification
-    ? `<details${log.verification.passed ? "" : " open"}><summary>Integrated verification ${badge(log.verification.passed ? "pasa" : "falla")}</summary><p>SHA ${escapeHtml(log.verification.sha)} · ${log.verification.checks.length} checks · ${log.verification.criteria.length} criterios</p></details>`
-    : "";
-  const body = [header(log, status, entry, now), why, activityBlock(activity, now), `<h2>Detalle</h2>`, ...log.subtasks.map((subtask) => subtaskSummary(subtask, entry, now, logUrl)), verification].join("\n");
+  const body = [
+    header(log, status, entry, now),
+    why,
+    activityBlock(activity, now),
+    verificationEvidence(log, evidence),
+    `<h2>Subtareas</h2>`,
+    ...log.subtasks.map((subtask) => subtaskSummary(subtask, entry, now, logUrl)),
+  ].join("\n");
   return page(`run ${log.runId}`, body);
 }
 
@@ -280,10 +285,10 @@ function variantC(entry: RunEntry, now: Date, logUrl: LogUrl, causes: Cause[], a
   return page(`run ${log.runId}`, body);
 }
 
-export function prototypeRunPage(variant: Variant, entry: RunEntry, now: Date, logUrl: LogUrl, activity: Activity | null): string {
+export function prototypeRunPage(variant: Variant, entry: RunEntry, now: Date, logUrl: LogUrl, activity: Activity | null, evidence: EvidenceFiles): string {
   const causes = runCauses(entry, now, logUrl);
-  const render = { A: variantA, B: variantB, C: variantC }[variant];
-  return inject(render(entry, now, logUrl, causes, activity), switcher(variant, NAMES));
+  const html = variant === "A" ? variantA(entry, now, logUrl, causes, activity, evidence) : { B: variantB, C: variantC }[variant](entry, now, logUrl, causes, activity);
+  return inject(html, switcher(variant, NAMES));
 }
 
 export function prototypeCurrentRun(entry: RunEntry, now: Date, logUrl: LogUrl): string {
@@ -358,3 +363,112 @@ export function prototypeHome(variant: Variant, data: HomeData, activities: Home
 }
 
 export { homeView };
+
+export type EvidenceFile = { name: string; url: string; text?: string };
+export type EvidenceFiles = { outputs: Map<string, string>; byCriterion: Map<string, EvidenceFile[]>; tester: EvidenceFile[] };
+
+const TEXT_FILE = /\.(txt|log|json|md|mjs|js)$/i;
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp)$/i;
+const VIDEO_FILE = /\.(webm|mp4)$/i;
+
+async function filesIn(runDir: string, runId: string, segments: string[]): Promise<EvidenceFile[]> {
+  const dir = join(runDir, ...segments);
+  const names = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  const files: EvidenceFile[] = [];
+  for (const dirent of names) {
+    if (!dirent.isFile()) continue;
+    const url = `/runs/${runId}/${[...segments, dirent.name].map(encodeURIComponent).join("/")}`;
+    const text = TEXT_FILE.test(dirent.name) ? await readFile(join(dir, dirent.name), "utf8") : undefined;
+    files.push({ name: dirent.name, url, ...(text !== undefined ? { text } : {}) });
+  }
+  return files.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export async function readEvidence(entry: RunEntry, runDir: string): Promise<EvidenceFiles> {
+  const { log } = entry;
+  const outputs = new Map<string, string>();
+  const byCriterion = new Map<string, EvidenceFile[]>();
+  const verification = log.verification;
+  for (const item of [...(verification?.checks ?? []), ...(verification?.criteria ?? [])]) {
+    const key = "name" in item ? `check:${item.name}` : item.id;
+    if (item.outputLog) outputs.set(key, await readFile(join(runDir, item.outputLog), "utf8").catch(() => ""));
+  }
+  for (const id of [...(verification?.criteria.map((criterion) => criterion.id) ?? []), ...log.criteria.passing, ...log.criteria.blocked]) {
+    if (!byCriterion.has(id)) byCriterion.set(id, await filesIn(runDir, entry.dir, ["tester", "verification", id]));
+  }
+  return { outputs, byCriterion, tester: await filesIn(runDir, entry.dir, ["tester", "verification"]) };
+}
+
+function lineClass(line: string): string {
+  if (/✘|^\s*\d+\)|Error:|ERR_|failed|did not run/.test(line)) return "bad";
+  if (/✓|passed/.test(line)) return "ok";
+  if (/^\s*>\s*\d+\s*\|/.test(line)) return "hl";
+  if (/^\s*(Expected|Received)/.test(line)) return "em";
+  if (/^\s*\d+\s*\|/.test(line) || /^\s*\|/.test(line) || /^\s+at /.test(line)) return "dim";
+  return "";
+}
+
+export function formatOutput(text: string): string {
+  const clean = text.replace(/\u001b\[[0-9;]*m/g, "").replace(/\s+$/, "");
+  const lines = clean.split("\n").map((line) => {
+    const css = lineClass(line);
+    return css ? `<span class="${css}">${escapeHtml(line)}</span>` : escapeHtml(line);
+  });
+  return `<pre class="out">${lines.join("\n")}</pre>`;
+}
+
+function fileBlock(file: EvidenceFile): string {
+  if (IMAGE_FILE.test(file.name)) return `<figure class="shot"><a href="${escapeHtml(file.url)}"><img src="${escapeHtml(file.url)}" alt="${escapeHtml(file.name)}"></a><figcaption>${escapeHtml(file.name)}</figcaption></figure>`;
+  if (VIDEO_FILE.test(file.name)) return `<figure class="shot"><video controls src="${escapeHtml(file.url)}"></video><figcaption>${escapeHtml(file.name)}</figcaption></figure>`;
+  if (file.text !== undefined) return `<details class="file"><summary>${escapeHtml(file.name)}</summary>${formatOutput(file.text)}</details>`;
+  return `<p>${escapeHtml(file.name)}</p>`;
+}
+
+function filesBlock(files: readonly EvidenceFile[]): string {
+  const media = files.filter((file) => IMAGE_FILE.test(file.name) || VIDEO_FILE.test(file.name));
+  const texts = files.filter((file) => !media.includes(file));
+  return [media.length ? `<div class="shots">${media.map(fileBlock).join("")}</div>` : "", ...texts.map(fileBlock)].join("");
+}
+
+function verificationEvidence(log: RunLog, evidence: EvidenceFiles): string {
+  const verification = log.verification;
+  if (!verification) return `<h2>Verificación y evidencias</h2><p>Todavía sin integrated verification.</p>`;
+  const checks = verification.checks
+    .map((check) => {
+      const output = evidence.outputs.get(`check:${check.name}`);
+      const body = !check.passed && output ? formatOutput(output) : check.firstError ? `<p>${escapeHtml(check.firstError)}</p>` : "";
+      return `<div class="crit"><div class="head"><strong>${escapeHtml(check.name)}</strong> ${badge(check.passed ? "pasa" : "falla")}</div>${body}</div>`;
+    })
+    .join("");
+  const verdicts = new Map((verification.tester?.verdicts ?? []).map((verdict) => [verdict.id, verdict]));
+  const criteria = verification.criteria
+    .map((criterion) => {
+      const verdict = verdicts.get(criterion.id);
+      const output = evidence.outputs.get(criterion.id);
+      const files = evidence.byCriterion.get(criterion.id) ?? [];
+      const videos = files.filter((file) => VIDEO_FILE.test(file.name));
+      return [
+        `<div class="crit" id="${escapeHtml(criterion.id)}">`,
+        `<div class="head"><strong>${escapeHtml(criterion.id)}</strong> <span class="muted">${escapeHtml(criterion.evidence ?? "")}</span> · comando ${badge(criterion.passed ? "pasa" : "falla")} · tester ${verdict ? badge(verdict.passed ? "pasa" : "falla") : badge("sin veredicto")}</div>`,
+        verdict ? `<p class="obs">${escapeHtml(verdict.observation)}</p>` : "",
+        !criterion.passed && output ? formatOutput(output) : "",
+        filesBlock(files),
+        criterion.evidence === "playwright" && videos.length === 0 ? `<p class="muted">Vídeo: no está en el run log.</p>` : "",
+        `</div>`,
+      ].join("");
+    })
+    .join("");
+  const human = verification.humanCriteria.map((criterion) => `<div class="crit"><div class="head"><strong>${escapeHtml(criterion.id)}</strong> ${badge("human")}</div><p>${escapeHtml(criterion.reason)}</p></div>`).join("");
+  const tester = verification.tester;
+  const testerOwn = evidence.tester;
+  const testerBlock = tester
+    ? `<h3 id="tester">Acceptance tester · ${escapeHtml(tester.agent.model)}</h3>${tester.error ? `<p style="color:var(--bad)">${escapeHtml(tester.error)}</p>` : ""}${filesBlock(testerOwn)}`
+    : "";
+  return [
+    `<h2>Verificación y evidencias</h2>`,
+    `<p class="muted">Integrated verification sobre ${escapeHtml(verification.sha.slice(0, 8))} · ${badge(verification.passed ? "pasa" : "falla")}${verification.environment ? ` · ${escapeHtml(verification.environment)}` : ""}</p>`,
+    `<h3 id="checks">Checks</h3>${checks}`,
+    `<h3>Criterios</h3>${criteria}${human}`,
+    testerBlock,
+  ].join("\n");
+}

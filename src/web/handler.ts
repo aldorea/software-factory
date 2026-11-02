@@ -9,7 +9,9 @@ import { logLinks } from "./log-links.ts";
 import { matchRoute } from "./routes.ts";
 import { readRunFile } from "./run-file.ts";
 import { runView } from "./run-view.ts";
-import { parseVariant, prototypeHome, prototypeRunPage, readActivity } from "./prototype-variants.ts";
+import { parseVariant, prototypeHome, prototypeRunPage, readActivity, readEvidence } from "./prototype-variants.ts";
+import { readFile } from "node:fs/promises";
+import { resolveRunFile } from "./run-file.ts";
 
 export interface WebRequest {
   method: string;
@@ -43,12 +45,18 @@ async function runPage(logsDir: string, runId: string, now: Date, variantParam?:
   if (read.kind !== "found") return null;
   const logUrl = await logLinks(runId, join(logsDir, runId), read.entry.log);
   const variant = parseVariant(variantParam ?? null);
-  if (variant !== null) return html(200, prototypeRunPage(variant, read.entry, now, logUrl, await readActivity(read.entry, logUrl)));
+  if (variant !== null) return html(200, prototypeRunPage(variant, read.entry, now, logUrl, await readActivity(read.entry, logUrl), await readEvidence(read.entry, join(logsDir, runId))));
   return html(200, runView({ entry: read.entry, now, logUrl }));
 }
 
 async function runLog(logsDir: string, runId: string, segments: string[]): Promise<WebResponse | null> {
   if ((await readRunEntry(logsDir, runId)).kind !== "found") return null;
+  const media = /\.(png|jpe?g|webm|mp4)$/i.exec(segments.at(-1) ?? "");
+  if (media) {
+    const file = await resolveRunFile(join(logsDir, runId), segments);
+    const types: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webm: "video/webm", mp4: "video/mp4" };
+    return file === null ? null : { status: 200, contentType: types[(media[1] ?? "").toLowerCase()] ?? "application/octet-stream", body: (await readFile(file)) as unknown as string };
+  }
   const content = await readRunFile(join(logsDir, runId), segments);
   return content === null ? null : { status: 200, contentType: TEXT, body: content };
 }
