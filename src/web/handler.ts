@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { abandonedLogs } from "../coordinator/abandoned.ts";
+import { abandonedLogs, runStatus } from "../coordinator/abandoned.ts";
 import { readRunEntries, readRunEntry } from "../coordinator/run-history.ts";
 import { summarizeRuns } from "../coordinator/stats.ts";
 import { page } from "./html.ts";
@@ -9,6 +9,7 @@ import { logLinks } from "./log-links.ts";
 import { matchRoute } from "./routes.ts";
 import { readRunFile } from "./run-file.ts";
 import { runView } from "./run-view.ts";
+import { parseVariant, prototypeHome, prototypeRunPage, readActivity } from "./prototype-variants.ts";
 
 export interface WebRequest {
   method: string;
@@ -17,6 +18,7 @@ export interface WebRequest {
   repoDir: string;
   port: number;
   now: Date;
+  variant?: string | null;
 }
 
 export interface WebResponse {
@@ -36,10 +38,12 @@ function refusal(status: number, title: string): WebResponse {
   return html(status, page(title, `<h1>${title}</h1>`));
 }
 
-async function runPage(logsDir: string, runId: string, now: Date): Promise<WebResponse | null> {
+async function runPage(logsDir: string, runId: string, now: Date, variantParam?: string | null): Promise<WebResponse | null> {
   const read = await readRunEntry(logsDir, runId);
   if (read.kind !== "found") return null;
   const logUrl = await logLinks(runId, join(logsDir, runId), read.entry.log);
+  const variant = parseVariant(variantParam ?? null);
+  if (variant !== null) return html(200, prototypeRunPage(variant, read.entry, now, logUrl, await readActivity(read.entry, logUrl)));
   return html(200, runView({ entry: read.entry, now, logUrl }));
 }
 
@@ -60,9 +64,18 @@ export async function handleRequest(request: WebRequest): Promise<WebResponse> {
       runs.map((entry) => entry.log),
       abandonedLogs(runs, request.now),
     );
+    const variant = parseVariant(request.variant ?? null);
+    if (variant !== null) {
+      const activities = new Map();
+      for (const entry of runs) {
+        if (runStatus(entry, request.now) !== "running") continue;
+        activities.set(entry.dir, await readActivity(entry, await logLinks(entry.dir, join(logsDir, entry.dir), entry.log)));
+      }
+      return html(200, prototypeHome(variant, { runs, stats, unreadable, now: request.now }, activities));
+    }
     return html(200, homeView({ runs, stats, unreadable, now: request.now }));
   }
-  if (route.kind === "run") return (await runPage(logsDir, route.runId, request.now)) ?? refusal(404, "404 Not Found");
+  if (route.kind === "run") return (await runPage(logsDir, route.runId, request.now, request.variant)) ?? refusal(404, "404 Not Found");
   if (route.kind === "log") return (await runLog(logsDir, route.runId, route.segments)) ?? refusal(404, "404 Not Found");
   return refusal(404, "404 Not Found");
 }

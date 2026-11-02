@@ -28,6 +28,7 @@ async function respond(incoming: IncomingMessage, outgoing: ServerResponse, opti
     const response = await handleRequest({
       method: incoming.method ?? "GET",
       path: pathOf(incoming.url),
+      variant: new URL(incoming.url ?? "/", "http://localhost").searchParams.get("variant"),
       host: incoming.headers.host,
       repoDir: options.repoDir,
       port,
