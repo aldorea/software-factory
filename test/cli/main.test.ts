@@ -336,6 +336,7 @@ describe("factory run: the choice of the agent of each role", () => {
       "10:02:20 S1: attempt 1 completed",
       "10:02:20 S1: gating",
       "10:02:20 S1: merged",
+      "10:02:20 tester: running the spec check",
       expect.stringMatching(/^10:02:20 integrated verification at /),
       expect.stringMatching(/^10:02:20 run 42-.*: (ready|draft)$/),
       expect.stringMatching(/^10:02:20 pull request: /),

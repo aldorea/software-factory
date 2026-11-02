@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { logPathsOf } from "../../src/coordinator/run-log-paths.ts";
 import type { ActivityEvent } from "../../src/workers/types.ts";
 import {
   passingTester,
@@ -391,5 +392,81 @@ describe("factory run: the acceptance tester in the pull request", () => {
     expect(body).toContain("- [ ] A2 The second part works with the first. Evidence: request `test -e ok-A2` passed");
     expect(body).toContain("  Acceptance tester: failed. It said bye. Evidence: [s.txt]");
     expect(body).toContain("criteria not passing: A2");
+  });
+});
+
+describe("factory run: the app of the acceptance tester", () => {
+  const DEPS = ".factory/logs/deps";
+
+  const START = `test -d ${DEPS} && touch ${DEPS}/up`;
+
+  function appConfig(install: string, start: string): string {
+    return CONFIG.replace(
+      'checks: [{ name: "parts", command: "test -e a/a.txt" }],',
+      `checks: [{ name: "install", command: ${JSON.stringify(install)} }, { name: "parts", command: "test -e a/a.txt" }],
+  app: { start: ${JSON.stringify(start)}, ready: "test -f ${DEPS}/up", readyTimeoutMs: 600000 },`,
+    );
+  }
+
+  const appTarget = (install: string, start = START) => targetRepo({ config: appConfig(install, start), issueBody: ISSUE_BODY, spec: SPEC });
+
+  it("should run the install check in the fresh worktree of the tester before it starts the app, because the worktree has no dependencies", async () => {
+    const repo = await appTarget(`mkdir -p ${DEPS}`);
+    const { run, runner } = harness(repo, bothParts);
+
+    const report = await run();
+
+    const [tester] = testers(runner);
+    expect(tester?.execs.slice(0, 2).map((call) => call.command)).toEqual([`mkdir -p ${DEPS}`, expect.stringContaining(`test -d ${DEPS}`)]);
+    expect(report.log.verification?.tester?.error).toBeUndefined();
+    expect(tester?.attempts).toHaveLength(1);
+    expect(report.result).toBe("ready");
+  });
+  it("should end the tester with an error that names the install check and its first error line when the install fails, without waiting for the app", async () => {
+    const failsForTester = `mkdir -p ${DEPS}; case "$PWD" in *-tester) echo "ERR_PNPM_FETCH_404 the registry is unreachable" >&2; exit 1;; esac`;
+    const repo = await appTarget(failsForTester);
+    const { run, runner } = harness(repo, bothParts);
+
+    const report = await run();
+
+    const tester = report.log.verification?.tester;
+    expect(tester?.error).toBe("The app did not start for the acceptance tester: the install check failed: ERR_PNPM_FETCH_404 the registry is unreachable");
+    expect(testers(runner)[0]?.attempts).toEqual([]);
+    expect(testers(runner)[0]?.execs).toHaveLength(1);
+    const [check] = tester?.checks ?? [];
+    expect(check).toMatchObject({ name: "install", passed: false, exitCode: 1, outputLog: "output/verification-tester/check-1-install.log" });
+    expect(await readFile(join(repo.repoDir, ".factory", "logs", report.log.runId, check?.outputLog ?? ""), "utf8")).toContain("ERR_PNPM_FETCH_404");
+    expect(logPathsOf(report.log)).toContain("output/verification-tester/check-1-install.log");
+    expect(report.result).toBe("draft");
+  });
+  it("should show in the terminal what the tester does while it prepares the app, so a long install or a slow app does not look like a hung run", async () => {
+    const repo = await appTarget(`mkdir -p ${DEPS}`);
+    const { run, progress } = harness(repo, bothParts);
+
+    await run();
+
+    const phases = progress.filter((line) => line.startsWith("tester: "));
+    expect(phases).toEqual([
+      "tester: running the install check",
+      `tester: starting the app with test -d ${DEPS} && touch ${DEPS}/up`,
+      `tester: waiting for the app to be ready (test -f ${DEPS}/up)`,
+    ]);
+  });
+  it("should end the tester as soon as the start command of the app exits with an error in its container, and keep the output of the app in the run log", async () => {
+    const start = `case "$PWD" in *-tester) echo "Error: listen EADDRINUSE :::4000" >&2; exit 1;; esac; ${START}`;
+    const repo = await appTarget(`mkdir -p ${DEPS}`, start);
+    const { run, runner } = harness(repo, bothParts);
+
+    const report = await run();
+
+    const tester = report.log.verification?.tester;
+    expect(tester?.error).toBe("The app did not start for the acceptance tester: the app exited with 1 before it was ready: Error: listen EADDRINUSE :::4000");
+    expect(testers(runner)[0]?.attempts).toEqual([]);
+    expect(tester?.checks).toEqual([
+      expect.objectContaining({ name: "app.start", passed: false, exitCode: 1, outputLog: "output/verification-tester/app-start.log" }),
+    ]);
+    expect(await readFile(join(repo.repoDir, ".factory", "logs", report.log.runId, "output/verification-tester/app-start.log"), "utf8")).toBe(
+      "Error: listen EADDRINUSE :::4000\n",
+    );
   });
 });

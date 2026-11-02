@@ -12,7 +12,7 @@ export function logPathsOf(log: RunLog): string[] {
     outputs.push(...subtask.gate.checks, ...subtask.gate.criteria);
   }
   if (log.verification !== undefined) {
-    outputs.push(...log.verification.checks, ...log.verification.criteria);
+    outputs.push(...log.verification.checks, ...log.verification.criteria, ...(log.verification.tester?.checks ?? []));
     paths.push(log.verification.tester?.logPath);
   }
   paths.push(...outputs.map((output) => output.outputLog));

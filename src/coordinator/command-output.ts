@@ -18,10 +18,19 @@ export async function keepFailedOutput(result: ExecResult, runDir: string, logPa
   return { outputTail: tail, outputLog: logPath };
 }
 
+export interface CheckOutput {
+  runDir: string;
+  label: string;
+}
+
 export function checkLogPath(label: string, index: number, name: string): string {
   return join("output", label, `check-${index + 1}-${name.replace(/[^A-Za-z0-9._-]+/g, "-")}.log`);
 }
 
 export function criterionLogPath(label: string, id: string): string {
   return join("output", label, `${id}.log`);
+}
+
+export function appLogPath(label: string): string {
+  return join("output", label, "app-start.log");
 }

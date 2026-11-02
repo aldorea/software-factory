@@ -124,6 +124,7 @@ export interface TesterRecord {
   verdicts: TesterVerdictRecord[];
   error?: string;
   logPath?: string;
+  checks?: CheckRecord[];
 }
 
 export interface TesterFailureRecord {

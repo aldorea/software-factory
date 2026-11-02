@@ -6,14 +6,14 @@ import { readPromptTemplate, renderTemplate } from "../prompts/template.ts";
 import { criteriaText } from "../spec/issue.ts";
 import { emptyUsage } from "../workers/agent-adapter.ts";
 import { inStage } from "../workers/failures.ts";
-import type { ActivityEvent, AttemptOutcome, AttemptResult } from "../workers/types.ts";
-import { inCheckContainer } from "./check-container.ts";
+import type { ActivityEvent, AttemptOutcome, AttemptResult, Worker } from "../workers/types.ts";
+import { execCheck, inCheckContainer } from "./check-container.ts";
 import { TESTER_EVIDENCE } from "./evidence-branch.ts";
 import { filesIn, startApp } from "./evidence-collection.ts";
 import { outputTail } from "./failures.ts";
 import { followUpStop } from "./follow-up.ts";
 import { environment, stopLimits, type RunContext } from "./run-context.ts";
-import type { CriterionRecord, TesterRecord } from "./run-log.ts";
+import type { CheckRecord, CriterionRecord, TesterRecord } from "./run-log.ts";
 import { addUsage, agentRunTokens } from "./run-totals.ts";
 import { formatDuration } from "./stop-rules.ts";
 import type { PlanLimitHit } from "./subtask-loop.ts";
@@ -29,7 +29,9 @@ export interface TesterRequest {
 
 export type TesterOutcome = { kind: "tested"; record: TesterRecord } | PlanLimitHit;
 
-type Attempted = { kind: "app-problem"; problem: string } | { kind: "attempted"; result: AttemptResult };
+type AppUnprepared = { kind: "app-problem"; problem: string; check?: CheckRecord };
+
+type Attempted = AppUnprepared | { kind: "attempted"; result: AttemptResult };
 
 export async function acceptanceTest(context: RunContext, request: TesterRequest): Promise<TesterOutcome> {
   const { config, tester } = context.prepared;
@@ -60,8 +62,8 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
         outputDir: evidenceDir,
       },
       async (worker) => {
-        const appProblem = config.app ? await startApp(worker, config.app) : null;
-        if (appProblem !== null) return { kind: "app-problem", problem: appProblem };
+        const unprepared = await prepareApp(context, worker, label);
+        if (unprepared !== null) return unprepared;
         const deadline = new Date(context.ports.clock.now().getTime() + TESTER_TIMEOUT_MS);
         const limits = { deadline, idleTimeoutMs: config.limits.attemptIdleTimeoutMs };
         const hooks = { onActivity: (event: ActivityEvent) => context.ports.activity?.({ source: "tester", at: context.ports.clock.now(), event }) };
@@ -70,7 +72,10 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
       },
     );
     if (attempted === null) return tested(tester, { error: "A failure of the worker layer stopped the acceptance tester." });
-    if (attempted.kind === "app-problem") return tested(tester, { error: `The app did not start for the acceptance tester: ${attempted.problem}` });
+    if (attempted.kind === "app-problem") {
+      const checks = attempted.check === undefined ? {} : { checks: [attempted.check] };
+      return tested(tester, { error: `The app did not start for the acceptance tester: ${attempted.problem}`, ...checks });
+    }
 
     const { result } = attempted;
     const kept = join(TESTER_EVIDENCE, request.label);
@@ -99,6 +104,25 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
   } finally {
     await rm(evidenceDir, { recursive: true, force: true });
   }
+}
+
+async function prepareApp(context: RunContext, worker: Worker, label: string): Promise<AppUnprepared | null> {
+  const { checks, app } = context.prepared.config;
+  const phase = (text: string) => context.ports.progress?.(`tester: ${text}`);
+  const output = { runDir: context.runDir, label };
+  const [install] = checks;
+  if (install !== undefined) {
+    phase(`running the ${install.name} check`);
+    const check = await execCheck(worker, install, 0, output);
+    if (!check.passed) {
+      const why = check.firstError === undefined ? ` with exit code ${check.exitCode}` : `: ${check.firstError}`;
+      return { kind: "app-problem", problem: `the ${install.name} check failed${why}`, check };
+    }
+  }
+  if (app === undefined) return null;
+  phase(`starting the app with ${app.start}`);
+  const problem = await startApp(worker, app, { ...output, onWaiting: (ready) => phase(`waiting for the app to be ready (${ready})`) });
+  return problem === null ? null : { kind: "app-problem", ...problem };
 }
 
 async function keepEvidence(evidenceDir: string, target: string): Promise<Set<string>> {
