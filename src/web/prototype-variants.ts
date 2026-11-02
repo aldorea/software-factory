@@ -153,6 +153,13 @@ pre.out .bad{color:var(--bad);font-weight:600}pre.out .ok{color:var(--ok)}pre.ou
 .crit{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem;margin:.5rem 0}.crit .head{margin-bottom:.25rem}.muted{color:var(--muted)}.obs{font-style:italic}
 .shots{display:flex;flex-wrap:wrap;gap:.6rem;margin:.5rem 0}.shot{margin:0;width:15rem}.shot img,.shot video{width:100%;border:1px solid var(--line);border-radius:6px}.shot figcaption{font-size:.75rem;color:var(--muted)}
 details.file{padding:.2rem .6rem}details.file summary{font-weight:400;font-size:.9rem}
+ol.steps{list-style:none;padding:0;margin:.5rem 0;display:grid;gap:.4rem}
+.step a{display:flex;gap:.7rem;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.5rem .8rem;color:var(--fg)}
+.step a:hover{text-decoration:none;border-color:var(--accent)}
+.step.bad a{border-left:4px solid var(--bad)}.step.ok a{border-left:4px solid var(--ok)}.step.running a{border-left:4px solid var(--info)}.step.warn a{border-left:4px solid var(--warn)}.step.pending a,.step.skipped a{opacity:.75}
+.step-icon{display:inline-flex;justify-content:center;align-items:center;width:1.4rem;height:1.4rem;border-radius:50%;font-size:.8rem;font-weight:700;flex:none;background:var(--muted-bg);color:var(--muted)}
+.step-icon.ok{background:var(--ok-bg);color:var(--ok)}.step-icon.bad{background:var(--bad-bg);color:var(--bad)}.step-icon.running{background:var(--info-bg);color:var(--info)}.step-icon.warn{background:var(--warn-bg);color:var(--warn)}
+.video-slot{border:1px dashed var(--line);border-radius:8px;padding:1.2rem;text-align:center;margin:.5rem 0;width:15rem;font-size:.85rem}
 .proto-bar{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:#111;color:#fff;border-radius:999px;padding:.4rem .6rem;display:flex;gap:.6rem;align-items:center;box-shadow:0 4px 18px #0006;font:13px system-ui;z-index:9}
 .proto-bar a{color:#fff;padding:0 .5rem;font-size:1.1rem}
 @media (max-width:50rem){.grid{grid-template-columns:1fr}.side{position:static}}
@@ -207,7 +214,7 @@ function subtaskSummary(subtask: SubtaskRecord, entry: RunEntry, now: Date, logU
     .map((attempt) => `<li>Intento ${attempt.number} · ${escapeHtml(attempt.agent.model)} · ${badge(attemptAbandoned(attempt, entry, now) ? "abandoned" : attempt.outcome)} · ${countedTokens(attempt.usage)} tokens${attempt.failure ? `<br><span style="color:var(--bad)">${escapeHtml(attempt.failure.description)}</span>` : ""}</li>`)
     .join("");
   const open = subtask.state !== "merged" ? " open" : "";
-  return `<details${open}><summary>${escapeHtml(subtask.id)} ${badge(subtask.state)} <span style="color:var(--muted);font-weight:400">· ${subtask.attempts.length} intentos · criterios ${escapeHtml(subtask.criteria.join(", "))}</span></summary><ul>${attempts}</ul><p>${subtask.gateRejections} rechazos del gate · ${subtask.verifierRejections} del independent verifier</p></details>`;
+  return `<details id="subtask-${escapeHtml(subtask.id)}"${open}><summary>${escapeHtml(subtask.id)} ${badge(subtask.state)} <span style="color:var(--muted);font-weight:400">· ${subtask.attempts.length} intentos · criterios ${escapeHtml(subtask.criteria.join(", "))}</span></summary><ul>${attempts}</ul><p>${subtask.gateRejections} rechazos del gate · ${subtask.verifierRejections} del independent verifier</p></details>`;
 }
 
 function variantA(entry: RunEntry, now: Date, logUrl: LogUrl, causes: Cause[], activity: Activity | null, evidence: EvidenceFiles): string {
@@ -217,8 +224,8 @@ function variantA(entry: RunEntry, now: Date, logUrl: LogUrl, causes: Cause[], a
   const body = [
     header(log, status, entry, now),
     why,
-    activityBlock(activity, now),
-    verificationEvidence(log, evidence),
+    stepsBlock(log, status),
+    verificationEvidence(log, evidence, status),
     `<h2>Subtareas</h2>`,
     ...log.subtasks.map((subtask) => subtaskSummary(subtask, entry, now, logUrl)),
   ].join("\n");
@@ -430,14 +437,22 @@ function filesBlock(files: readonly EvidenceFile[]): string {
   return [media.length ? `<div class="shots">${media.map(fileBlock).join("")}</div>` : "", ...texts.map(fileBlock)].join("");
 }
 
-function verificationEvidence(log: RunLog, evidence: EvidenceFiles): string {
+function pendingCriteria(log: RunLog, inferred: boolean): string {
+  const ids = [...log.criteria.passing, ...log.criteria.blocked, ...log.criteria.pending];
+  return ids.map((id) => `<div class="crit" id="${escapeHtml(id)}"><div class="head">${stepIcon(inferred ? "running" : "pending")} <strong>${escapeHtml(id)}</strong> ${badge(inferred ? "en curso (deducido)" : "pendiente")}</div></div>`).join("");
+}
+
+function verificationEvidence(log: RunLog, evidence: EvidenceFiles, status: string): string {
   const verification = log.verification;
-  if (!verification) return `<h2>Verificación y evidencias</h2><p>Todavía sin integrated verification.</p>`;
+  if (!verification) {
+    const inferred = status === "running" && log.subtasks.length > 0 && log.subtasks.every((subtask) => subtask.state === "merged");
+    return `<h2 id="verification">Verificación y evidencias</h2><p class="muted">${inferred ? "La integrated verification está en marcha: run.json todavía no dice qué check o criterio corre." : "Todavía sin integrated verification."}</p><h3 id="checks">Checks</h3><p class="muted">${inferred ? "en curso" : "pendientes"}</p><h3>Criterios</h3>${pendingCriteria(log, inferred)}`;
+  }
   const checks = verification.checks
     .map((check) => {
       const output = evidence.outputs.get(`check:${check.name}`);
       const body = !check.passed && output ? formatOutput(output) : check.firstError ? `<p>${escapeHtml(check.firstError)}</p>` : "";
-      return `<div class="crit"><div class="head"><strong>${escapeHtml(check.name)}</strong> ${badge(check.passed ? "pasa" : "falla")}</div>${body}</div>`;
+      return `<div class="crit"><div class="head">${stepIcon(check.passed ? "ok" : "bad")} <strong>${escapeHtml(check.name)}</strong> ${badge(check.passed ? "pasa" : "falla")}</div>${body}</div>`;
     })
     .join("");
   const verdicts = new Map((verification.tester?.verdicts ?? []).map((verdict) => [verdict.id, verdict]));
@@ -447,13 +462,15 @@ function verificationEvidence(log: RunLog, evidence: EvidenceFiles): string {
       const output = evidence.outputs.get(criterion.id);
       const files = evidence.byCriterion.get(criterion.id) ?? [];
       const videos = files.filter((file) => VIDEO_FILE.test(file.name));
+      const testerState = verdict ? (verdict.passed ? "ok" : "bad") : verification.tester?.error ? "bad" : criterion.passed ? "pending" : "skipped";
+      const overall = !criterion.passed ? "bad" : testerState;
       return [
         `<div class="crit" id="${escapeHtml(criterion.id)}">`,
-        `<div class="head"><strong>${escapeHtml(criterion.id)}</strong> <span class="muted">${escapeHtml(criterion.evidence ?? "")}</span> · comando ${badge(criterion.passed ? "pasa" : "falla")} · tester ${verdict ? badge(verdict.passed ? "pasa" : "falla") : badge("sin veredicto")}</div>`,
+        `<div class="head">${stepIcon(overall)} <strong>${escapeHtml(criterion.id)}</strong> <span class="muted">${escapeHtml(criterion.evidence ?? "")}</span> · comando ${badge(criterion.passed ? "pasa" : "falla")} · tester ${badge(STEP_LABEL[testerState])}</div>`,
         verdict ? `<p class="obs">${escapeHtml(verdict.observation)}</p>` : "",
         !criterion.passed && output ? formatOutput(output) : "",
         filesBlock(files),
-        criterion.evidence === "playwright" && videos.length === 0 ? `<p class="muted">Vídeo: no está en el run log.</p>` : "",
+        criterion.evidence === "playwright" && videos.length === 0 ? `<div class="video-slot">▶ Vídeo de ${escapeHtml(criterion.id)}<br><span class="muted">Aquí irá el vídeo de Playwright cuando la verificación lo copie al run log (Q12).</span></div>` : "",
         `</div>`,
       ].join("");
     })
@@ -471,4 +488,55 @@ function verificationEvidence(log: RunLog, evidence: EvidenceFiles): string {
     `<h3>Criterios</h3>${criteria}${human}`,
     testerBlock,
   ].join("\n");
+}
+
+type StepState = "ok" | "bad" | "running" | "pending" | "skipped" | "warn";
+const STEP_LABEL: Record<StepState, string> = { ok: "pasa", bad: "falla", running: "en curso", pending: "pendiente", skipped: "no ejecutado", warn: "atención" };
+const STEP_ICON: Record<StepState, string> = { ok: "✓", bad: "✗", running: "●", pending: "○", skipped: "–", warn: "!" };
+
+function stepIcon(state: StepState): string {
+  return `<span class="step-icon ${state}">${STEP_ICON[state]}</span>`;
+}
+
+type Step = { state: StepState; title: string; summary: string; href: string; inferred?: boolean };
+
+function subtaskStep(subtask: SubtaskRecord): Step {
+  const state: StepState = subtask.state === "merged" ? "ok" : subtask.state === "blocked" ? "bad" : subtask.state === "pending" ? "pending" : "running";
+  const gate = subtask.gate ? ` · gate ${subtask.gate.accepted ? "aceptado" : "rechazado"}` : "";
+  return { state, title: `Subtarea ${subtask.id}`, summary: `${subtask.state} · ${subtask.attempts.length} ${subtask.attempts.length === 1 ? "intento" : "intentos"}${gate}`, href: `#subtask-${subtask.id}` };
+}
+
+function runSteps(log: RunLog, status: string): Step[] {
+  const steps = log.subtasks.map(subtaskStep);
+  const merged = log.subtasks.length > 0 && log.subtasks.every((subtask) => subtask.state === "merged");
+  const live = status === "running";
+  const verification = log.verification;
+  if (!verification) {
+    steps.push({ state: live && merged ? "running" : "pending", title: "Integrated verification", summary: live && merged ? "en marcha" : "pendiente", href: "#verification", inferred: live && merged });
+    steps.push({ state: "pending", title: "Acceptance tester", summary: "pendiente", href: "#verification" });
+  } else {
+    const checksOk = verification.checks.filter((check) => check.passed).length;
+    const criteriaOk = verification.criteria.filter((criterion) => criterion.passed).length;
+    const commandsPassed = verification.checks.every((check) => check.passed) && verification.criteria.every((criterion) => criterion.passed) && verification.environment === undefined;
+    steps.push({ state: commandsPassed ? "ok" : "bad", title: "Integrated verification", summary: `checks ${checksOk}/${verification.checks.length} · criterios ${criteriaOk}/${verification.criteria.length}${verification.environment ? " · entorno" : ""}`, href: "#verification" });
+    const tester = verification.tester;
+    if (tester) {
+      const ok = tester.verdicts.filter((verdict) => verdict.passed).length;
+      steps.push({ state: tester.error ? "bad" : ok === tester.verdicts.length ? "ok" : "bad", title: "Acceptance tester", summary: tester.error ? "error" : `veredictos ${ok}/${tester.verdicts.length}`, href: "#tester" });
+    } else {
+      const testing = live && commandsPassed;
+      steps.push({ state: testing ? "running" : commandsPassed && live ? "pending" : "skipped", title: "Acceptance tester", summary: testing ? "en marcha" : !commandsPassed ? "no ejecutado: falló la verificación" : live ? "pendiente" : "no ejecutado", href: "#verification", inferred: testing });
+    }
+  }
+  if (isUnpublished(log)) steps.push({ state: "bad", title: "Publicación", summary: `falló en ${log.publicationFailure.phase}`, href: "#" });
+  else if (log.pullRequest) steps.push({ state: log.pullRequest.draft ? "warn" : "ok", title: "Publicación", summary: `PR #${log.pullRequest.number}${log.pullRequest.draft ? " (draft)" : " ready"}`, href: log.pullRequest.url });
+  else steps.push({ state: live ? "pending" : "skipped", title: "Publicación", summary: live ? "pendiente" : "sin PR", href: "#" });
+  return steps;
+}
+
+function stepsBlock(log: RunLog, status: string): string {
+  const items = runSteps(log, status).map(
+    (step) => `<li class="step ${step.state}"><a href="${escapeHtml(step.href)}">${stepIcon(step.state)}<span><strong>${escapeHtml(step.title)}</strong><br><span class="muted">${escapeHtml(step.summary)}${step.inferred ? " (deducido)" : ""}</span></span></a></li>`,
+  );
+  return `<h2>Pasos del run</h2><ol class="steps">${items.join("")}</ol>`;
 }
