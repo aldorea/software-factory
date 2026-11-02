@@ -21,4 +21,5 @@ The server binds `127.0.0.1` only and accepts a `POST` only with the `Origin` of
 - A run started in a terminal is stopped in its terminal; the web stops only what it started.
 - In a turn of the refinement nobody can approve a tool, so the refinement from the web runs with a fixed list of allowed tools, checked in code. A refinement that needs another tool must change the list, and the list is part of the design.
 - The refinement skill must work turn by turn: each turn ends with a message that the developer answers, as each round of questions already does.
+- A turn of the refinement is a capability of the adapter of each agent: start the skill, resume the session, apply the list of allowed tools and fail closed when it does not load. Only Claude Code has it while the refinement stays on Claude Code ([ADR 0003](0003-interchangeable-agents.md)); another agent joins by giving its adapter a turn, with no change to the web.
 - A credential travels from the browser to the server in the body of a `POST` on `127.0.0.1`, and from the server to `factory auth` on its standard input.
