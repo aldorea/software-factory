@@ -105,6 +105,10 @@ The record of a run in `.factory/logs/<run-id>/`, outside git: `run.json` and th
 A command of the CLI that the developer starts from the web view. It runs as the same command, with the same checks, in a process of its own.
 _Avoid_: job, task, run (a run is only what `factory run` does)
 
+**Interrupted**:
+The state of a web action whose process ended without recording its end, for example because it was killed or the machine restarted.
+_Avoid_: abandoned (a run that has stopped changing), failed (a web action that recorded a non-zero exit code)
+
 **Publication**:
 The last step of a run: the coordinator pushes the integration branch and the evidence branch and opens or updates the PR. A run whose publication failed keeps its result and can be published again without new work.
 _Avoid_: delivery, upload, sync
