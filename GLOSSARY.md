@@ -101,6 +101,10 @@ The branch `factory-evidence/<n>`, with no common history with the default branc
 **Run log**:
 The record of a run in `.factory/logs/<run-id>/`, outside git: `run.json` and the raw log of each attempt.
 
+**Web action**:
+A command of the CLI that the developer starts from the web view. It runs as the same command, with the same checks, in a process of its own.
+_Avoid_: job, task, run (a run is only what `factory run` does)
+
 **Publication**:
 The last step of a run: the coordinator pushes the integration branch and the evidence branch and opens or updates the PR. A run whose publication failed keeps its result and can be published again without new work.
 _Avoid_: delivery, upload, sync
