@@ -6,7 +6,7 @@ The idea comes from a factory that splits its review into a black-box app check 
 
 ## Considered Options
 
-- **Keep the independent verifier alone.** Rejected: it judges whether a test proves a criterion, but it cannot see what the app does, and the test comes from the worker it checks.
+- **Keep the independent verifier alone.** Rejected: it judges whether a test proves a criterion, but it cannot see what the app does, and the test comes from the worker it checks. Accepted later only for a criterion that no running app can show: see [ADR 0013](0013-test-evidence-with-no-running-app.md).
 - **An agent that reviews the diff for bugs and regressions.** Rejected for now: the developer reviews every pull request and the gate covers the mechanical checks of the diff. It is reconsidered when the escaped defects show bugs that a reading of the code would have found.
 - **The tester at every gate.** Rejected: it multiplies the cost by the attempts of every subtask, while the evidence of the pull request comes only from the integrated verification.
 - **Holdout scenarios hidden from the workers.** Deferred: the containers already keep a file on the host out of the workers' reach, with any agent, but nobody writes or maintains the scenarios yet. It is reconsidered when the escaped defects show behaviour that the criteria do not describe.

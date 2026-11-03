@@ -169,3 +169,59 @@ The usage cap of the subscription of one of the agents of a run, per window of t
 **Paused**:
 The state of a run that reached the plan limit of one of its agents. It is not a failure: no worker starts and no patience or wall clock is spent until the developer resumes it.
 _Avoid_: blocked, failed
+
+### Version 2
+
+The terms of [`docs/design-v2.md`](docs/design-v2.md). They hold once version 2 is built.
+
+**Engagement**:
+One job for one client: a new target repo, its brief, its PRD and its engagement plan, run by one developer.
+_Avoid_: project, client repo
+
+**Brief**:
+What the client asked for, in their own words, with their attachments and mockups. It is never approved by itself.
+_Avoid_: requirements, spec
+
+**PRD**:
+The scope of an engagement as the client reads it, in their language and with no technical terms, in sections with a fixed ID `P1`, `P2`… The client confirms it outside the factory.
+_Avoid_: spec, plan
+
+**Engagement plan**:
+The parent issue of an engagement and its children, in order, each with the PRD sections it delivers. The developer approves it with a hash.
+_Avoid_: plan (alone), roadmap
+
+**Child**:
+One issue of an engagement plan. It has its own spec and run, and starts only after the previous child is merged.
+_Avoid_: subtask (a part of one run), task
+
+**Plan refinement**:
+The refinement that turns the brief into the PRD and the engagement plan, with no technical part of any child.
+_Avoid_: project refinement
+
+**Plan reviewer**:
+An agent with every tool denied and its own clean context that receives only the brief, the PRD and the children, and reports the gaps between them.
+_Avoid_: reviewer, verifier
+
+**Stack template**:
+The versioned base, owned by the factory, from which every engagement creates its target repo.
+_Avoid_: boilerplate, starter
+
+**Preview**:
+A protected deploy of the verified SHA of a child, for the client to try. It is never evidence.
+_Avoid_: deploy (alone), staging
+
+**Preview token**:
+The secret that lets the coordinator deploy a preview from the host. It never enters a container.
+_Avoid_: credential (that is an agent's)
+
+**Demo seed**:
+Believable data in the client's language that the preview and the acceptance tester's app load, apart from the data of the tests.
+_Avoid_: fixtures, test data
+
+**Result note**:
+What the client receives for each child: the text of its PRD sections, the link to its preview and its screenshots, with nothing of the implementation. The developer sends it.
+_Avoid_: delivery note, report
+
+**Test criterion**:
+A criterion whose evidence is a test that the worker writes and the independent verifier judges, allowed only when no running app can prove it.
+_Avoid_: unit criterion
