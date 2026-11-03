@@ -1,5 +1,5 @@
-import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { copyFile, lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
+import { basename, dirname, join, relative, sep } from "node:path";
 import type { AppStart, EvidenceCommands } from "../config/config.ts";
 import type { Worker } from "../workers/types.ts";
 import { appLogPath, criterionLogPath, keepFailedOutput, type CheckOutput } from "./command-output.ts";
@@ -21,6 +21,7 @@ export interface EvidenceContext {
   app: AppStart | undefined;
   commands: EvidenceCommands;
   attachmentsDir: string;
+  recordingsDir?: string;
   runDir: string;
   label: string;
 }
@@ -31,9 +32,12 @@ export async function collectEvidence(worker: Worker, plan: EvidencePlan, contex
   if (appProblem !== null) return { criteria: [], human: [], appProblem: appProblem.problem, ...(appProblem.check ? { appCheck: appProblem.check } : {}) };
   const criteria: CriterionRecord[] = [];
   for (const item of plan.criteria) {
+    const recording = item.evidence === "playwright" ? recordingOf(worker, item.id, context) : undefined;
+    if (recording !== undefined) await rm(recording.source, { recursive: true, force: true });
     const result = await worker.exec(item.command);
     const passed = result.exitCode === 0;
     const output = passed ? {} : await keepFailedOutput(result, context.runDir, criterionLogPath(context.label, item.id));
+    const evidenceFiles = recording === undefined ? [] : await keepRecording(worker, recording, context.runDir);
     criteria.push({
       id: item.id,
       evidence: item.evidence,
@@ -41,6 +45,7 @@ export async function collectEvidence(worker: Worker, plan: EvidencePlan, contex
       exitCode: result.exitCode,
       passed,
       ...output,
+      ...(evidenceFiles.length > 0 ? { evidenceFiles } : {}),
     });
   }
   const human: HumanCriterionRecord[] = [];
@@ -108,6 +113,40 @@ async function isReady(worker: Worker, ready: string, readyTimeoutMs: number): P
     if ((error as { killed?: boolean }).killed === true) return false;
     throw error;
   }
+}
+
+interface Recording {
+  source: string;
+  target: string;
+}
+
+function recordingOf(worker: Worker, id: string, context: EvidenceContext): Recording | undefined {
+  const { attachments } = context.commands;
+  if (context.recordingsDir === undefined || attachments === undefined) return undefined;
+  return { source: join(worker.worktreePath, attachments), target: join(context.recordingsDir, id) };
+}
+
+async function keepRecording(worker: Worker, recording: Recording, runDir: string): Promise<string[]> {
+  const { source, target } = recording;
+  await rm(target, { recursive: true, force: true });
+  const kept: string[] = [];
+  if (await isFolderInside(source, worker.worktreePath)) {
+    for (const file of (await filesIn(source)).sort()) {
+      const copy = join(target, relative(source, file));
+      await mkdir(dirname(copy), { recursive: true });
+      await copyFile(file, copy);
+      kept.push(relative(runDir, copy));
+    }
+  }
+  await rm(source, { recursive: true, force: true });
+  return kept;
+}
+
+async function isFolderInside(folder: string, root: string): Promise<boolean> {
+  const entry = await lstat(folder).catch(() => null);
+  if (entry === null || !entry.isDirectory()) return false;
+  const [realFolder, realRoot] = await Promise.all([realpath(folder), realpath(root)]);
+  return realFolder.startsWith(`${realRoot}${sep}`);
 }
 
 async function captureAttachments(worker: Worker, id: string, context: EvidenceContext): Promise<string[]> {

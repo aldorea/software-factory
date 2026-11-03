@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { approveSpec } from "../../src/commands/approve.ts";
@@ -30,7 +31,7 @@ const ISSUE_BODY = [
   "",
 ].join("\n");
 
-const SPEC = [
+const specText = (a1Level: "subtask" | "integration" = "subtask") => [
   "# Spec #42",
   "",
   "```json factory-spec",
@@ -40,7 +41,7 @@ const SPEC = [
       base: null,
       subtasks: [{ id: "S1", criteria: ["A1", "A2", "A3"], scope: ["src/", "e2e/", "requests/"], dependsOn: [], testChanges: [] }],
       criteria: {
-        A1: { evidence: "playwright", level: "subtask" },
+        A1: { evidence: "playwright", level: a1Level },
         A2: { evidence: "request", level: "integration" },
         A3: { evidence: "human", level: "integration", reason: "Friendliness is subjective." },
       },
@@ -97,7 +98,7 @@ interface Target {
   github: FakeGitHub;
 }
 
-async function targetRepo(config: string): Promise<Target> {
+async function targetRepo(config: string, spec: string = specText()): Promise<Target> {
   const repoDir = await temp.make("evidence-target-");
   const remoteDir = await temp.make("evidence-remote-");
   await execOk("git", ["init", "-q", "--bare", "-b", "main", remoteDir]);
@@ -116,7 +117,7 @@ async function targetRepo(config: string): Promise<Target> {
   await git(repoDir, "remote", "set-head", "origin", "--auto");
   await git(repoDir, "switch", "-q", "-c", BRANCH);
   await mkdir(join(repoDir, "specs"));
-  await writeFile(join(repoDir, "specs", "42.md"), SPEC);
+  await writeFile(join(repoDir, "specs", "42.md"), spec);
   await git(repoDir, "add", ".");
   await git(repoDir, "commit", "-q", "-m", "Spec #42");
   await git(repoDir, "switch", "-q", "main");
@@ -229,6 +230,87 @@ describe("criterion evidence at the integrated verification", () => {
 
     expect(report.result).toBe("ready");
     expect(report.log.verification?.criteria.find((criterion) => criterion.id === "A2")?.passed).toBe(true);
+  });
+});
+
+const RECORDING =
+  'mkdir -p test-results/{{id}}-chromium && cp e2e/{{id}}.png test-results/{{id}}-chromium/test-finished-1.png && cp e2e/{{id}}.webm test-results/{{id}}-chromium/video.webm; test "$(cat e2e/{{id}}.result)" = pass';
+
+function recorded(results: { A1?: string } = {}): AttemptScript {
+  const base = writes(results);
+  return async (call) => {
+    const attempt = await base(call);
+    return { ...attempt, files: { ...attempt.files, "e2e/A1.png": "png-of-A1\n", "e2e/A1.webm": "webm-of-A1\n" } };
+  };
+}
+
+describe("Playwright evidence in the run log", () => {
+  it("should copy the screenshots and videos of a passing Playwright criterion to evidence/<id>/ and record their paths", async () => {
+    const target = await targetRepo(configSource({ playwright: RECORDING }));
+    const { run } = harness(target, recorded());
+
+    const report = await run();
+
+    const criterion = report.log.verification?.criteria.find((item) => item.id === "A1");
+    expect(criterion?.passed).toBe(true);
+    expect(criterion?.evidenceFiles).toEqual(["evidence/A1/A1-chromium/test-finished-1.png", "evidence/A1/A1-chromium/video.webm"]);
+    const runDir = join(target.repoDir, ".factory", "logs", report.log.runId);
+    expect(await readFile(join(runDir, "evidence", "A1", "A1-chromium", "video.webm"), "utf8")).toBe("webm-of-A1\n");
+  });
+
+  it("should copy the screenshots and videos of a failing Playwright criterion as well, so the developer sees what it showed", async () => {
+    const target = await targetRepo(configSource({ playwright: RECORDING }), specText("integration"));
+    const { run } = harness(target, recorded({ A1: "fail" }));
+
+    const report = await run();
+
+    const criterion = report.log.verification?.criteria.find((item) => item.id === "A1");
+    expect(criterion?.passed).toBe(false);
+    expect(criterion?.evidenceFiles).toEqual(["evidence/A1/A1-chromium/test-finished-1.png", "evidence/A1/A1-chromium/video.webm"]);
+    const runDir = join(target.repoDir, ".factory", "logs", report.log.runId);
+    expect(await readFile(join(runDir, "evidence", "A1", "A1-chromium", "test-finished-1.png"), "utf8")).toBe("png-of-A1\n");
+  });
+
+  it("should not copy a symlink of the Playwright folder that points outside it, so a test cannot pull a host file into the run log", async () => {
+    const outside = await temp.make("evidence-outside-");
+    await writeFile(join(outside, "secret.txt"), "host secret\n");
+    const linking = `${RECORDING}; ln -s ${outside}/secret.txt test-results/{{id}}-chromium/secret.txt; ln -s ${outside} test-results/{{id}}-chromium/outside`;
+    const target = await targetRepo(configSource({ playwright: linking }));
+    const { run } = harness(target, recorded());
+
+    const report = await run();
+
+    const criterion = report.log.verification?.criteria.find((item) => item.id === "A1");
+    expect(criterion?.evidenceFiles).toEqual(["evidence/A1/A1-chromium/test-finished-1.png", "evidence/A1/A1-chromium/video.webm"]);
+    const copied = await readdir(join(target.repoDir, ".factory", "logs", report.log.runId, "evidence", "A1", "A1-chromium"));
+    expect(copied.sort()).toEqual(["test-finished-1.png", "video.webm"]);
+  });
+
+  it("should copy nothing when the Playwright folder itself is a symlink that points outside the worktree", async () => {
+    const outside = await temp.make("evidence-outside-");
+    await writeFile(join(outside, "secret.png"), "host secret\n");
+    const linking = `ln -s ${outside} test-results; test "$(cat e2e/{{id}}.result)" = pass`;
+    const target = await targetRepo(configSource({ playwright: linking }));
+    const { run } = harness(target, writes());
+
+    const report = await run();
+
+    const criterion = report.log.verification?.criteria.find((item) => item.id === "A1");
+    expect(criterion?.passed).toBe(true);
+    expect(criterion).not.toHaveProperty("evidenceFiles");
+    expect(existsSync(join(target.repoDir, ".factory", "logs", report.log.runId, "evidence", "A1"))).toBe(false);
+  });
+
+  it("should create no evidence folder for a Playwright criterion that leaves no files", async () => {
+    const target = await targetRepo(configSource());
+    const { run } = harness(target, writes());
+
+    const report = await run();
+
+    const criterion = report.log.verification?.criteria.find((item) => item.id === "A1");
+    expect(criterion?.passed).toBe(true);
+    expect(criterion).not.toHaveProperty("evidenceFiles");
+    expect(existsSync(join(target.repoDir, ".factory", "logs", report.log.runId, "evidence", "A1"))).toBe(false);
   });
 });
 

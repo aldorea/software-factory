@@ -16,6 +16,7 @@ export interface CheckRequest {
   purpose: WorkerEnvironmentContext;
   plan: EvidencePlan;
   subtaskId: string | null;
+  keepsRecordings?: boolean;
 }
 
 export interface CheckOutcome extends EvidenceResult {
@@ -96,6 +97,7 @@ async function checksIn(context: RunContext, worker: Worker, request: CheckReque
     app: config.app,
     commands: config.evidence,
     attachmentsDir: join(context.runDir, "attachments"),
+    ...(request.keepsRecordings === true ? { recordingsDir: join(context.runDir, "evidence") } : {}),
     runDir: context.runDir,
     label: request.label,
   });

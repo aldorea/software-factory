@@ -36,6 +36,7 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
       purpose: { purpose: "verification", subtask: null, slot: 0 },
       plan: integrationPlan(spec, config.evidence),
       subtaskId: null,
+      keepsRecordings: true,
     });
     if (verified === null) {
       delete log.verification;
