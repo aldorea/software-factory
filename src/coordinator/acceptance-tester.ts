@@ -115,14 +115,10 @@ async function prepareApp(
   onPhase: TesterRequest["onPhase"],
 ): Promise<AppUnprepared | null> {
   const { checks, app } = context.prepared.config;
-  const phase = async (current: TesterPhase, text: string) => {
-    await onPhase?.(current);
-    context.ports.progress?.(`tester: ${text}`);
-  };
   const output = { runDir: context.runDir, label };
   const [install] = checks;
   if (install !== undefined) {
-    await phase("install", `running the ${install.name} check`);
+    await onPhase?.("install");
     const check = await execCheck(worker, install, 0, output);
     if (!check.passed) {
       const why = check.firstError === undefined ? ` with exit code ${check.exitCode}` : `: ${check.firstError}`;
@@ -130,8 +126,8 @@ async function prepareApp(
     }
   }
   if (app === undefined) return null;
-  await phase("start", `starting the app with ${app.start}`);
-  const problem = await startApp(worker, app, { ...output, onWaiting: (ready) => phase("ready", `waiting for the app to be ready (${ready})`) });
+  await onPhase?.("start");
+  const problem = await startApp(worker, app, { ...output, onWaiting: () => onPhase?.("ready") });
   return problem === null ? null : { kind: "app-problem", ...problem };
 }
 

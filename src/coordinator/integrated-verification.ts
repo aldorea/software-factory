@@ -42,12 +42,18 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
       subtaskId: null,
       keepsRecordings: true,
       progress: {
+        step: async (current) => {
+          progress.current = current;
+          await context.save();
+        },
         check: async (record) => {
           progress.checks.push(record);
+          delete progress.current;
           await context.save();
         },
         criterion: async (record) => {
           progress.criteria.push(record);
+          delete progress.current;
           await context.save();
         },
       },

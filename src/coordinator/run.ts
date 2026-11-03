@@ -81,7 +81,7 @@ export async function runIssue(request: RunRequest, ports: RunPorts): Promise<Ru
     saveLock.exclusive(async () => {
       applyTotals(log, ports.clock.now());
       await writeRunLog(runLogPath, log);
-      for (const line of progressLines(reported, log)) ports.progress?.(line);
+      for (const line of progressLines(reported, log, prepared.config)) ports.progress?.(line);
       reported = structuredClone(log);
       ports.snapshot?.(reported);
     });

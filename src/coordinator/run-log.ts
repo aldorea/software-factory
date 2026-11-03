@@ -147,7 +147,9 @@ export interface VerificationRecord {
   tester?: TesterRecord;
 }
 
-export type VerificationProgressRecord = Pick<VerificationRecord, "sha" | "checks" | "criteria">;
+export type VerificationStep = { kind: "check"; name: string } | { kind: "app" } | { kind: "criterion"; id: string };
+
+export type VerificationProgressRecord = Pick<VerificationRecord, "sha" | "checks" | "criteria"> & { current?: VerificationStep };
 
 export interface EvidenceBranchRecord {
   branch: string;
