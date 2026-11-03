@@ -61,6 +61,17 @@ describe("resumedLog and a publication that failed", () => {
   });
 });
 
+describe("resumedLog and the progress of the integrated verification", () => {
+  it("should start the continued run with empty progress, because no process is running the checks of the paused run", () => {
+    const check = { name: "greeting", command: "true", exitCode: 0, passed: true };
+    const previous = runRecord(0, [], { result: "paused", verificationProgress: { sha: "a".repeat(40), checks: [check], criteria: [] } });
+
+    const log = resumedLog({ fresh: fresh(), previous, merged: new Set(), now: NOW });
+
+    expect(log).not.toHaveProperty("verificationProgress");
+  });
+});
+
 describe("resumedLog and the idle threshold of the run", () => {
   it("should keep the attemptIdleTimeoutMs the paused run recorded, although the new start carries another", () => {
     const previous = runRecord(0, [], { result: "paused", attemptIdleTimeoutMs: 1_800_000 });

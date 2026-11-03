@@ -4,7 +4,7 @@ import { createBranchAt, deleteBranch } from "../git/repo.ts";
 import { inStage } from "../workers/failures.ts";
 import type { Worker } from "../workers/types.ts";
 import { checkLogPath, keepFailedOutput, type CheckOutput } from "./command-output.ts";
-import { collectEvidence, type EvidenceResult } from "./evidence-collection.ts";
+import { collectEvidence, type CheckProgress, type EvidenceResult } from "./evidence-collection.ts";
 import type { EvidencePlan } from "./evidence.ts";
 import { firstErrorLine } from "./failures.ts";
 import { environment, type RunContext } from "./run-context.ts";
@@ -17,6 +17,7 @@ export interface CheckRequest {
   plan: EvidencePlan;
   subtaskId: string | null;
   keepsRecordings?: boolean;
+  progress?: CheckProgress;
 }
 
 export interface CheckOutcome extends EvidenceResult {
@@ -91,7 +92,10 @@ async function checksIn(context: RunContext, worker: Worker, request: CheckReque
   const { config } = context.prepared;
   const checks: CheckRecord[] = [];
   for (const [index, check] of config.checks.entries()) {
-    checks.push(await execCheck(worker, check, index, { runDir: context.runDir, label: request.label }));
+    await request.progress?.step({ kind: "check", name: check.name });
+    const record = await execCheck(worker, check, index, { runDir: context.runDir, label: request.label });
+    checks.push(record);
+    await request.progress?.check(record);
   }
   const { appCheck, ...evidence } = await collectEvidence(worker, request.plan, {
     app: config.app,
@@ -100,6 +104,7 @@ async function checksIn(context: RunContext, worker: Worker, request: CheckReque
     ...(request.keepsRecordings === true ? { recordingsDir: join(context.runDir, "evidence") } : {}),
     runDir: context.runDir,
     label: request.label,
+    ...(request.progress !== undefined ? { progress: request.progress } : {}),
   });
   return { checks: appCheck === undefined ? checks : [...checks, appCheck], ...evidence };
 }
