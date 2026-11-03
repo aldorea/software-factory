@@ -2,15 +2,17 @@ import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { AppStart, EvidenceCommands } from "../config/config.ts";
 import type { Worker } from "../workers/types.ts";
-import { criterionLogPath, keepFailedOutput } from "./command-output.ts";
+import { appLogPath, criterionLogPath, keepFailedOutput, type CheckOutput } from "./command-output.ts";
 import { evidenceCommand, type EvidencePlan } from "./evidence.ts";
-import type { CriterionRecord, HumanCriterionRecord } from "./run-log.ts";
+import { firstErrorLine } from "./failures.ts";
+import type { CheckRecord, CriterionRecord, HumanCriterionRecord } from "./run-log.ts";
 import { formatDuration } from "./stop-rules.ts";
 
 export interface EvidenceResult {
   criteria: CriterionRecord[];
   human: HumanCriterionRecord[];
   appProblem?: string;
+  appCheck?: CheckRecord;
 }
 
 export const READY_POLL_MS = 250;
@@ -25,8 +27,8 @@ export interface EvidenceContext {
 
 export async function collectEvidence(worker: Worker, plan: EvidencePlan, context: EvidenceContext): Promise<EvidenceResult> {
   if (plan.criteria.length === 0 && plan.human.length === 0) return { criteria: [], human: [] };
-  const appProblem = context.app ? await startApp(worker, context.app) : null;
-  if (appProblem !== null) return { criteria: [], human: [], appProblem };
+  const appProblem = context.app ? await startApp(worker, context.app, context) : null;
+  if (appProblem !== null) return { criteria: [], human: [], appProblem: appProblem.problem, ...(appProblem.check ? { appCheck: appProblem.check } : {}) };
   const criteria: CriterionRecord[] = [];
   for (const item of plan.criteria) {
     const result = await worker.exec(item.command);
@@ -48,16 +50,55 @@ export async function collectEvidence(worker: Worker, plan: EvidencePlan, contex
   return { criteria, human };
 }
 
-export async function startApp(worker: Worker, app: AppStart): Promise<string | null> {
-  const started = await worker.exec(`(${app.start}) >/dev/null 2>&1 &`);
-  if (started.exitCode !== 0) return `the app did not start: ${app.start} exited with ${started.exitCode}`;
-  if (app.ready === undefined) return null;
-  const polls = Math.max(1, Math.ceil(app.readyTimeoutMs / READY_POLL_MS));
-  for (let poll = 1; poll <= polls; poll += 1) {
-    if (await isReady(worker, app.ready, app.readyTimeoutMs)) return null;
-    if (poll < polls) await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS));
+export interface AppProblem {
+  problem: string;
+  check?: CheckRecord;
+}
+
+export const APP_START_CHECK = "app.start";
+
+export const APP_OUTPUT_BYTES = 64 * 1024;
+
+export interface AppStartOptions extends CheckOutput {
+  onWaiting?: (ready: string) => void;
+}
+
+export async function startApp(worker: Worker, app: AppStart, options: AppStartOptions): Promise<AppProblem | null> {
+  const started = await worker.exec(
+    `dir=$(mktemp -d) || exit 1; { ( (${app.start}) 2>&1; echo $? >"$dir/code" ) | tail -c ${APP_OUTPUT_BYTES} >"$dir/output"; mv "$dir/code" "$dir/exit"; } >/dev/null 2>&1 & echo "$dir"`,
+  );
+  if (started.exitCode !== 0) return { problem: `the app did not start: ${app.start} exited with ${started.exitCode}` };
+  const dir = started.stdout.trim();
+  try {
+    if (app.ready === undefined) return null;
+    options.onWaiting?.(app.ready);
+    const polls = Math.max(1, Math.ceil(app.readyTimeoutMs / READY_POLL_MS));
+    for (let poll = 1; poll <= polls; poll += 1) {
+      if (await isReady(worker, app.ready, app.readyTimeoutMs)) return null;
+      const exitCode = await appExitCode(worker, dir);
+      if (exitCode !== null && exitCode !== 0) return await exitedApp(worker, app, dir, exitCode, options);
+      if (poll < polls) await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS));
+    }
+    return { problem: `the app did not become ready: ${app.ready} kept failing for ${formatDuration(app.readyTimeoutMs)}` };
+  } finally {
+    await worker.exec(`rm -rf '${dir}'`).catch(() => undefined);
   }
-  return `the app did not become ready: ${app.ready} kept failing for ${formatDuration(app.readyTimeoutMs)}`;
+}
+
+async function appExitCode(worker: Worker, dir: string): Promise<number | null> {
+  const read = await worker.exec(`cat '${dir}/exit' 2>/dev/null`);
+  const text = read.stdout.trim();
+  return read.exitCode === 0 && /^[0-9]+$/.test(text) ? Number(text) : null;
+}
+
+async function exitedApp(worker: Worker, app: AppStart, dir: string, exitCode: number, output: CheckOutput): Promise<AppProblem> {
+  const { stdout } = await worker.exec(`cat '${dir}/output' 2>/dev/null`);
+  const firstError = firstErrorLine(stdout);
+  const kept = await keepFailedOutput({ exitCode, stdout, stderr: "" }, output.runDir, appLogPath(output.label));
+  return {
+    problem: `the app exited with ${exitCode} before it was ready${firstError === undefined ? "" : `: ${firstError}`}`,
+    check: { name: APP_START_CHECK, command: app.start, exitCode, passed: false, ...(firstError !== undefined ? { firstError } : {}), ...kept },
+  };
 }
 
 async function isReady(worker: Worker, ready: string, readyTimeoutMs: number): Promise<boolean> {

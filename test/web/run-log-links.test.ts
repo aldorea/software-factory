@@ -415,4 +415,37 @@ describe("the link of the independent verifier and the acceptance tester to thei
     expect(page.body).toContain("Acceptance tester");
     expect(logHrefs(page.body)).toEqual([]);
   });
+
+  it("should open the output of the check that failed while the tester prepared the app", async () => {
+    const page = await pageWith(
+      () => ({
+        verification: {
+          sha: "9f8e7d6",
+          passed: false,
+          checks: [],
+          criteria: [],
+          humanCriteria: [],
+          tester: {
+            agent: { agent: "claude-code", model: "claude-sonnet-4-5" },
+            verdicts: [],
+            error: "The app did not start for the acceptance tester: the install check failed: ERR_PNPM_FETCH_404",
+            checks: [
+              {
+                name: "install",
+                command: "pnpm install --frozen-lockfile",
+                exitCode: 1,
+                passed: false,
+                outputTail: "ERR_PNPM_FETCH_404",
+                outputLog: "output/verification-tester/check-1-install.log",
+              },
+            ],
+          },
+        },
+      }),
+      { "output/verification-tester/check-1-install.log": "ERR_PNPM_FETCH_404 the registry is unreachable" },
+    );
+
+    expect(logHrefs(page.body)).toEqual([`/runs/${page.runId}/output/verification-tester/check-1-install.log`]);
+    expect((await open(page, logHrefs(page.body)[0] as string)).body).toBe("ERR_PNPM_FETCH_404 the registry is unreachable");
+  });
 });

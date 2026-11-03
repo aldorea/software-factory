@@ -27,6 +27,7 @@ function testerBlock(tester: TesterRecord | undefined, logUrl: LogUrl): string {
   ];
   lines.push(...logAnchors(logUrl(tester.logPath), RAW_LOG).map((link) => `<p>${link}</p>`));
   if (tester.error !== undefined) lines.push(`<p>Error: ${escapeHtml(tester.error)}</p>`);
+  if (tester.checks !== undefined) lines.push(checksGroup(tester.checks, logUrl));
   if (tester.verdicts.length > 0) lines.push(bullets(tester.verdicts.map(verdictItem)));
   return lines.join("\n");
 }

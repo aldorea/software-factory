@@ -61,6 +61,7 @@ interface ConfigOptions {
   request?: string | null;
   app?: string;
   ready?: string;
+  readyTimeoutMs?: number;
 }
 
 function configSource(options: ConfigOptions = {}): string {
@@ -75,7 +76,7 @@ export default {
     ${request === null ? "" : `request: ${JSON.stringify(request)},`}
     attachments: "test-results",
   },
-  ${options.app === undefined ? "" : `app: { start: ${JSON.stringify(options.app)}${options.ready === undefined ? "" : `, ready: ${JSON.stringify(options.ready)}, readyTimeoutMs: 1500`} },`}
+  ${options.app === undefined ? "" : `app: { start: ${JSON.stringify(options.app)}${options.ready === undefined ? "" : `, ready: ${JSON.stringify(options.ready)}, readyTimeoutMs: ${options.readyTimeoutMs ?? 1500}`} },`}
   environment: () => ({}),
   protectedPaths: ["package.json"],
   roles: {
@@ -266,6 +267,36 @@ describe("the app of the config before the evidence", () => {
 
     expect(report.log.subtasks[0]).toMatchObject({ state: "blocked", blockType: "environment" });
     expect(report.log.subtasks[0]?.reason).toContain("the app did not start: fi exited with 2");
+  });
+
+  it("should block the subtask as soon as the start command of the app exits with an error, without waiting for readyTimeoutMs, and keep its output in the run log", async () => {
+    const target = await targetRepo(
+      configSource({ app: 'echo "starting"; echo "Error: Cannot find module next" >&2; exit 3', ready: "false", readyTimeoutMs: 600_000 }),
+    );
+    const { run } = harness(target, writes());
+
+    const report = await run();
+
+    const [subtask] = report.log.subtasks;
+    expect(subtask).toMatchObject({ state: "blocked", blockType: "environment" });
+    expect(subtask?.reason).toContain("the app exited with 3 before it was ready: Error: Cannot find module next");
+    const appCheck = subtask?.gate?.checks.find((check) => check.name === "app.start");
+    expect(appCheck).toMatchObject({ passed: false, exitCode: 3, firstError: "Error: Cannot find module next", outputLog: "output/S1-gate-1/app-start.log" });
+    const output = await readFile(join(target.repoDir, ".factory", "logs", report.log.runId, appCheck?.outputLog ?? ""), "utf8");
+    expect(output).toBe("starting\nError: Cannot find module next\n");
+  });
+
+  it("should keep only the end of the output of the app, so a chatty app cannot fill the disk of its container while it runs", async () => {
+    const chatty = 'i=0; while [ $i -lt 20000 ]; do echo "log line $i of the dev server"; i=$((i+1)); done; echo "Error: the last words" >&2; exit 1';
+    const target = await targetRepo(configSource({ app: chatty, ready: "false", readyTimeoutMs: 600_000 }));
+    const { run } = harness(target, writes());
+
+    const report = await run();
+
+    const appCheck = report.log.subtasks[0]?.gate?.checks.find((check) => check.name === "app.start");
+    const output = await readFile(join(target.repoDir, ".factory", "logs", report.log.runId, appCheck?.outputLog ?? ""), "utf8");
+    expect(Buffer.byteLength(output)).toBeLessThanOrEqual(64 * 1024);
+    expect(output.endsWith("log line 19999 of the dev server\nError: the last words\n")).toBe(true);
   });
 
   it("should record a failed integrated verification with the reason when the app does not become ready on the integration branch", async () => {

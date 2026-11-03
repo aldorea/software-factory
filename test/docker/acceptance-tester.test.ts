@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RoleChoice } from "../../src/config/config.ts";
@@ -29,12 +29,17 @@ const SPEC = specText({
   criteria: { A1: { evidence: "request", level: "subtask" } },
 });
 
-function config(tester: RoleChoice): string {
+const READY = "curl -sf http://localhost:$E2E_PORT/ >/dev/null";
+
+function config(tester: RoleChoice, app: { install?: string; start?: string; readyTimeoutMs?: number } = {}): string {
+  const install = app.install === undefined ? [] : [{ name: "install", command: app.install }];
+  const checks = [...install, { name: "syntax", command: "node --check server.js" }];
+  const start = app.start ?? "node server.js";
   return `
 export default {
   image: ${JSON.stringify(IMAGE)},
-  checks: [{ name: "syntax", command: "node --check server.js" }],
-  app: { start: "node server.js", ready: "curl -sf http://localhost:$E2E_PORT/ >/dev/null", readyTimeoutMs: 20000 },
+  checks: ${JSON.stringify(checks)},
+  app: { start: ${JSON.stringify(start)}, ready: ${JSON.stringify(READY)}, readyTimeoutMs: ${app.readyTimeoutMs ?? 20000} },
   evidence: { request: "curl -sf http://localhost:$E2E_PORT/ >/dev/null # {{id}}" },
   environment: ({ purpose }) => ({ E2E_PORT: purpose === "tester" ? "4100" : "4000" }),
   protectedPaths: ["package.json"],
@@ -68,12 +73,18 @@ class ChecksInDocker implements WorkerRunner {
   }
 }
 
-async function testedRun(tester: RoleChoice, credentials: Partial<Record<AgentKind, string>>) {
-  const target = await targetRepo({ config: config(tester), issueBody: ISSUE_BODY, spec: SPEC });
+const answersHello: AttemptScript = () => ({ files: { "server.js": server("hello") }, commit: "Serve the greeting" });
+
+async function testedRun(
+  tester: RoleChoice,
+  credentials: Partial<Record<AgentKind, string>>,
+  options: { app?: Parameters<typeof config>[1]; script?: AttemptScript } = {},
+) {
+  const target = await targetRepo({ config: config(tester, options.app), issueBody: ISSUE_BODY, spec: SPEC });
   const report = await runIssue(
     { repoDir: target.repoDir, issue: ISSUE, credentials },
     {
-      runner: new ChecksInDocker(answersBye),
+      runner: new ChecksInDocker(options.script ?? answersBye),
       verifier: new FakeVerifier(),
       github: target.github,
       notifier: new FakeNotifier(),
@@ -110,4 +121,31 @@ describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("the acceptance tester agains
         { "claude-code": "unused", opencode: OPENCODE_KEY ?? "" },
       ),
   );
+});
+
+describe.skipIf(!process.env.FACTORY_DOCKER_TESTS)("the app of the config in Docker, with no subscription", { timeout: 300_000 }, () => {
+  const HAIKU: RoleChoice = { agent: "claude-code", model: "haiku" };
+  const DEPS = ".factory/logs/deps";
+
+  it("should install the dependencies in the fresh worktree of the tester and start the app there before the agent runs", async () => {
+    const app = { install: `mkdir -p ${DEPS}`, start: `test -d ${DEPS} && node server.js`, readyTimeoutMs: 600_000 };
+    const { report } = await testedRun(HAIKU, { "claude-code": "not-a-real-token" }, { app, script: answersHello });
+
+    expect(report.log.verification?.checks.every((check) => check.passed)).toBe(true);
+    expect(report.log.verification?.tester?.error).toMatch(/^The acceptance tester failed/);
+    expect(report.log.verification?.tester?.checks).toBeUndefined();
+  });
+
+  it("should block the subtask as soon as the start command of the app exits with an error in the container, and keep its output", async () => {
+    const app = { start: 'echo "Error: Cannot find module next" >&2; exit 1', readyTimeoutMs: 600_000 };
+    const startedAt = Date.now();
+    const { report, runDir } = await testedRun(HAIKU, { "claude-code": "not-a-real-token" }, { app, script: answersHello });
+
+    expect(Date.now() - startedAt).toBeLessThan(120_000);
+    const [subtask] = report.log.subtasks;
+    expect(subtask).toMatchObject({ state: "blocked", blockType: "environment" });
+    expect(subtask?.reason).toContain("the app exited with 1 before it was ready: Error: Cannot find module next");
+    const appCheck = subtask?.gate?.checks.find((check) => check.name === "app.start");
+    expect(readFileSync(join(runDir, appCheck?.outputLog ?? ""), "utf8")).toBe("Error: Cannot find module next\n");
+  });
 });

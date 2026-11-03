@@ -1,9 +1,9 @@
 import { join } from "node:path";
-import type { WorkerEnvironmentContext } from "../config/config.ts";
+import type { Check, WorkerEnvironmentContext } from "../config/config.ts";
 import { createBranchAt, deleteBranch } from "../git/repo.ts";
 import { inStage } from "../workers/failures.ts";
 import type { Worker } from "../workers/types.ts";
-import { checkLogPath, keepFailedOutput } from "./command-output.ts";
+import { checkLogPath, keepFailedOutput, type CheckOutput } from "./command-output.ts";
 import { collectEvidence, type EvidenceResult } from "./evidence-collection.ts";
 import type { EvidencePlan } from "./evidence.ts";
 import { firstErrorLine } from "./failures.ts";
@@ -90,25 +90,29 @@ async function checksIn(context: RunContext, worker: Worker, request: CheckReque
   const { config } = context.prepared;
   const checks: CheckRecord[] = [];
   for (const [index, check] of config.checks.entries()) {
-    const result = await inStage("exec", () => worker.exec(check.command));
-    const passed = result.exitCode === 0;
-    const firstError = passed ? undefined : firstErrorLine(`${result.stderr}\n${result.stdout}`);
-    const output = passed ? {} : await keepFailedOutput(result, context.runDir, checkLogPath(request.label, index, check.name));
-    checks.push({
-      name: check.name,
-      command: check.command,
-      exitCode: result.exitCode,
-      passed,
-      ...(firstError !== undefined ? { firstError } : {}),
-      ...output,
-    });
+    checks.push(await execCheck(worker, check, index, { runDir: context.runDir, label: request.label }));
   }
-  const evidence = await collectEvidence(worker, request.plan, {
+  const { appCheck, ...evidence } = await collectEvidence(worker, request.plan, {
     app: config.app,
     commands: config.evidence,
     attachmentsDir: join(context.runDir, "attachments"),
     runDir: context.runDir,
     label: request.label,
   });
-  return { checks, ...evidence };
+  return { checks: appCheck === undefined ? checks : [...checks, appCheck], ...evidence };
+}
+
+export async function execCheck(worker: Worker, check: Check, index: number, output: CheckOutput): Promise<CheckRecord> {
+  const result = await inStage("exec", () => worker.exec(check.command));
+  const passed = result.exitCode === 0;
+  const firstError = passed ? undefined : firstErrorLine(`${result.stderr}\n${result.stdout}`);
+  const kept = passed ? {} : await keepFailedOutput(result, output.runDir, checkLogPath(output.label, index, check.name));
+  return {
+    name: check.name,
+    command: check.command,
+    exitCode: result.exitCode,
+    passed,
+    ...(firstError !== undefined ? { firstError } : {}),
+    ...kept,
+  };
 }

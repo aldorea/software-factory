@@ -274,7 +274,7 @@ describe("factory run for a one-subtask spec", () => {
     ]);
     expect(tester?.spec.id).toMatch(/-verification-tester$/);
     expect(tester?.attempts).toHaveLength(1);
-    expect(tester?.execs).toEqual([]);
+    expect(tester?.execs).toEqual([{ command: "grep -q hello src/greeting.txt", exitCode: 0 }]);
     expect(runner.workers.every((record) => record.closed)).toBe(true);
     expect(await listWorktrees(target.repoDir)).toEqual([{ path: target.repoDir, branch: "main" }]);
   });
