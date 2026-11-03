@@ -8,7 +8,7 @@ import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
-import { FakeWorkerRunner, type AttemptScript, type TesterScript, type WorkerFaults } from "../fakes/worker-runner.ts";
+import { FakeWorkerRunner, type AttemptScript, type ExecObserver, type TesterScript, type WorkerFaults } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 export const temp = tempDirs();
@@ -111,8 +111,8 @@ export async function targetRepo(options: { config?: string | null; issueBody?: 
   return { repoDir, remoteDir, github };
 }
 
-export function harness(target: Target, script: AttemptScript, faults: WorkerFaults = {}, tester?: TesterScript) {
-  const runner = new FakeWorkerRunner(script, faults, tester);
+export function harness(target: Target, script: AttemptScript, faults: WorkerFaults = {}, tester?: TesterScript, observeExec?: ExecObserver) {
+  const runner = new FakeWorkerRunner(script, faults, tester, observeExec);
   const notifier = new FakeNotifier();
   const clock = new FakeClock("2026-10-24T08:00:00.000Z");
   const request: RunRequest = {

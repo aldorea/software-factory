@@ -1,11 +1,12 @@
-import type { AttemptRecord, RunLog, SubtaskRecord } from "./run-log.ts";
+import type { AttemptRecord, RunLog, SubtaskRecord, VerificationRecord } from "./run-log.ts";
 
 export function progressLines(before: RunLog | null, after: RunLog): string[] {
   if (before === null) return [startLine(after)];
   const previous = new Map(before.subtasks.map((record) => [record.id, record]));
   const lines = after.subtasks.flatMap((record) => subtaskLines(previous.get(record.id), record));
-  if (after.verification !== undefined && after.verification.sha !== before.verification?.sha) {
-    lines.push(`integrated verification at ${after.verification.sha.slice(0, 12)}: ${after.verification.passed ? "passed" : "failed"}`);
+  const verification = settledVerification(after);
+  if (verification !== undefined && verification.sha !== settledVerification(before)?.sha) {
+    lines.push(`integrated verification at ${verification.sha.slice(0, 12)}: ${verification.passed ? "passed" : "failed"}`);
   }
   if (after.pauseReason !== undefined && before.pauseReason === undefined) lines.push(`run paused: ${after.pauseReason}`);
   if (after.result !== before.result) lines.push(`run ${after.runId}: ${after.result}`);
@@ -13,6 +14,10 @@ export function progressLines(before: RunLog | null, after: RunLog): string[] {
     lines.push(`pull request: ${after.pullRequest.url}`);
   }
   return lines;
+}
+
+function settledVerification(log: RunLog): VerificationRecord | undefined {
+  return log.verification?.testerPhase === undefined ? log.verification : undefined;
 }
 
 function startLine(log: RunLog): string {

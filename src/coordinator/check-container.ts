@@ -8,7 +8,12 @@ import { collectEvidence, type EvidenceResult } from "./evidence-collection.ts";
 import type { EvidencePlan } from "./evidence.ts";
 import { firstErrorLine } from "./failures.ts";
 import { environment, type RunContext } from "./run-context.ts";
-import type { CheckRecord } from "./run-log.ts";
+import type { CheckRecord, CriterionRecord } from "./run-log.ts";
+
+export interface CheckProgress {
+  check(record: CheckRecord): Promise<void>;
+  criterion(record: CriterionRecord): Promise<void>;
+}
 
 export interface CheckRequest {
   label: string;
@@ -17,6 +22,7 @@ export interface CheckRequest {
   plan: EvidencePlan;
   subtaskId: string | null;
   keepsRecordings?: boolean;
+  progress?: CheckProgress;
 }
 
 export interface CheckOutcome extends EvidenceResult {
@@ -91,7 +97,9 @@ async function checksIn(context: RunContext, worker: Worker, request: CheckReque
   const { config } = context.prepared;
   const checks: CheckRecord[] = [];
   for (const [index, check] of config.checks.entries()) {
-    checks.push(await execCheck(worker, check, index, { runDir: context.runDir, label: request.label }));
+    const record = await execCheck(worker, check, index, { runDir: context.runDir, label: request.label });
+    checks.push(record);
+    await request.progress?.check(record);
   }
   const { appCheck, ...evidence } = await collectEvidence(worker, request.plan, {
     app: config.app,
@@ -100,6 +108,7 @@ async function checksIn(context: RunContext, worker: Worker, request: CheckReque
     ...(request.keepsRecordings === true ? { recordingsDir: join(context.runDir, "evidence") } : {}),
     runDir: context.runDir,
     label: request.label,
+    ...(request.progress !== undefined ? { onCriterion: request.progress.criterion } : {}),
   });
   return { checks: appCheck === undefined ? checks : [...checks, appCheck], ...evidence };
 }

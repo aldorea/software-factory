@@ -95,6 +95,8 @@ export const passingTester: TesterScript = ({ criteria }) => ({
   ),
 });
 
+export type ExecObserver = (spec: WorkerSpec, command: string) => void | Promise<void>;
+
 export interface WorkerFaults {
   start?: (spec: WorkerSpec) => Error | undefined;
   attempt?: (call: AttemptCall) => Error | undefined;
@@ -108,11 +110,13 @@ export class FakeWorkerRunner implements WorkerRunner {
   private readonly faults: WorkerFaults;
 
   private readonly tester: TesterScript;
+  private readonly observeExec: ExecObserver | undefined;
 
-  constructor(script: AttemptScript = () => ({}), faults: WorkerFaults = {}, tester: TesterScript = passingTester) {
+  constructor(script: AttemptScript = () => ({}), faults: WorkerFaults = {}, tester: TesterScript = passingTester, observeExec?: ExecObserver) {
     this.script = script;
     this.faults = faults;
     this.tester = tester;
+    this.observeExec = observeExec;
   }
 
   async start(spec: WorkerSpec): Promise<Worker> {
@@ -121,7 +125,7 @@ export class FakeWorkerRunner implements WorkerRunner {
     const worktreePath = await prepareWorktree(spec);
     const record: FakeWorkerRecord = { spec, worktreePath, attempts: [], execs: [], closed: false };
     this.workers.push(record);
-    return new FakeWorker(record, await mergeBase(spec.repoDir, spec.baseRef, spec.branch), this.script, this.faults, this.tester);
+    return new FakeWorker(record, await mergeBase(spec.repoDir, spec.baseRef, spec.branch), this.script, this.faults, this.tester, this.observeExec);
   }
 }
 
@@ -131,13 +135,22 @@ class FakeWorker implements Worker {
   private readonly script: AttemptScript;
   private readonly faults: WorkerFaults;
   private readonly tester: TesterScript;
+  private readonly observeExec: ExecObserver | undefined;
 
-  constructor(record: FakeWorkerRecord, baseSha: string, script: AttemptScript, faults: WorkerFaults, tester: TesterScript) {
+  constructor(
+    record: FakeWorkerRecord,
+    baseSha: string,
+    script: AttemptScript,
+    faults: WorkerFaults,
+    tester: TesterScript,
+    observeExec: ExecObserver | undefined,
+  ) {
     this.record = record;
     this.baseSha = baseSha;
     this.script = script;
     this.faults = faults;
     this.tester = tester;
+    this.observeExec = observeExec;
   }
 
   get spec(): WorkerSpec {
@@ -203,6 +216,7 @@ class FakeWorker implements Worker {
   }
 
   async exec(command: string, options: { timeoutMs?: number } = {}): Promise<ExecResult> {
+    await this.observeExec?.(this.spec, command);
     const result = await exec("sh", ["-c", command], { cwd: this.worktreePath, ...options });
     this.record.execs.push({ command, exitCode: result.exitCode });
     return result;

@@ -134,6 +134,8 @@ export interface TesterFailureRecord {
   observation: string;
 }
 
+export type TesterPhase = "install" | "start" | "ready" | "testing";
+
 export interface VerificationRecord {
   sha: string;
   passed: boolean;
@@ -141,8 +143,11 @@ export interface VerificationRecord {
   criteria: CriterionRecord[];
   humanCriteria: HumanCriterionRecord[];
   environment?: string;
+  testerPhase?: TesterPhase;
   tester?: TesterRecord;
 }
+
+export type VerificationProgressRecord = Pick<VerificationRecord, "sha" | "checks" | "criteria">;
 
 export interface EvidenceBranchRecord {
   branch: string;
@@ -234,6 +239,7 @@ export interface RunLog {
   friction: FrictionRecord;
   workerLayerFailures: WorkerLayerFailureRecord[];
   subtasks: SubtaskRecord[];
+  verificationProgress?: VerificationProgressRecord;
   verification?: VerificationRecord;
   testerUsage?: Partial<Record<AgentKind, TokenUsage>>;
   testerFailures?: TesterFailureRecord[];

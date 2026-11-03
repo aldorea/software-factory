@@ -11,6 +11,7 @@ export function logPathsOf(log: RunLog): string[] {
     paths.push(...subtask.gate.verifier.map((record) => record.logPath));
     outputs.push(...subtask.gate.checks, ...subtask.gate.criteria);
   }
+  if (log.verificationProgress !== undefined) outputs.push(...log.verificationProgress.checks, ...log.verificationProgress.criteria);
   if (log.verification !== undefined) {
     outputs.push(...log.verification.checks, ...log.verification.criteria, ...(log.verification.tester?.checks ?? []));
     paths.push(log.verification.tester?.logPath);

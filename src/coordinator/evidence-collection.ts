@@ -24,6 +24,7 @@ export interface EvidenceContext {
   recordingsDir?: string;
   runDir: string;
   label: string;
+  onCriterion?: (record: CriterionRecord) => Promise<void>;
 }
 
 export async function collectEvidence(worker: Worker, plan: EvidencePlan, context: EvidenceContext): Promise<EvidenceResult> {
@@ -38,7 +39,7 @@ export async function collectEvidence(worker: Worker, plan: EvidencePlan, contex
     const passed = result.exitCode === 0;
     const output = passed ? {} : await keepFailedOutput(result, context.runDir, criterionLogPath(context.label, item.id));
     const evidenceFiles = recording === undefined ? [] : await keepRecording(worker, recording, context.runDir);
-    criteria.push({
+    const record: CriterionRecord = {
       id: item.id,
       evidence: item.evidence,
       command: item.command,
@@ -46,7 +47,9 @@ export async function collectEvidence(worker: Worker, plan: EvidencePlan, contex
       passed,
       ...output,
       ...(evidenceFiles.length > 0 ? { evidenceFiles } : {}),
-    });
+    };
+    criteria.push(record);
+    await context.onCriterion?.(record);
   }
   const human: HumanCriterionRecord[] = [];
   for (const item of plan.human) {
@@ -65,7 +68,7 @@ export const APP_START_CHECK = "app.start";
 export const APP_OUTPUT_BYTES = 64 * 1024;
 
 export interface AppStartOptions extends CheckOutput {
-  onWaiting?: (ready: string) => void;
+  onWaiting?: (ready: string) => void | Promise<void>;
 }
 
 export async function startApp(worker: Worker, app: AppStart, options: AppStartOptions): Promise<AppProblem | null> {
@@ -76,7 +79,7 @@ export async function startApp(worker: Worker, app: AppStart, options: AppStartO
   const dir = started.stdout.trim();
   try {
     if (app.ready === undefined) return null;
-    options.onWaiting?.(app.ready);
+    await options.onWaiting?.(app.ready);
     const polls = Math.max(1, Math.ceil(app.readyTimeoutMs / READY_POLL_MS));
     for (let poll = 1; poll <= polls; poll += 1) {
       if (await isReady(worker, app.ready, app.readyTimeoutMs)) return null;

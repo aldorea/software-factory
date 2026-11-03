@@ -13,7 +13,7 @@ import { filesIn, startApp } from "./evidence-collection.ts";
 import { outputTail } from "./failures.ts";
 import { followUpStop } from "./follow-up.ts";
 import { environment, stopLimits, type RunContext } from "./run-context.ts";
-import type { CheckRecord, CriterionRecord, TesterRecord } from "./run-log.ts";
+import type { CheckRecord, CriterionRecord, TesterPhase, TesterRecord } from "./run-log.ts";
 import { addUsage, agentRunTokens } from "./run-totals.ts";
 import { formatDuration } from "./stop-rules.ts";
 import type { PlanLimitHit } from "./subtask-loop.ts";
@@ -25,6 +25,7 @@ export interface TesterRequest {
   label: string;
   sha: string;
   criteria: CriterionRecord[];
+  onPhase?: (phase: TesterPhase) => Promise<void>;
 }
 
 export type TesterOutcome = { kind: "tested"; record: TesterRecord } | PlanLimitHit;
@@ -62,8 +63,9 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
         outputDir: evidenceDir,
       },
       async (worker) => {
-        const unprepared = await prepareApp(context, worker, label);
+        const unprepared = await prepareApp(context, worker, label, request.onPhase);
         if (unprepared !== null) return unprepared;
+        await request.onPhase?.("testing");
         const deadline = new Date(context.ports.clock.now().getTime() + TESTER_TIMEOUT_MS);
         const limits = { deadline, idleTimeoutMs: config.limits.attemptIdleTimeoutMs };
         const hooks = { onActivity: (event: ActivityEvent) => context.ports.activity?.({ source: "tester", at: context.ports.clock.now(), event }) };
@@ -106,13 +108,21 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
   }
 }
 
-async function prepareApp(context: RunContext, worker: Worker, label: string): Promise<AppUnprepared | null> {
+async function prepareApp(
+  context: RunContext,
+  worker: Worker,
+  label: string,
+  onPhase: TesterRequest["onPhase"],
+): Promise<AppUnprepared | null> {
   const { checks, app } = context.prepared.config;
-  const phase = (text: string) => context.ports.progress?.(`tester: ${text}`);
+  const phase = async (current: TesterPhase, text: string) => {
+    await onPhase?.(current);
+    context.ports.progress?.(`tester: ${text}`);
+  };
   const output = { runDir: context.runDir, label };
   const [install] = checks;
   if (install !== undefined) {
-    phase(`running the ${install.name} check`);
+    await phase("install", `running the ${install.name} check`);
     const check = await execCheck(worker, install, 0, output);
     if (!check.passed) {
       const why = check.firstError === undefined ? ` with exit code ${check.exitCode}` : `: ${check.firstError}`;
@@ -120,8 +130,8 @@ async function prepareApp(context: RunContext, worker: Worker, label: string): P
     }
   }
   if (app === undefined) return null;
-  phase(`starting the app with ${app.start}`);
-  const problem = await startApp(worker, app, { ...output, onWaiting: (ready) => phase(`waiting for the app to be ready (${ready})`) });
+  await phase("start", `starting the app with ${app.start}`);
+  const problem = await startApp(worker, app, { ...output, onWaiting: (ready) => phase("ready", `waiting for the app to be ready (${ready})`) });
   return problem === null ? null : { kind: "app-problem", ...problem };
 }
 

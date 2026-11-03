@@ -16,7 +16,7 @@ import {
 import { paused, stopLimits, type RunContext } from "./run-context.ts";
 import { agentRunTokens } from "./run-totals.ts";
 import { blockSubtask, entryOf } from "./subtask-settlement.ts";
-import type { TesterRecord, VerificationRecord } from "./run-log.ts";
+import type { TesterRecord, VerificationProgressRecord, VerificationRecord } from "./run-log.ts";
 import { pauseRun, workOn } from "./subtask-work.ts";
 
 export async function verifyIntegration(context: RunContext, subtasks: Subtask[]): Promise<void> {
@@ -30,6 +30,10 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
     const sha = await revParse(repoDir, branch);
     context.verifications += 1;
     const label = context.verifications === 1 ? "verification" : `verification-${context.verifications}`;
+    const progress: VerificationProgressRecord = { sha, checks: [], criteria: [] };
+    delete log.verification;
+    log.verificationProgress = progress;
+    await context.save();
     const verified = await checksOn(context, {
       label,
       sha,
@@ -37,11 +41,19 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
       plan: integrationPlan(spec, config.evidence),
       subtaskId: null,
       keepsRecordings: true,
+      progress: {
+        check: async (record) => {
+          progress.checks.push(record);
+          await context.save();
+        },
+        criterion: async (record) => {
+          progress.criteria.push(record);
+          await context.save();
+        },
+      },
     });
-    if (verified === null) {
-      delete log.verification;
-      break;
-    }
+    delete log.verificationProgress;
+    if (verified === null) break;
     const { checks, criteria, human, appProblem } = verified;
     if (appProblem !== undefined) {
       log.verification = { sha, passed: false, checks, criteria, humanCriteria: human, environment: appProblem };
@@ -54,7 +66,16 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
     let tester: TesterRecord | undefined;
     if (passed) {
       if (criteria.length === 0) break;
-      const tested = await acceptanceTest(context, { label, sha, criteria });
+      const tested = await acceptanceTest(context, {
+        label,
+        sha,
+        criteria,
+        onPhase: async (phase) => {
+          verification.testerPhase = phase;
+          await context.save();
+        },
+      });
+      delete verification.testerPhase;
       if (tested.kind === "plan-limit") {
         verification.passed = false;
         pauseRun(context, tested);

@@ -61,6 +61,15 @@ describe("the progress lines of a run", () => {
     expect(progressLines(after, after)).toEqual([]);
   });
 
+  it("should report the integrated verification only when the acceptance tester ends, because the tester can still fail a round whose checks passed", () => {
+    const verification = { sha: "0123456789abcdef", passed: true, checks: [], criteria: [], humanCriteria: [] };
+    const testing = running({ verification: { ...verification, testerPhase: "testing" } });
+    const tested = running({ verification: { ...verification, passed: false } });
+
+    expect(progressLines(running(), testing)).toEqual([]);
+    expect(progressLines(testing, tested)).toEqual(["integrated verification at 0123456789ab: failed"]);
+  });
+
   it("should report a pause with its reason", () => {
     expect(progressLines(running(), running({ result: "paused", pauseReason: "plan limit" }))).toEqual([
       "run paused: plan limit",
