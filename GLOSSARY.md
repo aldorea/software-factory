@@ -138,6 +138,10 @@ _Avoid_: reviewer, judge
 An agent with its own clean context that receives only the text of the criteria and the running app, uses the app as a user would, and leaves a file of evidence for each criterion. It never sees the diff or the tests of the workers. A criterion it fails counts as a failed criterion.
 _Avoid_: verifier, reviewer, QA
 
+**Holdout scenario**:
+A Playwright test or a request check that the refinement proposes and the developer accepts, kept on the host outside git, that no agent of the run sees. It runs after the acceptance tester, and a failed one ends the run as a draft without a follow-up task.
+_Avoid_: hidden test, holdout test, secret test
+
 **Escaped defect**:
 A defect in a target repo that reached the developer's review or the default branch through a pull request of the factory.
 
