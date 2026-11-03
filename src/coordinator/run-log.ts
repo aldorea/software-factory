@@ -45,6 +45,7 @@ export interface CriterionRecord {
   passed: boolean;
   outputTail?: string;
   outputLog?: string;
+  evidenceFiles?: string[];
 }
 
 export interface HumanCriterionRecord {
