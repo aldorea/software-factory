@@ -50,9 +50,9 @@ One set of checks tells whether the host and the target repo are ready. `factory
 | Command | Checks before it starts |
 |---|---|
 | `factory refine` | `gh` signed in, the Claude session of the host (`claude auth status`), `origin/HEAD` resolved |
-| `factory run` | Docker running, `gh` signed in, the credential of the agent of each role the spec needs, the worker image present and built from the current base image, push access to the GitHub repo of `origin` with the `gh` session |
+| `factory run` | Docker running, `gh` signed in, the credential of the agent of each role the spec needs, the worker image present and built from the current base image, push access to the GitHub repo of `origin` with the `gh` session, `.factory/holdout/` ignored by git |
 | `factory publish` | `gh` signed in, push access to the GitHub repo of `origin` with the `gh` session |
-| `factory doctor` | All of the above, Node, the config loads, `.factory/.env` has every value the config reads, `.factory/.dockerignore` excludes `.env`, and the credential of each agent the config's roles use |
+| `factory doctor` | All of the above, Node, the config loads, `.factory/.env` has every value the config reads, `.factory/.dockerignore` excludes `.env`, `.factory/holdout/` ignored by git, and the credential of each agent the config's roles use |
 
 `factory run` asks for a credential only for the roles the spec needs: the workers always, the independent verifier only when a criterion has `playwright` evidence, and the acceptance tester only when a criterion has evidence other than `human`. This is the rule of the run itself, so a spec with no automatic criteria runs with no credential for the tester. When the spec cannot be read at that point, every role counts, and the run reports the spec problem right after. `factory doctor` has no issue, so it checks every agent that a role of the config uses.
 
@@ -60,7 +60,9 @@ With a terminal, `factory run` checks before the role menu only the credentials 
 
 The worker image is built with `.factory/` as its context, so `.factory/.env` must not reach the build. `factory doctor` and `factory image` fail closed when `.factory/.dockerignore` is missing (the fix is `factory init`) or does not exclude `.env` (the fix is to add the line: `factory init` never overwrites the file).
 
-What depends on one issue, such as a criterion whose type has no evidence command, stays in `factory validate <n>`. A command reports every problem it finds, not only the first, and each problem names the command that fixes it:
+The holdout scenarios must never reach git (see [Holdout scenarios](#holdout-scenarios)). `factory doctor` and `factory run` fail closed when `git check-ignore` does not ignore `.factory/holdout/` (the fix is `factory init`, or the line in `.gitignore`).
+
+What depends on one issue, such as a criterion or a holdout scenario whose type has no command, stays in `factory validate <n>`. A command reports every problem it finds, not only the first, and each problem names the command that fixes it:
 
 ```
 ✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode
@@ -93,14 +95,15 @@ What depends on one issue, such as a criterion whose type has no evidence comman
 1. **Refine.** The agent of the refinement runs with the chosen model in an interactive session in the terminal, or turn by turn from the web (see [Web actions](#web-actions)), on the host, in the worktree of the issue. A refinement skill reads the issue and the code, writes the technical part, and asks only the open decisions (product, ambiguities, doubtful criteria), in rounds, each with a recommended answer. At the end it:
    - rewrites the criteria of the issue with IDs `A1`, `A2`…;
    - writes `specs/<n>.md` on the integration branch;
-   - posts a comment on the issue with the decisions and their reasons.
-2. **Approve.** `factory approve <n>` writes the date and two hashes in the header of `specs/<n>.md`: one of the criteria of the issue, one of the technical part of the spec. It commits "Approve spec #<n>".
+   - writes the holdout scenarios that I accept in `.factory/holdout/<n>/`, outside git (see [Holdout scenarios](#holdout-scenarios));
+   - posts a comment on the issue with the decisions and their reasons, never with the content of a holdout scenario.
+2. **Approve.** `factory approve <n>` writes the date and three hashes in the header of `specs/<n>.md`: one of the criteria of the issue, one of the technical part of the spec, one of the holdout scenarios. It commits "Approve spec #<n>".
 3. **Run.** `factory run <n>` recomputes the hashes. If one differs, it stops and says what changed (fail closed). Then:
    1. The base subtask runs alone, then its gate, then its branch merges into the integration branch.
    2. The other subtasks run in waves, in parallel up to `maxParallel`, each from the integration branch.
    3. Each subtask that passes its gate merges into the integration branch with `git merge`. A conflict blocks the run: it is an error of the refinement, not a task for an agent.
-   4. Integrated verification: the checks of the repo and all the criteria, on the integrated app. When they pass, the acceptance tester uses the app against every automatic criterion.
-   5. A failed criterion, by its command or by the acceptance tester, sends a follow-up task to the subtask that owns it. Then the integrated verification runs again.
+   4. Integrated verification: the checks of the repo and all the criteria, on the integrated app. When they pass, the acceptance tester uses the app against every automatic criterion. When the tester passes too, the holdout scenarios run on the same SHA.
+   5. A failed criterion, by its command or by the acceptance tester, sends a follow-up task to the subtask that owns it. Then the integrated verification runs again. A failed holdout scenario sends no follow-up task.
    6. The coordinator opens or updates the PR.
 
 ### The spec
@@ -165,6 +168,18 @@ The tests above come from the workers, and the independent verifier only reads t
 - A criterion it fails counts as a failed criterion: it sends a follow-up task with the observation and its evidence to the subtask that owns it, under the same patience and limits.
 - In the PR, each automatic criterion shows both proofs: the result of its command and the observation of the tester, with a link to its files. Its screenshots go to the evidence branch, as the attachments of the human criteria do.
 
+### Holdout scenarios
+
+The tests of the workers and the acceptance tester both start from the criteria, and the workers know the criteria. A holdout scenario is a Playwright test or a request check that no agent of the run ever sees. It checks what I expect of the product, also what the criteria do not say (see [ADR 0009](adr/0009-holdout-scenarios.md)).
+
+- **Who writes them.** The refinement proposes them in a step of its own, after the criteria, and I accept, change or drop each one. A spec may have none; the PR then says so.
+- **Where they live.** In `.factory/holdout/<n>/` of the target repo, on the host, ignored by git. Never in git, in the issue, in `specs/<n>.md` or in a comment: a container can read the objects of git, and the workers receive the criteria and the spec. `factory doctor` and `factory run` fail closed when git does not ignore the folder.
+- **Approval.** `factory approve <n>` records a hash of the folder, of its paths and their content, as the third hash of the spec. A change after the approval stops the run, as a change of the criteria does.
+- **When they run.** Once per round of the integrated verification, only when the checks, the criteria and the acceptance tester pass on that SHA. They are the last step before the PR is ready.
+- **How they run.** Each file is one scenario, in the subfolder of its type: `playwright/` or `request/`. The holdout commands of `.factory/config.ts`, one per type, run each scenario on its own with the placeholder `{{path}}` for its file, so the coordinator counts the scenarios that pass and fail. A scenario whose type has no command stops `factory validate <n>`, and stops the run before any worker starts. They run in a container of their own (see [Worker layer](#worker-layer)).
+- **When one fails.** It sends no follow-up task: a worker that saw the failure would learn the scenario, and a scenario can cross several criteria with no subtask that owns it. The run ends with a draft PR and a `holdout` block in `run.json` and in the PR, as an integration check does. I decide: I fix it by hand, or I turn the scenario into a criterion, approve the spec again and start a new run. A scenario that becomes a criterion is no longer hidden, so it leaves the folder.
+- **What the PR shows.** Only how many scenarios passed and how many failed. The name, the content, the output and the evidence of each one stay in `holdout/` of the run log, which the [web view](#web-view) shows. They never go to the evidence branch.
+
 ### Two levels
 
 | Level | Who | What | Purpose |
@@ -172,6 +187,7 @@ The tests above come from the workers, and the independent verifier only reads t
 | Worker | The worker, in its loop | Checks of the repo and its own criteria | Find failures early |
 | Gate | The coordinator, not the worker | Runs the checks and the verification of the subtask again on its branch, checks the diff against its scope paths and against the existing tests, runs the independent verifier | Do not trust the report of the worker |
 | Integration | The coordinator, then the acceptance tester | Checks of the repo and all the criteria on the integrated app, then the tester's own use of the app against the automatic criteria | The evidence of the PR |
+| Holdout | The coordinator | The holdout scenarios on the integrated app, when everything above passes | Find what the criteria do not say, with tests that no agent has seen |
 
 The evidence of the PR comes only from the integrated run on the final SHA. A commit after it makes the coordinator generate the evidence again.
 
@@ -229,6 +245,7 @@ The coordinator never asks me during a run. It records each block in the PR and 
 | A question of design or product | `blocked`. The factory never decides a requirement. I change the spec, approve it again and start the run again. |
 | Patience, a limit or the environment (for example, the app does not become ready) | `blocked`, with the reason. A start command of the app that exits with an error stops the wait at once, and the end of its output is kept as a failed `app.start` check. |
 | A check of the repo fails in the integrated verification while every criterion passes | No subtask owns it, so the coordinator sends no follow-up task and guesses no owner: such a failure is usually a gap in the refinement. The run ends with a draft PR and an `integration-check` block in `run.json` and in the PR, with the check, the SHA of the integration branch and the end of its output. When criteria fail too, their follow-up tasks carry the failed checks instead. |
+| A holdout scenario fails | The coordinator sends no follow-up task, so that no worker learns the scenario. The run ends with a draft PR and a `holdout` block in `run.json` and in the PR, which gives only the number of scenarios that failed. The detail stays in the run log (see [Holdout scenarios](#holdout-scenarios)). |
 
 A macOS notification links to the PR when a run ends, pauses or blocks. Before the run starts, `factory run` prints the URL of `factory web` (a run started from the web shows the same lines in the page of its web action), and a notice when the last run of the issue is abandoned (see [Web view](#web-view)). While the run works, it prints two kinds of line to the terminal, each with the time (`hh:mm:ss`):
 
@@ -241,10 +258,10 @@ The activity is only shown: nobody talks to an agent during an attempt, and it n
 
 ### Output of a run
 
-- **All criteria pass** (except the "human" ones): the coordinator marks the PR "ready for review". Only the coordinator does this.
+- **All criteria pass** (except the "human" ones) **and every holdout scenario passes**: the coordinator marks the PR "ready for review". Only the coordinator does this.
 - **Anything else:** a draft PR with the real state: the evidence of the criteria that pass, each blocked subtask with its reason and its last failure, and what it needs to continue.
 
-The PR names the agent and the model of each role, and any change on resume. When the independent verifier or the acceptance tester used the same model as the workers, the PR says so in one line: its independence then rests on its clean context alone.
+The PR names the agent and the model of each role, and any change on resume. When the independent verifier or the acceptance tester used the same model as the workers, the PR says so in one line: its independence then rests on its clean context alone. Of the holdout scenarios, the PR gives only how many passed and how many failed, or that the spec has none.
 
 The issue, `specs/<n>.md` and the PR are the records. A new session starts again from them, not from a conversation.
 
@@ -265,11 +282,12 @@ The publication is the last step of a run, ended or paused: the coordinator, on 
 
 - **`software-factory`** (this repo): the coordinator, the gates, the worker layer, the skills (refinement, independent verifier), the prompts and the `factory` CLI. It takes the target repo as an argument.
 - **Each target repo:** a `.factory/` folder:
-  - `config.ts`: checks, the first of which installs the dependencies, app start and the command that tells when the app is ready, e2e commands, environment, protected paths, the default agent and model of each role, and per agent its token limits and `maxParallel`. It imports nothing from this repo, so it works wherever the two repos live, and the factory validates it when it loads and reports each mistake by field. It reads its own `.factory/.env` and fails with a clear message when a value is missing: the factory never loads `.env`, and only the values that `environment` returns reach a container.
+  - `config.ts`: checks, the first of which installs the dependencies, app start and the command that tells when the app is ready, e2e commands, the holdout commands, environment, protected paths, the default agent and model of each role, and per agent its token limits and `maxParallel`. It imports nothing from this repo, so it works wherever the two repos live, and the factory validates it when it loads and reports each mistake by field. It reads its own `.factory/.env` and fails with a clear message when a value is missing: the factory never loads `.env`, and only the values that `environment` returns reach a container.
   - `Dockerfile`: the worker image of that repo, from the factory's base image.
   - `.env.example`, and `.env` in `.gitignore`.
   - `package.json` with `"type": "module"`, so that the config loads as an ES module.
-  - `logs/`, `worktrees/` and `web/`, in `.gitignore`.
+  - `logs/`, `worktrees/`, `web/` and `holdout/`, in `.gitignore`.
+  - `holdout/<n>/`: the holdout scenarios of each issue, on the host only.
 
 `factory init` writes the files that are missing, never overwrites one, and the factory does not change the `package.json` of a target repo.
 
@@ -299,7 +317,13 @@ The publication is the last step of a run, ended or paused: the coordinator, on 
   - with its own clean context, never shared with the workers, even when it runs their agent and model;
   - with the credential of its agent, the URL of a Neon branch and its own `E2E_PORT`, as a worker;
   - with its tools, because it uses the app; its evidence goes to a folder outside the worktree, which the coordinator copies to the log of the run.
+- The holdout scenarios run in a container of the same image, created for one round of the integrated verification and removed after it:
+  - with a copy of the integration branch at the verified SHA, exported with no `.git`, to start the app, and the folder of the scenarios mounted read-only;
+  - with no git directory, because the app that it starts comes from the workers: the app must not be able to write the scenarios where a later worker could read them;
+  - with the URL of a Neon branch and its own `E2E_PORT`, as a worker;
+  - with no credential, because no agent runs there.
 - No container has:
+  - the holdout scenarios, except the container that runs them;
   - the `.env` of the repo;
   - `~/.ssh`;
   - the `gh` session;
@@ -383,7 +407,8 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
 - **Idle threshold:** the `attemptIdleTimeoutMs` of the run, recorded when it starts and kept when it resumes. A run log without it, from an older version, counts as the default of 10 minutes.
 - **Cost:** tokens per subtask and per run, per agent, attempts per subtask, wall clock with no pauses. The tokens of the independent verifier and of the acceptance tester count in the run and in their agent, and are kept apart from the attempts of the subtask.
 - **Friction:**
-  - blocks by type (scope, design question, patience, limit, environment, integration check);
+  - blocks by type (scope, design question, patience, limit, environment, integration check, holdout);
+  - holdout scenarios that failed while every criterion and the acceptance tester passed;
   - automatic scope extensions;
   - rejections by the gate and by the verifier, and criteria failed by the acceptance tester whose command passed;
   - conflicts at integration (expected: 0).
@@ -393,7 +418,7 @@ Each run writes `.factory/logs/<run-id>/run.json`, outside git:
   - a process hangs;
   - commits or cleanup fail;
   - the token usage cannot be read.
-- **Logs:** the path to the raw log of each attempt. An attempt enters `run.json` when it starts, as `running` with the path to its raw log, and gets its outcome when it ends, so the raw log can be read while it grows. For each check and criterion that failed, the end of its output, and the path to its whole output in `output/` of the run log. The integrated verification records each check and each criterion in `run.json` as soon as it ends, and the acceptance tester records its current phase (the install, the start of the app, the wait for `ready`, the test of the criteria), so the web shows the step that runs while it runs. For each Playwright criterion of the integrated verification, passed or failed, the screenshots and videos that Playwright left in the folder of the config, copied to `evidence/<criterion-id>/` of the run log, so that the [web view](#web-view) can show them without git.
+- **Logs:** the path to the raw log of each attempt. An attempt enters `run.json` when it starts, as `running` with the path to its raw log, and gets its outcome when it ends, so the raw log can be read while it grows. For each check and criterion that failed, the end of its output, and the path to its whole output in `output/` of the run log. The integrated verification records each check and each criterion in `run.json` as soon as it ends, and the acceptance tester records its current phase (the install, the start of the app, the wait for `ready`, the test of the criteria), so the web shows the step that runs while it runs. For each Playwright criterion of the integrated verification, passed or failed, the screenshots and videos that Playwright left in the folder of the config, copied to `evidence/<criterion-id>/` of the run log, so that the [web view](#web-view) can show them without git. For each holdout scenario, its result, its output and its evidence in `holdout/` of the run log.
 - **Quality, after the merge:** changes I made at review, and escapes (bugs that the verification did not find). An escape is an issue with the label `escaped-defect` in the target repo, linked to the PR of the factory that brought it; it is counted with `gh issue list --label escaped-defect`, not by `factory stats`.
 
 `factory stats` summarizes these files for a repo, per agent as well, to compare the subscriptions. It counts abandoned runs apart from the ones in progress and the finished ones, each with the threshold its own run log carries, so it does not read `.factory/config.ts`.
@@ -411,9 +436,9 @@ The layout is that of a console of resources: a side menu with Board, Runs, Web 
 
 The page of a run answers why the run is in its state, where it stopped and what proves it, in tabs: Summary (the causes, the state, the criteria and the agents), Steps, Verification and evidence, Subtasks and Activity. A tab with a failure shows its count. Above the tabs, the buttons of its web actions name the command that each one runs.
 
-- **Causes.** Each reason why the run is not ready, in order: abandoned, paused, the publication that failed, the block of the run, each blocked subtask, and each check, criterion or verdict of the acceptance tester that failed in the integrated verification. Each cause names where it is, what happened, its detail (the last failure or the reason in `run.json`), a link to its evidence lower in the page, and the next step. The next step is a button that opens the form of its [web action](#web-actions), filled in, next to the command it runs, and it is a command only when it is safe: `factory run <n>` resumes a paused run; for an abandoned run, an error of the acceptance tester or of the environment, it starts a new run, in which the merged subtasks do not run again; `factory publish <n>` publishes again. A block that needs a change of the spec (scope, design question, integration check) gives no command: it says to review the spec, then start a new run. A draft with no other cause lists its human criteria.
-- **Steps.** The steps of the run in order, each with its state (passed, failed, running, pending, not run) and a link to its detail: each subtask with its attempts and its gate, the integrated verification with the checks and criteria that pass, the acceptance tester with its verdicts or its phase, and the publication with the PR. A subtask merged by an earlier run says so. A step that `run.json` does not record yet is pending; a step not reached because an earlier one failed is not run.
-- **Verification and evidence.** Each check and criterion of the integrated verification with its state, the result of its command, the verdict and the observation of the acceptance tester, and its evidence (see Evidence, not raw logs below).
+- **Causes.** Each reason why the run is not ready, in order: abandoned, paused, the publication that failed, the block of the run, each blocked subtask, each check, criterion or verdict of the acceptance tester that failed in the integrated verification, and each holdout scenario that failed. Each cause names where it is, what happened, its detail (the last failure or the reason in `run.json`), a link to its evidence lower in the page, and the next step. The next step is a button that opens the form of its [web action](#web-actions), filled in, next to the command it runs, and it is a command only when it is safe: `factory run <n>` resumes a paused run; for an abandoned run, an error of the acceptance tester or of the environment, it starts a new run, in which the merged subtasks do not run again; `factory publish <n>` publishes again. A block that needs a change of the spec (scope, design question, integration check) gives no command: it says to review the spec, then start a new run. A failed holdout scenario gives no command either: it says to fix the code by hand, or to turn the scenario into a criterion and start a new run. A draft with no other cause lists its human criteria.
+- **Steps.** The steps of the run in order, each with its state (passed, failed, running, pending, not run) and a link to its detail: each subtask with its attempts and its gate, the integrated verification with the checks and criteria that pass, the acceptance tester with its verdicts or its phase, the holdout scenarios with their results, and the publication with the PR. A subtask merged by an earlier run says so. A step that `run.json` does not record yet is pending; a step not reached because an earlier one failed is not run.
+- **Verification and evidence.** Each check and criterion of the integrated verification with its state, the result of its command, the verdict and the observation of the acceptance tester, and its evidence (see Evidence, not raw logs below). Each holdout scenario with its result, its output and its evidence from `holdout/` of the run log.
 - **Subtasks.** The detail of each subtask. A merged subtask stays folded in `<details>`; a blocked one or one in progress stays open.
 
 - **Actions through the CLI.** A page never changes anything on a `GET`. The developer starts the commands of the CLI from forms, and each one runs as the same `factory` command (see [Web actions](#web-actions)), so the server itself never pushes, approves or calls an agent.
@@ -436,5 +461,5 @@ The developer can do from the web what they do with the CLI. A **web action** is
 - **Stop.** The page of a web action that is still working has a Stop button, which sends `SIGINT` to its process group, as Ctrl-C does in a terminal, only when the start time of the process still matches `action.json`. It works after a restart of the server too. A run started in a terminal is stopped in its terminal: the web does not know its process.
 - **One at a time per issue, in the CLI.** `factory run <n>` and `factory approve <n>` refuse to start while the last run of the issue is `running` and not abandoned, and say since when it runs and when it will count as abandoned. They read it from the run log, so the rule needs no lock and holds in a terminal as from the web. Example: `factory run 28` in a terminal and another from the web: the web action ends at once with exit code 1 and `run 28-… of #28 is in progress since 10:42`. A run killed a moment ago counts as in progress until the threshold of abandonment passes.
 - **Credentials.** The form of `auth` sends the credential in the body of a `POST` to the server, which passes it to `factory auth` on its standard input, never as an argument, in the URL or in a log. The page never shows a saved credential, only its origin and its last four characters, as the CLI does.
-- **Refinement.** In the terminal, `factory refine <n>` is an interactive session of the agent. From the web it is a conversation turn by turn, with no terminal and no emulated terminal: the page shows the messages of the agent, formatted, and the tools it used as one line each, like the activity, and a form for the answer of the developer. Each answer starts one turn, as a web action like any other: `factory refine <n> --turn`, which prepares the same worktree, takes the answer on its standard input, never as an argument, and runs one turn of the agent of the refinement with the chosen model. A turn is a capability of the adapter of the agent, as the denial of every tool is for the independent verifier: the adapter starts the refinement skill in the first turn, resumes the same session in the next ones, and applies the list of allowed tools. With Claude Code a turn is `claude -p --resume <session> --output-format stream-json` with the plugin of the refinement and `--allowedTools`. The first turn records the session ID in the folder of the conversation under `.factory/web/`, and each turn keeps its stream there as a file of its own, so the conversation rebuilds from those files after a restart of the server or a closed tab. `factory refine <n> --turn` refuses to start while another turn of the same issue is in progress, because two turns would corrupt the same session; an interactive `factory refine <n>` in a terminal is not checked. In a turn nobody can approve a tool, so the turn runs with a fixed list of allowed tools and denies every other one: read the files of the worktree; write and edit inside the worktree; and as commands only `gh issue view`, `gh issue edit` and `gh issue comment` of that issue, `git add specs/<n>.md`, `git commit` and `node <factory CLI> validate <n>`. The adapter checks that the list loaded and fails closed. An agent whose adapter has no turn cannot refine from the web, and `factory refine --turn` refuses it and says why; today only Claude Code has one, because the refinement stays on Claude Code ([ADR 0003](adr/0003-interchangeable-agents.md)). A tool the skill needs outside the list is denied, and the agent says so in its message. Stop ends the turn in progress; the conversation can go on with a new answer. A refinement started in the terminal and one started from the web are the same refinement of the issue: both write `specs/<n>.md` on its integration branch.
+- **Refinement.** In the terminal, `factory refine <n>` is an interactive session of the agent. From the web it is a conversation turn by turn, with no terminal and no emulated terminal: the page shows the messages of the agent, formatted, and the tools it used as one line each, like the activity, and a form for the answer of the developer. Each answer starts one turn, as a web action like any other: `factory refine <n> --turn`, which prepares the same worktree, takes the answer on its standard input, never as an argument, and runs one turn of the agent of the refinement with the chosen model. A turn is a capability of the adapter of the agent, as the denial of every tool is for the independent verifier: the adapter starts the refinement skill in the first turn, resumes the same session in the next ones, and applies the list of allowed tools. With Claude Code a turn is `claude -p --resume <session> --output-format stream-json` with the plugin of the refinement and `--allowedTools`. The first turn records the session ID in the folder of the conversation under `.factory/web/`, and each turn keeps its stream there as a file of its own, so the conversation rebuilds from those files after a restart of the server or a closed tab. `factory refine <n> --turn` refuses to start while another turn of the same issue is in progress, because two turns would corrupt the same session; an interactive `factory refine <n>` in a terminal is not checked. In a turn nobody can approve a tool, so the turn runs with a fixed list of allowed tools and denies every other one: read the files of the worktree; write and edit inside the worktree and inside `.factory/holdout/<n>/`; and as commands only `gh issue view`, `gh issue edit` and `gh issue comment` of that issue, `git add specs/<n>.md`, `git commit` and `node <factory CLI> validate <n>`. The adapter checks that the list loaded and fails closed. An agent whose adapter has no turn cannot refine from the web, and `factory refine --turn` refuses it and says why; today only Claude Code has one, because the refinement stays on Claude Code ([ADR 0003](adr/0003-interchangeable-agents.md)). A tool the skill needs outside the list is denied, and the agent says so in its message. Stop ends the turn in progress; the conversation can go on with a new answer. A refinement started in the terminal and one started from the web are the same refinement of the issue: both write `specs/<n>.md` on its integration branch.
 - **Only the developer.** Any web page open in the browser can send a form to `127.0.0.1`, and such a request passes the check of the `Host` header. So a `POST` is accepted only when its `Origin` is `http://127.0.0.1:<port>` or `http://localhost:<port>` and it carries the token of the server. `factory web` creates a random token when it starts and prints the URL with it; the first visit keeps it in a cookie `HttpOnly; SameSite=Strict`, and each form carries it too. Anything else gets 403 and starts nothing.
