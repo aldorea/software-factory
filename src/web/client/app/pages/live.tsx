@@ -1,30 +1,19 @@
 import { Link, useSearchParams } from "react-router";
 import { AlertTriangle, Bot, Clock, Coins, Flag, MessageSquare, Wrench, X } from "lucide-react";
-import { Badge, type Tone } from "../components/ui/badge.tsx";
+import { Badge } from "../components/ui/badge.tsx";
 import { Card } from "../components/ui/card.tsx";
-import type { AgentState, LiveAgent, LiveEvent, LiveRole, LiveRun } from "../api.ts";
+import { OfflineNotice } from "../components/offline-notice.tsx";
+import type { LiveAgent, LiveEvent, LiveRole, LiveRun } from "../api.ts";
 import { cn } from "../cn.ts";
 import { duration } from "../format.ts";
+import { activatedBy } from "../keyboard.ts";
 import { useLive } from "../live-data.tsx";
+import { agentStateBar, agentStateEdge, agentStateText, agentStateTone, succeededTone } from "../tones.ts";
 
 const ROLE_LABEL: Record<LiveRole, string> = {
   worker: "Worker",
   "independent-verifier": "Independent verifier",
   "acceptance-tester": "Acceptance tester",
-};
-
-const STATE_TONE: Record<AgentState, Tone> = {
-  working: "info",
-  silent: "warn",
-  abandoned: "bad",
-  ended: "neutral",
-};
-
-const EDGE: Record<AgentState, string> = {
-  working: "border-t-info",
-  silent: "border-t-warn",
-  abandoned: "border-t-bad",
-  ended: "border-t-border",
 };
 
 function who(agent: LiveAgent): string {
@@ -41,15 +30,12 @@ function heading(agent: LiveAgent): string {
   return agent.subtask === null ? agent.step : `Subtask ${agent.subtask} · ${agent.step}`;
 }
 
-const GOOD_OUTCOMES = new Set(["completed", "accept", "passed"]);
-
 function tokens(agent: LiveAgent): string {
   return agent.tokens === null ? "—" : `${agent.tokens.input} in · ${agent.tokens.output} out`;
 }
 
 function silence(agent: LiveAgent): string {
-  const left = agent.abandonAfterMs - agent.silentMs;
-  return `Sin actividad ${duration(agent.silentMs)} · ${left > 0 ? `abandonado en ${duration(left)}` : "abandonado"}`;
+  return `Sin actividad ${duration(agent.silentMs)} · ${agent.abandonInMs === null ? "abandonado" : `abandonado en ${duration(agent.abandonInMs)}`}`;
 }
 
 function AgentCard({ agent, selected, onSelect }: { agent: LiveAgent; selected: boolean; onSelect: () => void }) {
@@ -57,15 +43,8 @@ function AgentCard({ agent, selected, onSelect }: { agent: LiveAgent; selected: 
     <Card
       role="article"
       aria-label={name(agent)}
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect();
-        }
-      }}
-      className={cn("flex cursor-pointer flex-col border-t-4 hover:bg-accent/40", EDGE[agent.state], selected && "ring-2 ring-primary")}
+      {...activatedBy(onSelect)}
+      className={cn("flex cursor-pointer flex-col border-t-4 hover:bg-accent/40", agentStateEdge(agent.state), selected && "ring-2 ring-primary")}
     >
       <div className="flex items-start justify-between gap-2 px-4 pt-3">
         <div className="min-w-0">
@@ -80,7 +59,7 @@ function AgentCard({ agent, selected, onSelect }: { agent: LiveAgent; selected: 
             {heading(agent)}
           </div>
         </div>
-        <Badge tone={STATE_TONE[agent.state]}>{agent.state}</Badge>
+        <Badge tone={agentStateTone(agent.state)}>{agent.state}</Badge>
       </div>
       <div className="space-y-1 px-4 py-3">
         <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
@@ -108,7 +87,7 @@ function AgentCard({ agent, selected, onSelect }: { agent: LiveAgent; selected: 
           <Coins className="size-3.5" />
           Tokens {tokens(agent)}
         </span>
-        <span className={cn("inline-flex items-center gap-1", agent.state === "abandoned" ? "text-bad" : agent.state === "silent" && "text-warn")}>
+        <span className={cn("inline-flex items-center gap-1", agentStateText(agent.state))}>
           <AlertTriangle className="size-3.5" />
           {silence(agent)}
         </span>
@@ -120,21 +99,14 @@ function AgentCard({ agent, selected, onSelect }: { agent: LiveAgent; selected: 
 function EndedRow({ agent, selected, onSelect }: { agent: LiveAgent; selected: boolean; onSelect: () => void }) {
   return (
     <li
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect();
-        }
-      }}
+      {...activatedBy(onSelect)}
       className={cn("flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm hover:bg-accent/50", selected && "bg-accent")}
     >
       <span className="font-medium">{name(agent)}</span>
       <span className="font-mono text-[11px] text-muted-foreground">
         {agent.agent} · {agent.model}
       </span>
-      <Badge tone={agent.outcome !== null && GOOD_OUTCOMES.has(agent.outcome) ? "ok" : "bad"}>{agent.outcome}</Badge>
+      <Badge tone={succeededTone(agent.succeeded)}>{agent.outcome}</Badge>
       <span className="ml-auto text-xs text-muted-foreground">
         {duration(agent.elapsedMs)} · {tokens(agent)}
       </span>
@@ -210,7 +182,7 @@ function SilenceBar({ agent }: { agent: LiveAgent }) {
         aria-valuemax={agent.abandonAfterMs}
         className="h-1.5 overflow-hidden rounded-full bg-muted"
       >
-        <div className={cn("h-full", ratio >= 1 ? "bg-bad" : agent.state === "silent" ? "bg-warn" : "bg-ok")} style={{ width: `${Math.max(2, ratio * 100)}%` }} />
+        <div className={cn("h-full", agentStateBar(agent.state))} style={{ width: `${Math.max(2, ratio * 100)}%` }} />
       </div>
     </div>
   );
@@ -230,7 +202,7 @@ function AgentDetail({ agent, run, onClose }: { agent: LiveAgent; run: LiveRun; 
           </div>
           <div className="mt-1 flex items-center gap-3">
             <h2 className="text-2xl font-semibold tracking-tight">{agent.step}</h2>
-            <Badge tone={ended ? (agent.outcome !== null && GOOD_OUTCOMES.has(agent.outcome) ? "ok" : "bad") : STATE_TONE[agent.state]}>{ended ? agent.outcome : agent.state}</Badge>
+            <Badge tone={ended ? succeededTone(agent.succeeded) : agentStateTone(agent.state)}>{ended ? agent.outcome : agent.state}</Badge>
           </div>
           <div className="mt-1 font-mono text-xs text-muted-foreground">
             {agent.agent} · {agent.model} · attempt {agent.attempt}
@@ -240,7 +212,7 @@ function AgentDetail({ agent, run, onClose }: { agent: LiveAgent; run: LiveRun; 
           <Figure label="Tiempo" value={duration(agent.elapsedMs)} />
           <Figure label="Tokens entrada" value={agent.tokens === null ? "—" : String(agent.tokens.input)} />
           <Figure label="Tokens salida" value={agent.tokens === null ? "—" : String(agent.tokens.output)} />
-          <Figure label="Silencio" value={ended ? "—" : duration(agent.silentMs)} tone={agent.state === "abandoned" ? "text-bad" : agent.state === "silent" ? "text-warn" : ""} />
+          <Figure label="Silencio" value={ended ? "—" : duration(agent.silentMs)} tone={agentStateText(agent.state)} />
         </div>
         {!ended && <SilenceBar agent={agent} />}
         <div className="rounded-lg border">
@@ -305,22 +277,21 @@ export function LivePage() {
         <h1 className="text-xl font-semibold">Live</h1>
         <p className="text-sm text-muted-foreground">Cada agente que trabaja ahora, en todos los runs.</p>
       </div>
-      {failed && (
-        <p role="status" className="rounded-md border border-warn/40 bg-warn/15 px-3 py-2 text-sm text-warn">
-          Sin conexión con factory web; se vuelve a intentar cada 2 s.
-        </p>
-      )}
+      {failed && <OfflineNotice />}
       {data === null ? (
         !failed && <p className="text-sm text-muted-foreground">Cargando…</p>
-      ) : data.runs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          <span>Ningún agente trabaja ahora.</span>{" "}
-          <Link to="/" className="text-primary hover:underline">
-            Ver los runs
-          </Link>
-        </p>
       ) : (
-        <LiveAgents runs={data.runs} />
+        <>
+          {data.atWork === 0 && (
+            <p className="text-sm text-muted-foreground">
+              <span>Ningún agente trabaja ahora.</span>{" "}
+              <Link to="/" className="text-primary hover:underline">
+                Ver los runs
+              </Link>
+            </p>
+          )}
+          <LiveAgents runs={data.runs} />
+        </>
       )}
     </div>
   );

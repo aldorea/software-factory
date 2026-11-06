@@ -154,7 +154,7 @@ describe("the detail of an agent on Live", () => {
     expect(text(detail)).toContain("Tokens salida40");
     expect(text(detail)).toContain("Silencio—");
     expect(within(detail).queryByRole("meter")).toBeNull();
-    expect(within(within(detail).getByRole("list", { name: "Últimos eventos" })).getAllByRole("listitem").map(text)[0]).toContain("attempt ended");
+    expect(within(within(detail).getByRole("list", { name: "Últimos eventos" })).getAllByRole("listitem").map(text)[0]).toContain("intento terminado");
   });
 
   it("should open Live with no detail when the agent of ?agent= is no longer known", async () => {

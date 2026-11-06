@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeRunLog, type RunLog, type VerificationRecord } from "../../../src/coordinator/run-log.ts";
 import { ApiOrigin } from "../../../src/web/client/app/api.ts";
 import { App } from "../../../src/web/client/app/app.tsx";
-import { toneOf } from "../../../src/web/client/app/format.ts";
+import { runStatusTone, subtaskStateTone } from "../../../src/web/client/app/tones.ts";
 import { startWebServer, type WebServer } from "../../../src/web/server.ts";
 import { attemptRecord, subtaskRecord } from "../../coordinator/run-log-fixtures.ts";
 import { FakeClock } from "../../fakes/clock.ts";
@@ -472,12 +472,12 @@ describe("the links of the page of a run to its files", () => {
 
 describe("the tone of a badge", () => {
   it("should colour a ready run as ok and a blocked subtask as bad", () => {
-    expect(toneOf("ready")).toBe("ok");
-    expect(toneOf("blocked")).toBe("bad");
+    expect(runStatusTone("ready")).toBe("ok");
+    expect(subtaskStateTone("blocked")).toBe("bad");
   });
 
   it("should not take a tone from a property of Object, because a run.json value can be any string", () => {
-    expect(toneOf("constructor")).toBe("neutral");
-    expect(toneOf("__proto__")).toBe("neutral");
+    expect(subtaskStateTone("constructor")).toBe("neutral");
+    expect(subtaskStateTone("__proto__")).toBe("neutral");
   });
 });

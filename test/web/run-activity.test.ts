@@ -78,6 +78,23 @@ describe("the activity of a run in the API", () => {
     expect(agent?.events.at(-1)).toEqual({ at: "2026-10-27T07:27:44.315Z", kind: "message", text: "All checks pass. Next I'll commit." });
   });
 
+  it("should keep asking while the run is running with no agent at work between two steps, so its next agent shows", async () => {
+    const { dir, runIds } = await repoWith({ issue: 23, attempts: [{ subtask: "health", outcome: "completed" }] });
+
+    const activity = await activityOf(dir, runIds[0] as string);
+
+    expect([activity.atWork, activity.inProgress]).toEqual([0, true]);
+  });
+
+  it("should stop asking for a run that is still running in run.json but abandoned as a whole", async () => {
+    const lines = (await realLog("claude-activity.jsonl")).slice(0, 6);
+    const { dir, runIds } = await repoWith({ issue: 23, runJsonSilentMs: 11 * MINUTE, attempts: [{ subtask: "health", lines, silentMs: 11 * MINUTE }] });
+
+    const activity = await activityOf(dir, runIds[0] as string);
+
+    expect([activity.atWork, activity.inProgress]).toEqual([0, false]);
+  });
+
   it("should answer a run that does not exist with a JSON 404", async () => {
     const { dir } = await repoWith();
 

@@ -3,6 +3,9 @@ import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { Badge } from "../components/ui/badge.tsx";
 import { Card } from "../components/ui/card.tsx";
+import { CriterionGroups } from "../components/criterion-groups.tsx";
+import { OfflineNotice } from "../components/offline-notice.tsx";
+import { Section } from "../components/section.tsx";
 import { cn } from "../cn.ts";
 import {
   usePoll,
@@ -17,7 +20,8 @@ import {
   type TesterView,
   type VerificationView,
 } from "../api.ts";
-import { relativeTime, STATUS_TONE, toneOf } from "../format.ts";
+import { relativeTime } from "../format.ts";
+import { runStatusTone, subtaskStateTone, succeededTone } from "../tones.ts";
 import { LiveAgents } from "./live.tsx";
 import { NotFound } from "./notices.tsx";
 
@@ -34,12 +38,12 @@ type TabId = (typeof TABS)[number]["id"];
 const RAW_LOG = "Log crudo";
 const FULL_OUTPUT = "Salida completa";
 
-function verdict(passed: boolean): string {
-  return passed ? "pasa" : "falla";
+function ResultBadge({ succeeded, children }: { succeeded: boolean | null; children: ReactNode }) {
+  return <Badge tone={succeededTone(succeeded)}>{children}</Badge>;
 }
 
-function Tone({ value }: { value: string }) {
-  return <Badge tone={toneOf(value)}>{value}</Badge>;
+function Verdict({ passed }: { passed: boolean }) {
+  return <ResultBadge succeeded={passed}>{passed ? "pasa" : "falla"}</ResultBadge>;
 }
 
 function FileLink({ url, label }: { url: string | null; label: string }) {
@@ -57,15 +61,6 @@ function ExternalLink({ url, text }: { url: string | null; text: string }) {
     <a href={url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
       {text}
     </a>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <Card role="region" aria-label={title} className="space-y-2 p-4 text-sm">
-      <h2 className="text-base font-semibold">{title}</h2>
-      {children}
-    </Card>
   );
 }
 
@@ -97,7 +92,7 @@ function Checks({ checks }: { checks: readonly CheckView[] }) {
       <Items>
         {checks.map((check, index) => (
           <li key={index}>
-            {check.name}: <Tone value={verdict(check.passed)} />
+            {check.name}: <Verdict passed={check.passed} />
             {check.firstError === null ? "" : ` (${check.firstError})`} <FileLink url={check.outputUrl} label={FULL_OUTPUT} />
           </li>
         ))}
@@ -113,7 +108,7 @@ function Criteria({ criteria }: { criteria: readonly CriterionView[] }) {
       <Items>
         {criteria.map((criterion, index) => (
           <li key={index}>
-            {criterion.id}: <Tone value={verdict(criterion.passed)} /> <FileLink url={criterion.outputUrl} label={FULL_OUTPUT} />
+            {criterion.id}: <Verdict passed={criterion.passed} /> <FileLink url={criterion.outputUrl} label={FULL_OUTPUT} />
           </li>
         ))}
       </Items>
@@ -130,7 +125,7 @@ function Header({ run }: { run: RunDetail }) {
       <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
           Resultado:{" "}
-          <Badge tone={STATUS_TONE[run.status]}>
+          <Badge tone={runStatusTone(run.status)}>
             {run.status === "running" && <Loader2 className="animate-spin" />}
             {run.status}
           </Badge>
@@ -185,15 +180,11 @@ function Activity({ runId }: { runId: string }) {
 }
 
 function Summary({ run }: { run: RunDetail }) {
-  const { agents, criteria } = run;
-  const working = run.status === "running";
-  const publicationFailure = working ? null : run.publicationFailure;
-  const pause = working ? null : run.pause;
-  const block = working ? null : run.block;
+  const { agents, criteria, publicationFailure, pause, block } = run;
   return (
     <div className="space-y-4">
       <Links run={run} />
-      {working && <CurrentStep key={run.modifiedAt} runId={run.runId} />}
+      {run.inProgress && <CurrentStep runId={run.runId} />}
       {publicationFailure !== null && (
         <Section title="Sin publicar">
           <p>Fase: {publicationFailure.phase}</p>
@@ -245,22 +236,17 @@ function Summary({ run }: { run: RunDetail }) {
           </Group>
         )}
       </Section>
-      <Section title="Criterios">
-        <div className="grid gap-3 sm:grid-cols-4">
-          {(
-            [
-              ["Pasan", criteria.passing],
-              ["Bloqueados", criteria.blocked],
-              ["Human", criteria.human],
-              ["Pendientes", criteria.pending],
-            ] as const
-          ).map(([title, ids]) => (
-            <Group key={title} title={title}>
-              <Items label={title}>{ids.length === 0 ? <li>Ninguno</li> : ids.map((id, index) => <li key={index}>{id}</li>)}</Items>
-            </Group>
-          ))}
-        </div>
-      </Section>
+      <CriterionGroups criteria={criteria}>
+        {(groups) => (
+          <div className="grid gap-3 sm:grid-cols-4">
+            {groups.map(([title, ids]) => (
+              <Group key={title} title={title}>
+                <Items label={title}>{ids.length === 0 ? <li>Ninguno</li> : ids.map((id, index) => <li key={index}>{id}</li>)}</Items>
+              </Group>
+            ))}
+          </div>
+        )}
+      </CriterionGroups>
     </div>
   );
 }
@@ -272,7 +258,7 @@ function Attempt({ attempt }: { attempt: AttemptView }) {
         Intento {attempt.number}: {attempt.agent} / {attempt.model}
       </p>
       <p>
-        Resultado: <Tone value={attempt.outcome} />
+        Resultado: <ResultBadge succeeded={attempt.succeeded}>{attempt.outcome}</ResultBadge>
       </p>
       {attempt.detail !== null && <p>Detalle: {attempt.detail}</p>}
       {attempt.failure !== null && <p>Fallo: {attempt.failure}</p>}
@@ -288,7 +274,7 @@ function Gate({ gate }: { gate: GateView }) {
   return (
     <div className="space-y-2">
       <h4 className="font-medium">
-        Gate {gate.sha}: <Tone value={gate.accepted ? "aceptado" : "rechazado"} />
+        Gate {gate.sha}: <ResultBadge succeeded={gate.accepted}>{gate.accepted ? "aceptado" : "rechazado"}</ResultBadge>
       </h4>
       {gate.reasons.length > 0 && (
         <Items>
@@ -304,7 +290,7 @@ function Gate({ gate }: { gate: GateView }) {
           <Items>
             {gate.verifier.map((record, index) => (
               <li key={index}>
-                {record.id}: <Tone value={record.verdict} />
+                {record.id}: <ResultBadge succeeded={record.accepted}>{record.verdict}</ResultBadge>
                 {record.reason === null ? "" : ` (${record.reason})`} <FileLink url={record.logUrl} label={RAW_LOG} />
               </li>
             ))}
@@ -320,7 +306,7 @@ function Subtask({ subtask }: { subtask: SubtaskView }) {
     <Card role="region" aria-label={subtask.id} className="space-y-2 p-4 text-sm">
       <h3 className="font-mono text-base font-semibold">{subtask.id}</h3>
       <p>
-        Estado: <Tone value={subtask.state} />
+        Estado: <Badge tone={subtaskStateTone(subtask.state)}>{subtask.state}</Badge>
       </p>
       <p>Criterios: {names(subtask.criteria)}</p>
       <p>Branch: {subtask.branch}</p>
@@ -386,7 +372,7 @@ function Tester({ tester }: { tester: TesterView }) {
         <Items>
           {tester.verdicts.map((testerVerdict, index) => (
             <li key={index}>
-              {testerVerdict.id}: <Tone value={verdict(testerVerdict.passed)} />{" "}
+              {testerVerdict.id}: <Verdict passed={testerVerdict.passed} />{" "}
               {`(${testerVerdict.observation})${testerVerdict.evidence.length === 0 ? "" : ` [${testerVerdict.evidence.join(", ")}]`}`}
             </li>
           ))}
@@ -408,7 +394,7 @@ function Verification({ verification }: { verification: VerificationView | null 
     <Section title="Integrated verification">
       <p>SHA: {verification.sha}</p>
       <p>
-        Resultado: <Tone value={verdict(verification.passed)} />
+        Resultado: <Verdict passed={verification.passed} />
       </p>
       {verification.environment !== null && <p>Entorno: {verification.environment}</p>}
       <Checks checks={verification.checks} />
@@ -429,12 +415,11 @@ function Verification({ verification }: { verification: VerificationView | null 
   );
 }
 
-
 function TabContent({ tab, run }: { tab: TabId; run: RunDetail }) {
   if (tab === "summary") return <Summary run={run} />;
   if (tab === "verification") return <Verification verification={run.verification} />;
   if (tab === "subtasks") return <Subtasks subtasks={run.subtasks} />;
-  if (tab === "activity") return <Activity key={run.modifiedAt} runId={run.runId} />;
+  if (tab === "activity") return <Activity runId={run.runId} />;
   return <p className="text-sm text-muted-foreground">Esta pestaña todavía no tiene contenido.</p>;
 }
 
@@ -475,11 +460,7 @@ export function RunPage() {
   if (missing) return <NotFound />;
   return (
     <div className="space-y-6">
-      {failed && (
-        <p role="status" className="rounded-md border border-warn/40 bg-warn/15 px-3 py-2 text-sm text-warn">
-          Sin conexión con factory web; se vuelve a intentar cada 2 s.
-        </p>
-      )}
+      {failed && <OfflineNotice />}
       {data === null ? (
         !failed && <p className="text-sm text-muted-foreground">Cargando…</p>
       ) : (

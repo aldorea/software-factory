@@ -66,7 +66,7 @@ describe("the Live page", () => {
     const runs = await screen.findAllByRole("region", { name: /^Run #/ });
 
     expect(runs.map((run) => within(run).getByRole("heading").textContent)).toEqual(["#24 health endpoint", "#21 csv export"]);
-    expect(text(runs[0] as HTMLElement)).toContain("Subtasks · d, e");
+    expect(text(runs[0] as HTMLElement)).toContain("Subtareas · d, e");
     expect(within(runs[0] as HTMLElement).getAllByRole("article").map((card) => card.getAttribute("aria-label"))).toEqual([
       "Worker d · attempt 1",
       "Worker e · attempt 1",
@@ -91,7 +91,7 @@ describe("the Live page", () => {
     expect(card).toContain("Sin actividad 4 min · abandonado en 6 min");
   });
 
-  it("should show a card for a question of the independent verifier with its criterion and its last message in the line of the tool, and one for the acceptance tester with its phase", async () => {
+  it("should show a card for a question of the independent verifier with its criterion and its last message once, in the line of the tool, and one for the acceptance tester with its phase", async () => {
     await open([
       {
         attempts: [{ subtask: "health", outcome: "completed" }],
@@ -104,7 +104,7 @@ describe("the Live page", () => {
     const tester = screen.getByRole("article", { name: "Acceptance tester · attempt 1" });
 
     expect(text(verifier)).toContain("Criterion C2 · Subtask health");
-    expect(within(verifier).getAllByText("OK")).toHaveLength(2);
+    expect(within(verifier).getAllByText("OK")).toHaveLength(1);
     expect(text(tester)).toContain("install");
     expect(text(tester)).toContain("Tokens —");
   });
@@ -149,6 +149,51 @@ describe("the Live page", () => {
 
     expect(await screen.findByText("Ningún agente trabaja ahora.")).toBeDefined();
     expect(screen.getByRole("link", { name: "Ver los runs" }).getAttribute("href")).toBe("/");
+  });
+
+  it("should say that no agent works and link to Runs when the runs in progress have only agents that ended", async () => {
+    await open([{ attempts: [{ subtask: "health", outcome: "completed" }] }]);
+
+    expect(await screen.findByText("Ningún agente trabaja ahora.")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Ver los runs" }).getAttribute("href")).toBe("/");
+  });
+
+  it("should say that no agent works when a run in progress has no agent yet", async () => {
+    await open([{ attempts: [] }]);
+
+    expect(await screen.findByText("Ningún agente trabaja ahora.")).toBeDefined();
+  });
+
+  it("should not say that no agent works while one works", async () => {
+    await open([{ attempts: [{ subtask: "health", lines: await claudeLines(6) }] }]);
+    await screen.findByRole("article");
+
+    expect(screen.queryByText("Ningún agente trabaja ahora.")).toBeNull();
+  });
+
+  it("should say on a card that an abandoned agent is abandoned, with no time left", async () => {
+    const lines = await claudeLines(6);
+    await open([{ attemptIdleTimeoutMs: 3 * MINUTE, attempts: [{ subtask: "a", lines, silentMs: 4 * MINUTE }, { subtask: "b", lines }] }]);
+
+    const card = text(await screen.findByRole("article", { name: "Worker a · attempt 1" }));
+
+    expect(card).toContain("Sin actividad 4 min · abandonado");
+    expect(card).not.toContain("abandonado en");
+  });
+
+  it("should show a live indicator next to Live in the menu while the page refreshes, on any page", async () => {
+    await open([{ attempts: [{ subtask: "a", lines: await claudeLines(6) }] }], "/settings");
+
+    const live = within(screen.getByRole("navigation", { name: "Menú" })).getByRole("link", { name: /^Live/ });
+
+    expect(await within(live).findByRole("img", { name: "Actualizando en directo" })).toBeDefined();
+  });
+
+  it("should show no live indicator when no agent works, since the page no longer refreshes", async () => {
+    await open([{ attempts: [{ subtask: "a", outcome: "completed" }] }]);
+    await screen.findByText("Ningún agente trabaja ahora.");
+
+    expect(screen.queryByRole("img", { name: "Actualizando en directo" })).toBeNull();
   });
 
   it("should show the count of agents at work next to Live in the menu, on any page", async () => {

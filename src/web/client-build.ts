@@ -3,7 +3,6 @@ import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 
 export const BUILD_MANIFEST = "build.json";
-export const BUILD_FIX = "pnpm build:web";
 
 export interface BuildManifest {
   sourceHash: string;

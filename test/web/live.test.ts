@@ -72,8 +72,10 @@ describe("the live agents of the API", () => {
         elapsedMs: 5 * MINUTE,
         silentMs: 20_000,
         abandonAfterMs: 10 * MINUTE,
+        abandonInMs: 10 * MINUTE - 20_000,
         state: "working",
         outcome: null,
+        succeeded: null,
         tokens: { input: 13_103, output: 98 },
       },
     ]);
@@ -85,7 +87,7 @@ describe("the live agents of the API", () => {
 
     const agent = (await liveOf(dir)).runs[0]?.agents[0];
 
-    expect([agent?.state, agent?.silentMs, agent?.abandonAfterMs]).toEqual(["silent", 4 * MINUTE, 10 * MINUTE]);
+    expect([agent?.state, agent?.silentMs, agent?.abandonAfterMs, agent?.abandonInMs]).toEqual(["silent", 4 * MINUTE, 10 * MINUTE, 6 * MINUTE]);
   });
 
   it("should call abandoned a worker whose raw log has not changed for longer than the attemptIdleTimeoutMs of its run, while another keeps the run alive", async () => {
@@ -100,9 +102,9 @@ describe("the live agents of the API", () => {
 
     const live = await liveOf(dir);
 
-    expect(live.runs[0]?.agents.map((agent) => [agent.subtask, agent.state, agent.abandonAfterMs])).toEqual([
-      ["health", "abandoned", 3 * MINUTE],
-      ["ui", "working", 3 * MINUTE],
+    expect(live.runs[0]?.agents.map((agent) => [agent.subtask, agent.state, agent.abandonAfterMs, agent.abandonInMs])).toEqual([
+      ["health", "abandoned", 3 * MINUTE, null],
+      ["ui", "working", 3 * MINUTE, 3 * MINUTE - 10_000],
     ]);
     expect(live.atWork).toBe(1);
   });
@@ -167,7 +169,7 @@ describe("the live agents of the API", () => {
     const live = await liveOf(dir);
     const agent = live.runs[0]?.agents[0];
 
-    expect(agent).toMatchObject({ state: "ended", outcome: "agent-error", elapsedMs: 2 * MINUTE, silentMs: 0, tokens: { input: 1000, output: 40 }, events: [] });
+    expect(agent).toMatchObject({ state: "ended", outcome: "agent-error", succeeded: false, elapsedMs: 2 * MINUTE, silentMs: 0, abandonInMs: null, tokens: { input: 1000, output: 40 }, events: [] });
     expect(live.inProgress).toBe(false);
     expect(live.atWork).toBe(0);
   });
@@ -191,7 +193,8 @@ describe("the live agents of the API", () => {
       ["2026-10-27T07:27:57.404Z", "message"],
       ["2026-10-27T07:27:57.404Z", "end"],
     ]);
-    expect(ended?.events.at(-1)?.text).toBe("attempt ended");
+    expect(ended?.events.at(-1)?.text).toBe("intento terminado");
+    expect(ended?.succeeded).toBe(true);
     expect(ended?.lastMessage).toMatch(/^`GET \/api\/health` is implemented/);
   });
 
@@ -205,6 +208,19 @@ describe("the live agents of the API", () => {
     );
 
     expect((await liveOf(dir)).runs.map((run) => run.runId)).toEqual([runIds[3], runIds[0]]);
+  });
+
+  it("should give the step of a run in Spanish: the subtasks at work, or the wait for the next step when no agent works", async () => {
+    const lines = (await realLog("claude-activity.jsonl")).slice(0, 6);
+    const { dir } = await repoWith(
+      { issue: 21, startedAgoMs: 60 * MINUTE, attempts: [{ subtask: "a", outcome: "completed" }] },
+      { issue: 22, startedAgoMs: 50 * MINUTE, attempts: [{ subtask: "b", lines }, { subtask: "c", lines }] },
+    );
+
+    expect((await liveOf(dir)).runs.map((run) => [run.issue, run.step])).toEqual([
+      [22, "Subtareas · b, c"],
+      [21, "Esperando el siguiente paso"],
+    ]);
   });
 
   it("should answer an empty list with nothing in progress for a repo without a run log", async () => {
@@ -277,14 +293,16 @@ describe("the independent verifier in Live", () => {
       attempt: 1,
       step: "gating",
       lastTool: "OK",
-      lastMessage: "OK",
+      lastMessage: null,
       events: [{ at: "2026-10-25T08:58:49.286Z", kind: "message", text: "OK" }],
       startedAt: new Date(NOW.getTime() - 2 * MINUTE).toISOString(),
       elapsedMs: 2 * MINUTE,
       silentMs: 5_000,
       abandonAfterMs: 10 * MINUTE,
+      abandonInMs: 10 * MINUTE - 5_000,
       state: "working",
       outcome: null,
+      succeeded: null,
       tokens: null,
     });
     expect(live.atWork).toBe(1);
@@ -310,6 +328,17 @@ describe("the independent verifier in Live", () => {
     ]);
   });
 
+  it("should say that a question that ended with accept succeeded", async () => {
+    const { dir } = await repoWith({
+      attempts: [{ subtask: "health", outcome: "completed" }],
+      endedVerifiers: [{ subtask: "health", criterion: "C2", verdict: "accept", startedAgoMs: 4 * MINUTE, durationMs: 90_000 }],
+    });
+
+    const verifier = (await liveOf(dir)).runs[0]?.agents.find((agent) => agent.role === "independent-verifier");
+
+    expect([verifier?.outcome, verifier?.succeeded]).toEqual(["accept", true]);
+  });
+
   it("should fold a question that ended into a row with its verdict and its time", async () => {
     const { dir } = await repoWith({
       attempts: [{ subtask: "health", outcome: "completed" }],
@@ -319,7 +348,7 @@ describe("the independent verifier in Live", () => {
     const live = await liveOf(dir);
     const verifier = live.runs[0]?.agents.find((agent) => agent.role === "independent-verifier");
 
-    expect(verifier).toMatchObject({ criterion: "C2", state: "ended", outcome: "refute", elapsedMs: 90_000, silentMs: 0, events: [] });
+    expect(verifier).toMatchObject({ criterion: "C2", state: "ended", outcome: "refute", succeeded: false, elapsedMs: 90_000, silentMs: 0, events: [] });
     expect(live.inProgress).toBe(false);
   });
 });
@@ -403,10 +432,10 @@ describe("the acceptance tester in Live", () => {
     const live = await liveOf(dir);
     const testers = live.runs.map((run) => [run.issue, run.agents.find((agent) => agent.role === "acceptance-tester")]);
 
-    expect(testers.map(([issue, tester]) => [issue, typeof tester === "object" ? tester?.outcome : null])).toEqual([
-      [24, "error"],
-      [22, "passed"],
-      [21, "failed"],
+    expect(testers.map(([issue, tester]) => [issue, typeof tester === "object" ? [tester?.outcome, tester?.succeeded] : null])).toEqual([
+      [24, ["error", false]],
+      [22, ["passed", true]],
+      [21, ["failed", false]],
     ]);
     expect(live.runs.find((run) => run.issue === 21)?.agents.find((agent) => agent.role === "acceptance-tester")).toMatchObject({
       state: "ended",

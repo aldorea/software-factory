@@ -1,18 +1,10 @@
 import type { ReactNode } from "react";
-import { Card } from "../components/ui/card.tsx";
+import { CriterionGroups } from "../components/criterion-groups.tsx";
+import { Section } from "../components/section.tsx";
 import type { RunStats } from "../api.ts";
 import { duration } from "../format.ts";
 
 type Rows = ReadonlyArray<readonly [string, ReactNode]>;
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <Card aria-label={title} role="region" className="p-4">
-      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
-      {children}
-    </Card>
-  );
-}
 
 function Definitions({ rows }: { rows: Rows }) {
   return (
@@ -35,7 +27,7 @@ function counts(entries: ReadonlyArray<[string, number | undefined]>): string {
 function Results({ stats }: { stats: RunStats }) {
   const { results } = stats;
   return (
-    <Section title="Resultados">
+    <Section level={3} title="Resultados">
       <Definitions
         rows={[
           ["Runs", stats.runs],
@@ -53,23 +45,16 @@ function Results({ stats }: { stats: RunStats }) {
 
 function Criteria({ stats: { criteria } }: { stats: RunStats }) {
   return (
-    <Section title="Criterios">
-      <Definitions
-        rows={[
-          ["Pasan", criteria.passing],
-          ["Bloqueados", criteria.blocked],
-          ["Human", criteria.human],
-          ["Pendientes", criteria.pending],
-        ]}
-      />
-    </Section>
+    <CriterionGroups criteria={criteria} level={3}>
+      {(groups) => <Definitions rows={groups} />}
+    </CriterionGroups>
   );
 }
 
 function Cost({ stats: { cost } }: { stats: RunStats }) {
   const { perRun, perSubtask } = cost;
   return (
-    <Section title="Coste">
+    <Section level={3} title="Coste">
       <Definitions
         rows={[
           [
@@ -87,7 +72,7 @@ function Cost({ stats: { cost } }: { stats: RunStats }) {
 
 function Agents({ stats: { perAgent } }: { stats: RunStats }) {
   return (
-    <Section title="Por agente">
+    <Section level={3} title="Por agente">
       <table className="w-full text-sm">
         <thead className="text-left text-xs text-muted-foreground">
           <tr>
@@ -116,7 +101,7 @@ function Agents({ stats: { perAgent } }: { stats: RunStats }) {
 
 function Friction({ stats: { friction } }: { stats: RunStats }) {
   return (
-    <Section title="Fricción">
+    <Section level={3} title="Fricción">
       <Definitions
         rows={[
           ["Bloqueos", counts(Object.entries(friction.blocks))],
@@ -133,7 +118,7 @@ function Friction({ stats: { friction } }: { stats: RunStats }) {
 
 function WorkerLayer({ stats: { workerLayerFailures } }: { stats: RunStats }) {
   return (
-    <Section title="Worker layer">
+    <Section level={3} title="Worker layer">
       <Definitions rows={[["Fallos de la worker layer", counts(Object.entries(workerLayerFailures))]]} />
     </Section>
   );

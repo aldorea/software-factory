@@ -1,7 +1,7 @@
 import type { Role, RoleChoice } from "../config/config.ts";
 import { CREDENTIAL_VARIABLES, type CredentialsProblem } from "../config/credentials.ts";
 import { ROLES } from "../config/roles.ts";
-import { BUILD_FIX } from "../web/client-build.ts";
+import { BUILD_FIX } from "../web/build-fix.ts";
 import { dockerignoreProblem } from "../workers/dockerignore.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";

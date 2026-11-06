@@ -1,6 +1,3 @@
-import type { Tone } from "./components/ui/badge.tsx";
-import type { RunStatus } from "./api.ts";
-
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -20,36 +17,4 @@ export function duration(ms: number): string {
   const rest = minutes % 60;
   if (hours === 0) return `${rest} min`;
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
-}
-
-export const STATUS_TONE: Record<RunStatus, Tone> = {
-  ready: "ok",
-  draft: "warn",
-  abandoned: "warn",
-  paused: "info",
-  running: "info",
-};
-
-const TONES = new Map<string, Tone>([
-  ["ready", "ok"],
-  ["merged", "ok"],
-  ["pasa", "ok"],
-  ["aceptado", "ok"],
-  ["accept", "ok"],
-  ["draft", "warn"],
-  ["interrupted", "warn"],
-  ["abandoned", "warn"],
-  ["paused", "info"],
-  ["running", "info"],
-  ["working", "info"],
-  ["gating", "info"],
-  ["blocked", "bad"],
-  ["falla", "bad"],
-  ["rechazado", "bad"],
-  ["refute", "bad"],
-  ["error", "bad"],
-]);
-
-export function toneOf(value: string): Tone {
-  return TONES.get(value) ?? "neutral";
 }

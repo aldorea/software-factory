@@ -42,6 +42,7 @@ describe("the subtasks of a run", () => {
         agent: "opencode",
         model: "opencode-go/kimi-k2",
         outcome: "agent-error",
+        succeeded: false,
         detail: null,
         failure: "typecheck failed in src/a.ts",
         tokens: 1250,
@@ -49,6 +50,19 @@ describe("the subtasks of a run", () => {
         endedAt: "2026-10-24T08:12:00.000Z",
         logUrl: null,
       },
+    ]);
+  });
+
+  it("should say whether each attempt succeeded, and nothing yet for an attempt in progress", async () => {
+    const attempts = [
+      { ...attemptRecord("claude-code", 10, 5), number: 1, outcome: "completed" as const },
+      { ...attemptRecord("claude-code", 10, 5), number: 2, outcome: "running" as const },
+    ];
+    const log = aRun(0, { result: "running", subtasks: [subtaskRecord("S1", { attempts })] });
+
+    expect((await runDetail(log)).subtasks[0]?.attempts.map((attempt) => [attempt.outcome, attempt.succeeded])).toEqual([
+      ["completed", true],
+      ["running", null],
     ]);
   });
 
@@ -87,8 +101,8 @@ describe("the subtasks of a run", () => {
       ],
       criteria: [{ id: "C1", passed: true, outputUrl: null }],
       verifier: [
-        { id: "C1", verdict: "accept", reason: null, logUrl: null },
-        { id: "C2", verdict: "refute", reason: "the button is missing", logUrl: null },
+        { id: "C1", verdict: "accept", accepted: true, reason: null, logUrl: null },
+        { id: "C2", verdict: "refute", accepted: false, reason: "the button is missing", logUrl: null },
       ],
     });
     expect([subtask?.gateRejections, subtask?.verifierRejections]).toEqual([2, 1]);

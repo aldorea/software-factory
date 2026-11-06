@@ -139,6 +139,32 @@ describe("the Activity tab of a run", () => {
   );
 });
 
+describe("the refresh of the Activity tab of a run", () => {
+  it(
+    "should keep the open detail when run.json changes, with no new Cargando…, since the tab is not drawn again from scratch",
+    async () => {
+      const lines = await claudeLines(6);
+      const fixture: LiveRunFixture = { issue: 23, runJsonSilentMs: MINUTE, attempts: [{ subtask: "health", lines }] };
+      const { dir, runs } = await write([fixture]);
+      await open(dir, `/runs/${runs[0]?.runId}?tab=activity&agent=${encodeURIComponent(`${runs[0]?.runId}:worker:health:1`)}`);
+      const detail = await within(panel()).findByRole("complementary", { name: "Detalle del agente" });
+      let loading = false;
+      const observer = new MutationObserver(() => {
+        loading ||= (document.body.textContent ?? "").includes("Cargando…");
+      });
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+      await writeLiveRun(join(dir, ".factory", "logs"), { ...fixture, runJsonSilentMs: 0, attempts: [...fixture.attempts, { subtask: "metrics", lines }] });
+      await within(panel()).findByRole("article", { name: "Worker metrics · attempt 1" }, { timeout: 2 * POLL_MS + 1000 });
+      observer.disconnect();
+
+      expect(loading).toBe(false);
+      expect(within(panel()).getByRole("complementary", { name: "Detalle del agente" })).toBe(detail);
+    },
+    4 * POLL_MS,
+  );
+});
+
 describe("the Summary tab of a run that works", () => {
   it("should show the current step of the run and a link to Activity, and no causes", async () => {
     const { dir, runs } = await write([{ issue: 23, attempts: [{ subtask: "health", lines: await claudeLines(6) }] }]);
@@ -150,7 +176,7 @@ describe("the Summary tab of a run that works", () => {
 
     await open(dir, `/runs/${run.runId}`);
 
-    expect(await within(panel()).findByText("Subtasks · health")).toBeDefined();
+    expect(await within(panel()).findByText("Subtareas · health")).toBeDefined();
     expect(within(panel()).queryByRole("region", { name: "Bloqueo del run" })).toBeNull();
     fireEvent.click(within(panel()).getByRole("link", { name: "Ver la actividad" }));
     expect(screen.getByRole("tab", { selected: true }).textContent).toBe("Actividad");

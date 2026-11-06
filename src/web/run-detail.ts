@@ -48,6 +48,7 @@ export interface AttemptView {
   agent: string;
   model: string;
   outcome: AttemptRecord["outcome"] | "abandoned";
+  succeeded: boolean | null;
   detail: string | null;
   failure: string | null;
   tokens: number;
@@ -59,6 +60,7 @@ export interface AttemptView {
 export interface VerifierView {
   id: string;
   verdict: VerifierRecord["verdict"];
+  accepted: boolean;
   reason: string | null;
   logUrl: string | null;
 }
@@ -151,6 +153,7 @@ function attemptView(attempt: AttemptRecord, abandoned: boolean, logUrl: LogUrl)
     agent: attempt.agent.agent,
     model: attempt.agent.model,
     outcome: abandoned ? "abandoned" : attempt.outcome,
+    succeeded: attempt.outcome === "running" && !abandoned ? null : attempt.outcome === "completed",
     detail: attempt.detail ?? null,
     failure: attempt.failure?.description ?? null,
     tokens: countedTokens(attempt.usage),
@@ -167,7 +170,7 @@ function gateView(gate: GateRecord, logUrl: LogUrl): GateView {
     reasons: gate.reasons,
     checks: gate.checks.map((check) => checkView(check, logUrl)),
     criteria: gate.criteria.map((criterion) => criterionView(criterion, logUrl)),
-    verifier: gate.verifier.map((record) => ({ id: record.id, verdict: record.verdict, reason: record.reason ?? null, logUrl: logUrl(record.logPath) })),
+    verifier: gate.verifier.map((record) => ({ id: record.id, verdict: record.verdict, accepted: record.verdict === "accept", reason: record.reason ?? null, logUrl: logUrl(record.logPath) })),
   };
 }
 
@@ -243,18 +246,19 @@ function roles({ agents }: RunLog): RoleAgent[] {
 export function runDetail(entry: RunEntry, now: Date, logUrl: LogUrl): RunDetail {
   const { log } = entry;
   const status = runStatus(entry, now);
+  const working = status === "running";
   return {
     now: now.toISOString(),
     issue: log.issue,
     runId: log.runId,
     status,
     modifiedAt: entry.modifiedAt.toISOString(),
-    inProgress: status === "running",
+    inProgress: working,
     pullRequest: log.pullRequest === undefined ? null : { number: log.pullRequest.number, url: safeLink(log.pullRequest.url), draft: log.pullRequest.draft },
     evidenceBranch: log.evidence === undefined ? null : evidenceBranchView(log.evidence),
-    publicationFailure: log.publicationFailure === undefined ? null : { ...log.publicationFailure, command: `factory publish ${log.issue}` },
+    publicationFailure: working || log.publicationFailure === undefined ? null : { ...log.publicationFailure, command: `factory publish ${log.issue}` },
     pause: log.result === "paused" ? { reason: log.pauseReason ?? null, resetsAt: log.resetsAt ?? null } : null,
-    block: log.block === undefined ? null : blockView(log.block, logUrl),
+    block: working || log.block === undefined ? null : blockView(log.block, logUrl),
     agents: { roles: roles(log), changes: log.agents.changes },
     criteria: log.criteria,
     subtasks: log.subtasks.map((subtask) => subtaskView(subtask, entry, now, logUrl)),

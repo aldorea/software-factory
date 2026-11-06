@@ -25,22 +25,22 @@ type Theme = "light" | "dark";
 const THEME_KEY = "factory-web-theme";
 
 function savedTheme(): Theme {
-  try {
-    return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
-  } catch {
-    return "light";
-  }
+  return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
 }
 
 function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>(savedTheme);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch {}
+    localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
   return [theme, () => setTheme((current) => (current === "dark" ? "light" : "dark"))];
+}
+
+function LiveIndicator() {
+  const { data } = useLive();
+  if (data === null || !data.inProgress) return null;
+  return <span role="img" aria-label="Actualizando en directo" className="size-2 animate-pulse rounded-full bg-info" />;
 }
 
 function AtWork() {
@@ -76,7 +76,12 @@ export function Shell({ children }: { children: ReactNode }) {
             >
               <item.icon className="size-4" />
               {item.label}
-              {item.path === "/live" && <AtWork />}
+              {item.path === "/live" && (
+                <>
+                  <LiveIndicator />
+                  <AtWork />
+                </>
+              )}
             </NavLink>
           ))}
         </nav>

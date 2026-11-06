@@ -136,6 +136,20 @@ describe("the block of a run", () => {
   });
 });
 
+describe("the causes of a run that works", () => {
+  it("should give no block, pause or publication failure while the run is running, since Summary then shows only its current step", async () => {
+    const log = aRun(0, {
+      result: "running",
+      block: { type: "default-branch-conflict", reason: "the default branch moved and the merge conflicts", sha: "def5678", files: ["src/a.ts"] },
+      publicationFailure: { phase: "integration-push", message: "rejected", at: "2026-10-24T09:00:00.000Z" },
+    });
+
+    const run = await runDetail(log);
+
+    expect([run.status, run.block, run.pause, run.publicationFailure]).toEqual(["running", null, null, null]);
+  });
+});
+
 describe("the pull request and the evidence branch of a run", () => {
   it("should link the pull request and the evidence branch of a ready run", async () => {
     const log = aRun(0, {

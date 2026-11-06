@@ -2,8 +2,10 @@ import { GitPullRequest, Loader2 } from "lucide-react";
 import { Link } from "react-router";
 import { Badge } from "../components/ui/badge.tsx";
 import { Card } from "../components/ui/card.tsx";
+import { OfflineNotice } from "../components/offline-notice.tsx";
 import { usePoll, type PullRequestCell, type RunRow, type RunsResponse } from "../api.ts";
-import { relativeTime, STATUS_TONE } from "../format.ts";
+import { relativeTime } from "../format.ts";
+import { runStatusTone } from "../tones.ts";
 import { Statistics } from "./stats.tsx";
 
 function PullRequest({ cell }: { cell: PullRequestCell }) {
@@ -31,7 +33,7 @@ function Row({ row, now }: { row: RunRow; now: string }) {
         )}
       </td>
       <td className="px-4 py-3">
-        <Badge tone={STATUS_TONE[row.status]}>
+        <Badge tone={runStatusTone(row.status)}>
           {row.status === "running" && <Loader2 className="animate-spin" />}
           {row.status}
         </Badge>
@@ -88,11 +90,7 @@ export function HomePage() {
   const { data, failed } = usePoll<RunsResponse>("/api/runs");
   return (
     <div className="space-y-6">
-      {failed && (
-        <p role="status" className="rounded-md border border-warn/40 bg-warn/15 px-3 py-2 text-sm text-warn">
-          Sin conexión con factory web; se vuelve a intentar cada 2 s.
-        </p>
-      )}
+      {failed && <OfflineNotice />}
       {data === null ? (
         !failed && <p className="text-sm text-muted-foreground">Cargando…</p>
       ) : (
