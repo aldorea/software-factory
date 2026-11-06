@@ -110,7 +110,7 @@ function worker(entry: RunEntry, subtask: SubtaskRecord, attempt: AttemptRecord,
   const lastChange = entry.logTimes.get(attempt.logPath) ?? new Date(startedAt);
   const silentMs = running ? Math.max(0, now.getTime() - lastChange.getTime()) : 0;
   const endedAt = running || attempt.endedAt === undefined ? now.getTime() : Date.parse(attempt.endedAt);
-  const events = running ? rawLogEvents(attempt.agent.agent, tails.get(attempt.logPath) ?? [], lastChange) : [];
+  const events = rawLogEvents(attempt.agent.agent, tails.get(attempt.logPath) ?? [], lastChange);
   return {
     id: `${log.runId}:worker:${subtask.id}:${attempt.number}`,
     runId: log.runId,
@@ -153,8 +153,8 @@ export function runsInProgress(entries: readonly RunEntry[], now: Date): RunEntr
   return entries.filter((entry) => entry.log.result === "running" && !runAbandoned(entry, now));
 }
 
-export function attemptsInProgress(entry: RunEntry): AttemptRecord[] {
-  return entry.log.subtasks.flatMap((subtask) => subtask.attempts.filter((attempt) => attempt.outcome === "running"));
+export function attemptsOf(entry: RunEntry): AttemptRecord[] {
+  return entry.log.subtasks.flatMap((subtask) => subtask.attempts);
 }
 
 export function isAtWork(agent: LiveAgent): boolean {
