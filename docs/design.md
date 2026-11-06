@@ -1,6 +1,6 @@
 # Software factory: design
 
-Status: agreed on 2026-10-23, before the first pilot. The pilot in `askwell` calibrates the values marked as initial. The open questions of the pilot are GitHub issues.
+Status: agreed on 2026-10-23, before the first pilot. The pilot in `askwell` calibrates the values marked as initial; the developer closed it on 2026-11-06. The open questions of the pilot are GitHub issues.
 
 ## Goal
 
