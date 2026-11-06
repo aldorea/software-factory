@@ -113,14 +113,6 @@ _Avoid_: abandoned (a run that has stopped changing), failed (a web action that 
 The last step of a run: the coordinator pushes the integration branch and the evidence branch and opens or updates the PR. A run whose publication failed keeps its result and can be published again without new work.
 _Avoid_: delivery, upload, sync
 
-**Preview**:
-A protected deploy of the verified SHA of a run, for the developer to try. It is never evidence.
-_Avoid_: deploy (alone), staging
-
-**Preview token**:
-The secret that lets the coordinator deploy a preview from the host. It never enters a container.
-_Avoid_: credential (that is an agent's)
-
 ### Verification
 
 **Checks**:

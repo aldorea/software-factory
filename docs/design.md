@@ -7,7 +7,7 @@ Status: agreed on 2026-10-23, before the first pilot. The pilot in `askwell` cal
 A personal factory that takes a GitHub issue of one of my TypeScript repos and returns a verified pull request that I review and merge.
 
 - Input: a GitHub issue ("What to build" and acceptance criteria).
-- Output: a PR with the evidence of each criterion, and a protected preview when the target repo configures one. No automatic merge and no deploy to production.
+- Output: a PR with the evidence of each criterion. No automatic merge and no deploy.
 - Scope: existing TypeScript repos, one repo per issue. Pilot: `askwell`.
 - Out of scope in v1: a loop for the observations of my PR review, new projects from zero, triggers by label or schedule.
 
@@ -23,7 +23,6 @@ A personal factory that takes a GitHub issue of one of my TypeScript repos and r
 | `factory web [target-repo] [--port <port>]` | Local web view of the run log of a repo, which also starts the other commands (see [Web actions](#web-actions)) |
 | `factory init` | Prepares `.factory/` in a target repo |
 | `factory auth [agent] [--force]` | Saves the credential of an agent, once for every target repo |
-| `factory auth vercel` | Saves the preview token, once for every target repo |
 | `factory image [target-repo]` | Builds the base image, then the worker image of the target repo, with `.factory/` as its build context |
 | `factory publish <n>` | Publishes the last run of issue `<n>` again: pushes its branches and opens or updates its PR, with no agent |
 | `factory doctor [target-repo]` | Checks that the host and the target repo are ready for any issue, and changes nothing |
@@ -278,17 +277,6 @@ The publication is the last step of a run, ended or paused: the coordinator, on 
 - **Retries.** A network failure (a timeout, a refused or reset connection) is retried 3 times, after 5, 15 and 45 seconds. Any other failure, such as a missing permission, fails at once.
 - **A failed publication.** When a push of either branch or the call that opens or updates the PR fails, `run.json` records a publication failure with its message, and the run keeps its result. The notification and the summary of `factory run` say `Not published: <title> → factory publish <n>`, and the command exits with 1.
 - **`factory publish <n>`.** It publishes the last run of the issue when it ended or paused: it pushes both branches and opens or updates the PR, with no agent and no plan usage. It refuses a run that is running or abandoned, and says why. It can run any number of times: an existing PR is updated.
-
-### Preview
-
-When `.factory/config.ts` has a `preview` block, the publication also deploys a **preview**: a protected deploy of the verified SHA, for me to try. See [ADR 0011](adr/0011-preview-deployed-by-the-coordinator.md). A target repo with no `preview` block publishes as before.
-
-- **Config.** The `preview` block holds the command that deploys and the command that prints the URL of the deploy.
-- **When.** The publication deploys before it opens or updates the PR, so that the PR links the preview. It deploys only when the run is ready, or a draft whose only pending criteria are human ones, because I review those on the preview. A draft with a failed check, criterion or holdout scenario gets no preview: it would show what the verification did not prove.
-- **Where.** The coordinator, on the host, exports the verified SHA with no `.git` and runs the deploy command with the preview token; the build happens on Vercel. No container runs it or receives the token.
-- **Preview token.** `factory auth vercel` saves it, once for every target repo, as `factory auth` does with a credential; it is never written under `.factory/web/` and is also a web action. When the config has a preview, the readiness of `factory run`, `factory publish` and `factory doctor` fails closed while the token is missing.
-- **Record.** `run.json` records the URL, the deployed SHA and the result; the PR and the page of the run link the preview.
-- **Never evidence.** A preview never proves a criterion and never changes the ready of the PR. A failed deploy is a failed publication, and `factory publish <n>` deploys again with no agent. A commit after the verified SHA needs a new deploy, as it needs new evidence.
 
 ## Architecture
 
