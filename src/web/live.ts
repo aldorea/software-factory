@@ -255,7 +255,7 @@ function runStep(agents: readonly LiveAgent[]): string {
   return subtasks.length === 0 ? "Waiting for the next step" : `Subtasks · ${subtasks.join(", ")}`;
 }
 
-function liveRun(entry: RunEntry, tails: RawLogTails, now: Date): LiveRun {
+export function liveRun(entry: RunEntry, tails: RawLogTails, now: Date): LiveRun {
   const agents = agentSources(entry).map((source) => liveAgent(entry, source, tails, now));
   return { runId: entry.log.runId, issue: entry.log.issue, title: titleOf(entry.log), step: runStep(agents), startedAt: entry.log.startedAt, agents };
 }

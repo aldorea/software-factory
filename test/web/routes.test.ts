@@ -51,6 +51,14 @@ describe("matchRoute", () => {
     expect(matchRoute(`/api/runs/${RUN_ID}`)).toEqual({ kind: "api", resource: "run", runId: RUN_ID });
   });
 
+  it("should match the activity of a run of the API by its run ID", () => {
+    expect(matchRoute(`/api/runs/${RUN_ID}/activity`)).toEqual({ kind: "api", resource: "run-activity", runId: RUN_ID });
+  });
+
+  it.each(["/api/runs/x/activity", `/api/runs/${RUN_ID}/activity/x`, "/api/runs//activity"])("should match %s as an unknown resource of the API", (path) => {
+    expect(matchRoute(path)).toEqual({ kind: "api", resource: null });
+  });
+
   it.each(["/api", "/api/", "/api/nope", "/api/runs/", "/api/runs/x", "/api/runs/..", "/api/runs/1-run-00", `/api/runs/${RUN_ID}/x`, "/api/%zz"])("should match %s as an unknown resource of the API", (path) => {
     expect(matchRoute(path)).toEqual({ kind: "api", resource: null });
   });

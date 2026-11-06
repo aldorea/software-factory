@@ -281,11 +281,24 @@ function useSelection(): Selection {
   return { selected, toggle: (id) => select(id === selected ? null : id) };
 }
 
+export function LiveAgents({ runs }: { runs: readonly LiveRun[] }) {
+  const selection = useSelection();
+  const found = runs.flatMap((run) => run.agents.map((agent) => ({ agent, run }))).find(({ agent }) => agent.id === selection.selected);
+  const shown: Selection = { selected: found === undefined ? null : found.agent.id, toggle: selection.toggle };
+  return (
+    <div className={cn("grid gap-6", found !== undefined && "xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]")}>
+      <div className="min-w-0 space-y-6">
+        {runs.map((run) => (
+          <RunAgents key={run.runId} run={run} selection={shown} />
+        ))}
+      </div>
+      {found !== undefined && <AgentDetail agent={found.agent} run={found.run} onClose={() => selection.toggle(found.agent.id)} />}
+    </div>
+  );
+}
+
 export function LivePage() {
   const { data, failed } = useLive();
-  const selection = useSelection();
-  const found = data?.runs.flatMap((run) => run.agents.map((agent) => ({ agent, run }))).find(({ agent }) => agent.id === selection.selected);
-  const shown: Selection = { selected: found === undefined ? null : found.agent.id, toggle: selection.toggle };
   return (
     <div className="space-y-6">
       <div>
@@ -307,14 +320,7 @@ export function LivePage() {
           </Link>
         </p>
       ) : (
-        <div className={cn("grid gap-6", found !== undefined && "xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]")}>
-          <div className="min-w-0 space-y-6">
-            {data.runs.map((run) => (
-              <RunAgents key={run.runId} run={run} selection={shown} />
-            ))}
-          </div>
-          {found !== undefined && <AgentDetail agent={found.agent} run={found.run} onClose={() => selection.toggle(found.agent.id)} />}
-        </div>
+        <LiveAgents runs={data.runs} />
       )}
     </div>
   );
