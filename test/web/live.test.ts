@@ -159,7 +159,7 @@ describe("the live agents of the API", () => {
     expect(agent?.tokens).toBeNull();
   });
 
-  it("should fold a worker that ended into its outcome, its time and its tokens, and stop asking when no agent works", async () => {
+  it("should fold a worker that ended into its outcome, its time and its tokens, and keep asking while its run is in progress, so the next agent of the run shows", async () => {
     const { dir } = await repoWith({
       attempts: [
         { subtask: "health", number: 1, agent: "opencode", outcome: "agent-error", durationMs: 2 * MINUTE, usage: { inputTokens: 900, cacheCreationInputTokens: 100, cacheReadInputTokens: 5000, outputTokens: 40 } },
@@ -170,8 +170,16 @@ describe("the live agents of the API", () => {
     const agent = live.runs[0]?.agents[0];
 
     expect(agent).toMatchObject({ state: "ended", outcome: "agent-error", succeeded: false, elapsedMs: 2 * MINUTE, silentMs: 0, abandonInMs: null, tokens: { input: 1000, output: 40 }, events: [] });
-    expect(live.inProgress).toBe(false);
+    expect(live.inProgress).toBe(true);
     expect(live.atWork).toBe(0);
+  });
+
+  it("should say nothing is in progress when no run is, so the client asks only every 15 seconds", async () => {
+    const { dir } = await repoWith({ result: "ready", attempts: [{ subtask: "health", outcome: "completed" }] });
+
+    const live = await liveOf(dir);
+
+    expect(live).toMatchObject({ inProgress: false, atWork: 0, runs: [] });
   });
 
   it("should give a worker that ended its last events from the end of its raw log, so that its detail shows what it did", async () => {
@@ -349,7 +357,7 @@ describe("the independent verifier in Live", () => {
     const verifier = live.runs[0]?.agents.find((agent) => agent.role === "independent-verifier");
 
     expect(verifier).toMatchObject({ criterion: "C2", state: "ended", outcome: "refute", succeeded: false, elapsedMs: 90_000, silentMs: 0, events: [] });
-    expect(live.inProgress).toBe(false);
+    expect(live.inProgress).toBe(true);
   });
 });
 

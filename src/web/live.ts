@@ -295,5 +295,5 @@ export function liveResponse(entries: readonly RunEntry[], tails: RawLogTails, n
   const runs = runsInProgress(entries, now)
     .map((entry) => liveRun(entry, tails, now))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  return liveAnswer(runs, now, false);
+  return liveAnswer(runs, now, runs.length > 0);
 }

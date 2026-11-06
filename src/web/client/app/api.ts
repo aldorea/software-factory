@@ -17,8 +17,11 @@ export type {
 export type { AgentState, LiveAgent, LiveEvent, LiveResponse, LiveRole, LiveRun } from "../../live.ts";
 
 export const POLL_MS = 2000;
+export const IDLE_POLL_MS = 15_000;
 
 export const ApiOrigin = createContext("");
+
+export const IdlePollMs = createContext(IDLE_POLL_MS);
 
 export interface Polled<T> {
   data: T | null;
@@ -28,6 +31,7 @@ export interface Polled<T> {
 
 export function usePoll<T extends { inProgress: boolean }>(path: string): Polled<T> {
   const origin = useContext(ApiOrigin);
+  const idleMs = useContext(IdlePollMs);
   const [state, setState] = useState<Polled<T>>({ data: null, failed: false, missing: false });
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -43,7 +47,7 @@ export function usePoll<T extends { inProgress: boolean }>(path: string): Polled
         const data = (await response.json()) as T;
         if (!alive) return;
         setState({ data, failed: false, missing: false });
-        if (data.inProgress) timer = setTimeout(tick, POLL_MS);
+        timer = setTimeout(tick, data.inProgress ? POLL_MS : idleMs);
       } catch {
         if (!alive) return;
         setState((previous) => ({ ...previous, failed: true }));
@@ -55,6 +59,6 @@ export function usePoll<T extends { inProgress: boolean }>(path: string): Polled
       alive = false;
       clearTimeout(timer);
     };
-  }, [origin, path]);
+  }, [origin, path, idleMs]);
   return state;
 }

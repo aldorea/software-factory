@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
-import { ApiOrigin, POLL_MS } from "../../../src/web/client/app/api.ts";
+import { ApiOrigin, IDLE_POLL_MS, IdlePollMs, POLL_MS } from "../../../src/web/client/app/api.ts";
 import { App } from "../../../src/web/client/app/app.tsx";
 import { startWebServer, type WebServer } from "../../../src/web/server.ts";
 import { FakeClock } from "../../fakes/clock.ts";
@@ -32,16 +32,18 @@ interface Opened {
   runIds: string[];
 }
 
-async function open(runs: LiveRunFixture[], path = "/live"): Promise<Opened> {
+async function open(runs: LiveRunFixture[], path = "/live", idlePollMs = IDLE_POLL_MS): Promise<Opened> {
   const dir = await temp.make("client-live-");
   const runIds: string[] = [];
   for (const run of runs) runIds.push((await writeLiveRun(join(dir, ".factory", "logs"), run)).runId);
   const server = await serve(dir);
   render(
     <ApiOrigin.Provider value={`http://${server.host}:${server.port}`}>
-      <MemoryRouter initialEntries={[path]}>
-        <App />
-      </MemoryRouter>
+      <IdlePollMs.Provider value={idlePollMs}>
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>
+      </IdlePollMs.Provider>
     </ApiOrigin.Provider>,
   );
   return { dir, server, runIds };
@@ -189,8 +191,8 @@ describe("the Live page", () => {
     expect(await within(live).findByRole("img", { name: "Actualizando en directo" })).toBeDefined();
   });
 
-  it("should show no live indicator when no agent works, since the page no longer refreshes", async () => {
-    await open([{ attempts: [{ subtask: "a", outcome: "completed" }] }]);
+  it("should show no live indicator when no run is in progress, since the page then asks only every 15 seconds", async () => {
+    await open([{ result: "ready", attempts: [{ subtask: "a", outcome: "completed" }] }]);
     await screen.findByText("Ningún agente trabaja ahora.");
 
     expect(screen.queryByRole("img", { name: "Actualizando en directo" })).toBeNull();
@@ -222,15 +224,27 @@ describe("the Live page", () => {
   );
 
   it(
-    "should stop asking once no agent works",
+    "should keep asking every 2 seconds while a run is in progress and no agent works, so the next agent of the run shows",
     async () => {
       const { dir } = await open([{ attempts: [{ subtask: "health", outcome: "completed" }] }]);
       await screen.findByRole("list", { name: "Agentes que terminaron" });
 
       await writeLiveRun(join(dir, ".factory", "logs"), { issue: 99, attempts: [{ subtask: "late", lines: await claudeLines(6) }] });
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS + 500));
 
-      expect(screen.queryByRole("article")).toBeNull();
+      expect(await screen.findByRole("article", { name: "Worker late · attempt 1" }, { timeout: 2 * POLL_MS + 1000 })).toBeDefined();
+    },
+    4 * POLL_MS,
+  );
+
+  it(
+    "should ask at the idle pace when no run is in progress, so a run started in a terminal shows without a reload",
+    async () => {
+      const { dir } = await open([], "/live", 300);
+      await screen.findByText("Ningún agente trabaja ahora.");
+
+      await writeLiveRun(join(dir, ".factory", "logs"), { issue: 99, attempts: [{ subtask: "late", lines: await claudeLines(6) }] });
+
+      expect(await screen.findByRole("article", { name: "Worker late · attempt 1" }, { timeout: POLL_MS })).toBeDefined();
     },
     4 * POLL_MS,
   );
