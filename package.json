@@ -14,11 +14,31 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:docker": "FACTORY_DOCKER_TESTS=1 vitest run --no-file-parallelism test/docker",
-    "image:build": "docker build -t software-factory/worker:dev --build-arg AGENT_UID=$(id -u) --build-arg AGENT_GID=$(id -g) docker"
+    "image:build": "docker build -t software-factory/worker:dev --build-arg AGENT_UID=$(id -u) --build-arg AGENT_GID=$(id -g) docker",
+    "prototype:web": "node src/web/prototype-react-live/server.ts",
+    "prototype:web:build": "vite build --config src/web/prototype-react-live/vite.config.ts",
+    "prototype:web:built": "node src/web/prototype-react-live/server.ts --built"
   },
   "devDependencies": {
+    "@radix-ui/react-collapsible": "^1.2.1",
+    "@radix-ui/react-slot": "^1.5.0",
+    "@radix-ui/react-tabs": "^1.2.1",
+    "@radix-ui/react-tooltip": "^1.4.1",
+    "@tailwindcss/vite": "^4.3.4",
     "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.70.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router": "^8.5.1",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss": "^4.3.4",
     "typescript": "^5.9.3",
+    "vite": "^8.3.6",
     "vitest": "^3.2.7"
   }
 }
