@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { supervise } from "../../src/workers/supervise.ts";
+import { isAlive } from "../process-alive.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
@@ -31,23 +31,6 @@ async function superviseNode(
 }
 
 const GRANDCHILD = `const c = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "inherit" }); console.log(c.pid);`;
-
-function isZombie(pid: number): boolean {
-  try {
-    return readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) /s, "").startsWith("Z");
-  } catch {
-    return false;
-  }
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-  } catch {
-    return false;
-  }
-  return !isZombie(pid);
-}
 
 describe("supervise", () => {
   it("should collect lines and the exit code", async () => {
