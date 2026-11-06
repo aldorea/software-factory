@@ -1,5 +1,7 @@
 # The coordinator deploys a protected preview of the verified SHA, from the host, with the build on Vercel
 
+Update of 2026-11-06: version 2 is withdrawn, and the preview moves to [`design.md`](../design.md#preview) for any target repo with a `preview` block. What this record says about children, clients and the demo seed waits for the design of freelance work.
+
 A client cannot read a pull request, and they should not try a branch on their own machine. Version 1 does no deploy. In version 2, the publication of a child also deploys a preview: the coordinator, on the host, exports the verified SHA with no `.git` and runs the preview command of the config with the preview token. The build happens on Vercel. The preview is protected, has its own environment and database, and loads the demo seed. It is never evidence and never blocks the "ready" of the pull request. A failed deploy is a failed publication, repeated with `factory publish <n>`.
 
 This extends [ADR 0005](0005-publish-through-gh-over-https.md): what leaves the machine leaves from the host, by the coordinator, and no container holds the secret that sends it.
