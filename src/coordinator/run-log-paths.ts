@@ -6,7 +6,7 @@ export function logPathsOf(log: RunLog): string[] {
   const outputs: Output[] = [...(log.block?.type === "integration-check" ? log.block.checks : [])];
   const paths: Array<string | undefined> = [];
   for (const subtask of log.subtasks) {
-    paths.push(...subtask.attempts.map((attempt) => attempt.logPath));
+    paths.push(...subtask.attempts.map((attempt) => attempt.logPath), subtask.verifierQuestion?.logPath);
     if (subtask.gate === undefined) continue;
     paths.push(...subtask.gate.verifier.map((record) => record.logPath));
     outputs.push(...subtask.gate.checks, ...subtask.gate.criteria);
@@ -14,7 +14,7 @@ export function logPathsOf(log: RunLog): string[] {
   if (log.verificationProgress !== undefined) outputs.push(...log.verificationProgress.checks, ...log.verificationProgress.criteria);
   if (log.verification !== undefined) {
     outputs.push(...log.verification.checks, ...log.verification.criteria, ...(log.verification.tester?.checks ?? []));
-    paths.push(log.verification.tester?.logPath);
+    paths.push(log.verification.tester?.logPath, log.verification.testerLogPath);
   }
   paths.push(...outputs.map((output) => output.outputLog));
   return [...new Set(paths.filter((path): path is string => typeof path === "string"))];

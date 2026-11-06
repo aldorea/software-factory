@@ -14,6 +14,7 @@ export interface WebServer {
 
 export interface WebServerOptions {
   repoDir: string;
+  clientDir: string;
   port: number;
   clock: Clock;
   err: (text: string) => void;
@@ -30,6 +31,7 @@ async function respond(incoming: IncomingMessage, outgoing: ServerResponse, opti
       path: pathOf(incoming.url),
       host: incoming.headers.host,
       repoDir: options.repoDir,
+      clientDir: options.clientDir,
       port,
       now: options.clock.now(),
     });

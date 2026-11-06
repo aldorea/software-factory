@@ -59,6 +59,14 @@ export interface VerifierRecord {
   verdict: "accept" | "refute" | "error";
   reason?: string;
   logPath: string;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+export interface VerifierQuestionRecord {
+  id: string;
+  logPath: string;
+  startedAt: string;
 }
 
 export interface GateRecord {
@@ -106,6 +114,7 @@ export interface SubtaskRecord {
   carriedLoop?: CarriedLoopRecord;
   usage: TokenUsage;
   verifierUsage?: Partial<Record<AgentKind, TokenUsage>>;
+  verifierQuestion?: VerifierQuestionRecord;
   gate?: GateRecord;
   gateRejections: number;
   verifierRejections: number;
@@ -126,6 +135,8 @@ export interface TesterRecord {
   error?: string;
   logPath?: string;
   checks?: CheckRecord[];
+  startedAt?: string;
+  endedAt?: string;
 }
 
 export interface TesterFailureRecord {
@@ -144,6 +155,8 @@ export interface VerificationRecord {
   humanCriteria: HumanCriterionRecord[];
   environment?: string;
   testerPhase?: TesterPhase;
+  testerStartedAt?: string;
+  testerLogPath?: string;
   tester?: TesterRecord;
 }
 

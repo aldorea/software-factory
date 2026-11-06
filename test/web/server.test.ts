@@ -8,6 +8,7 @@ import { startWebServer, type WebServer } from "../../src/web/server.ts";
 import { cleanRun } from "../coordinator/run-log-fixtures.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { tempDirs } from "../temp-dirs.ts";
+import { CLIENT_DIR } from "./web-helpers.ts";
 
 const temp = tempDirs();
 const servers: WebServer[] = [];
@@ -22,6 +23,7 @@ afterEach(async () => {
 async function start(repoDir?: string): Promise<WebServer> {
   const server = await startWebServer({
     repoDir: repoDir ?? (await temp.make("web-server-")),
+    clientDir: CLIENT_DIR,
     port: 0,
     clock: new FakeClock("2026-10-24T08:00:00.000Z"),
     err: (text) => errors.push(text),

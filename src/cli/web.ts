@@ -1,12 +1,15 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { clientBuildDir, clientBuildProblem } from "../web/client-build.ts";
 import { DEFAULT_WEB_PORT, startWebServer } from "../web/server.ts";
 import type { CliEnv } from "./main.ts";
+import { readiness, readinessProblems } from "./readiness.ts";
+import { reportErr } from "./report.ts";
 import { refused } from "./target-repo.ts";
 
 export const WEB_USAGE = "factory web [target-repo] [--port <port>]";
 
-type WebEnv = Pick<CliEnv, "cwd" | "factoryRoot" | "clock" | "signal" | "out" | "err">;
+type WebEnv = Pick<CliEnv, "cwd" | "factoryRoot" | "clock" | "signal" | "out" | "err" | "color" | "errColor">;
 
 interface WebArgs {
   repoArg?: string;
@@ -35,6 +38,11 @@ function stopped(signal: AbortSignal): Promise<void> {
   });
 }
 
+async function notReady(env: WebEnv): Promise<boolean> {
+  const results = readiness("web", { probes: { webClient: await clientBuildProblem(env.factoryRoot) }, roles: {}, credentials: {} });
+  return reportErr(readinessProblems(results), env);
+}
+
 export async function web(args: string[], env: WebEnv, usage: string): Promise<number> {
   const parsed = parseWebArgs(args);
   if (parsed === null) {
@@ -43,10 +51,12 @@ export async function web(args: string[], env: WebEnv, usage: string): Promise<n
   }
   const repoDir = resolve(env.cwd, parsed.repoArg ?? ".");
   if (await refused(repoDir, env)) return 1;
+  if (await notReady(env)) return 1;
   let server;
   try {
     server = await startWebServer({
       repoDir,
+      clientDir: clientBuildDir(env.factoryRoot),
       port: parsed.port,
       clock: env.clock,
       err: env.err,

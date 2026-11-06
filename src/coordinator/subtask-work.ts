@@ -162,6 +162,12 @@ async function gate(context: RunContext, request: GateRequest): Promise<GateDeci
         label: `${label}-attempt-${attempt}`,
         onActivity: (criterion, event) =>
           context.ports.activity?.({ source: `verifier ${criterion}`, at: context.ports.clock.now(), event }),
+        now: () => context.ports.clock.now(),
+        onQuestion: async (question) => {
+          if (question === null) delete record.verifierQuestion;
+          else record.verifierQuestion = question;
+          await context.save();
+        },
       })
     : NO_JUDGMENT;
   if (judgment.usage !== undefined) {

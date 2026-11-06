@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { approveSpec } from "../../src/commands/approve.ts";
 import { runIssue } from "../../src/coordinator/run.ts";
+import { logPathsOf } from "../../src/coordinator/run-log-paths.ts";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
 import type { ActivityEntry } from "../../src/coordinator/ports.ts";
 import type { VerifierQuestion } from "../../src/coordinator/verifier.ts";
@@ -192,8 +194,27 @@ describe("the independent verifier at the gate", () => {
     expect(report.result).toBe("ready");
     expect(await revParse(target.repoDir, BRANCH)).not.toBe(await revParse(target.repoDir, "main"));
     expect((await readRunLog(report.runLogPath)).subtasks[0]?.gate?.verifier).toEqual([
-      { id: "A1", verdict: "accept", logPath: verifier.questions[0]?.logPath },
+      { id: "A1", verdict: "accept", logPath: verifier.questions[0]?.logPath, startedAt: "2026-10-24T08:00:00.000Z", endedAt: "2026-10-24T08:00:00.000Z" },
     ]);
+  });
+
+  it("should record the question in progress in run.json while the verifier answers, and drop it once the verdict is in the gate, so the web shows the verifier at work", async () => {
+    const target = await targetRepo();
+    const seen: RunLog[] = [];
+    const { run } = harness(target, writesGreetingAndTest, (question) => {
+      seen.push(JSON.parse(readFileSync(join(dirname(question.logPath), "run.json"), "utf8")) as RunLog);
+      return { kind: "accept" };
+    });
+
+    const report = await run();
+
+    const [during] = seen;
+    const question = during?.subtasks[0]?.verifierQuestion;
+    expect(seen.map((log) => log.subtasks[0]?.verifierQuestion)).toEqual([
+      { id: "A1", logPath: expect.stringMatching(/-verifier-A1\.jsonl$/), startedAt: "2026-10-24T08:00:00.000Z" },
+    ]);
+    expect(report.log.subtasks[0]?.verifierQuestion).toBeUndefined();
+    expect(logPathsOf(during as RunLog)).toContain(question?.logPath);
   });
 
   it("should feed the reason of the verifier to the next attempt and merge once the verifier accepts the new test", async () => {
@@ -241,7 +262,7 @@ describe("the independent verifier at the gate", () => {
     const gate = log.subtasks[0]?.gate;
     expect(gate).toMatchObject({ accepted: false, reasons: [] });
     expect(gate?.verifier).toEqual([
-      { id: "A1", verdict: "refute", reason: "Asserts nothing.", logPath: expect.stringContaining("A1") },
+      { id: "A1", verdict: "refute", reason: "Asserts nothing.", logPath: expect.stringContaining("A1"), startedAt: expect.any(String), endedAt: expect.any(String) },
     ]);
     expect(log.friction).toMatchObject({ verifierRejections: 3, gateRejections: 0 });
   });

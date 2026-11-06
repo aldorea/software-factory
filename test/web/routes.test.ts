@@ -31,17 +31,43 @@ describe("parseRunId", () => {
 });
 
 describe("matchRoute", () => {
-  it("should match the home page", () => {
-    expect(matchRoute("/")).toEqual({ kind: "home" });
+  it.each(["/", "/live", "/board", "/settings", "/nope", "/runs", "/runs/", "/apis", "/assetsx"])(
+    "should give %s to the client, which draws the page of that URL or its not found page",
+    (path) => {
+      expect(matchRoute(path)).toEqual({ kind: "client" });
+    },
+  );
+
+  it("should give the page of a run to the client, so the link of a notification opens it", () => {
+    expect(matchRoute(`/runs/${RUN_ID}`)).toEqual({ kind: "client" });
   });
 
-  it("should match the page of a run", () => {
-    expect(matchRoute(`/runs/${RUN_ID}`)).toEqual({ kind: "run", runId: RUN_ID });
+  it("should match the API by its resource", () => {
+    expect(matchRoute("/api/runs")).toEqual({ kind: "api", resource: "runs" });
+    expect(matchRoute("/api/live")).toEqual({ kind: "api", resource: "live" });
+  });
+
+  it("should match the run of the API by its run ID", () => {
+    expect(matchRoute(`/api/runs/${RUN_ID}`)).toEqual({ kind: "api", resource: "run", runId: RUN_ID });
+  });
+
+  it("should match the activity of a run of the API by its run ID", () => {
+    expect(matchRoute(`/api/runs/${RUN_ID}/activity`)).toEqual({ kind: "api", resource: "run-activity", runId: RUN_ID });
+  });
+
+  it.each(["/api/runs/x/activity", `/api/runs/${RUN_ID}/activity/x`, "/api/runs//activity"])("should match %s as an unknown resource of the API", (path) => {
+    expect(matchRoute(path)).toEqual({ kind: "api", resource: null });
+  });
+
+  it.each(["/api", "/api/", "/api/nope", "/api/runs/", "/api/runs/x", "/api/runs/..", "/api/runs/1-run-00", `/api/runs/${RUN_ID}/x`, "/api/%zz"])("should match %s as an unknown resource of the API", (path) => {
+    expect(matchRoute(path)).toEqual({ kind: "api", resource: null });
+  });
+
+  it("should match a file of the build of the client as the segments below assets", () => {
+    expect(matchRoute("/assets/index-D3mZ1Z0S.js")).toEqual({ kind: "asset", segments: ["index-D3mZ1Z0S.js"] });
   });
 
   it.each([
-    "/runs",
-    "/runs/",
     `/runs/${RUN_ID}/`,
     `/runs/${RUN_ID}//`,
     `/runs/${RUN_ID}//etc/passwd`,
@@ -55,8 +81,21 @@ describe("matchRoute", () => {
     `/runs/${RUN_ID}/a%5Cb`,
     `/runs/${RUN_ID}/a%00b`,
     `/runs/${RUN_ID}/%zz`,
-    "/runs/..",
+    "/assets/",
+    "/assets/..",
+    "/assets/%2e%2e/index.html",
+    "/assets/a%2Fb.js",
+    "/assets/%zz",
     "/runs/../etc",
+    "/runs/1-run-00/output.log",
+    "/runs/nope/S1-attempt-1.jsonl",
+    "nope",
+  ])("should not match %s, so a malformed path to a file fails closed", (path) => {
+    expect(matchRoute(path)).toEqual({ kind: "not-found" });
+  });
+
+  it.each([
+    "/runs/..",
     "/runs/%2e%2e",
     "/runs/%2E%2E%2Fetc",
     `/runs/${RUN_ID}%2F..`,
@@ -65,9 +104,8 @@ describe("matchRoute", () => {
     "/runs/%00",
     "/runs/1-run-00",
     `/Runs/${RUN_ID}`,
-    "/nope",
-  ])("should not match %s, so a malformed path fails closed", (path) => {
-    expect(matchRoute(path)).toEqual({ kind: "not-found" });
+  ])("should give %s to the client and read no file, because its run ID is not the format of a run ID", (path) => {
+    expect(matchRoute(path)).toEqual({ kind: "client" });
   });
 
   it("should match a file of a run as the segments below the run ID", () => {
@@ -82,7 +120,7 @@ describe("matchRoute", () => {
     expect(matchRoute(`/runs/${RUN_ID}/my%20file.log`)).toEqual({ kind: "log", runId: RUN_ID, segments: ["my file.log"] });
   });
 
-  it("should decode the segment before it validates it", () => {
-    expect(matchRoute(`/runs/${RUN_ID.replace(/-/g, "%2D")}`)).toEqual({ kind: "run", runId: RUN_ID });
+  it("should decode the run ID of the API before it validates it", () => {
+    expect(matchRoute(`/api/runs/${RUN_ID.replace(/-/g, "%2D")}`)).toEqual({ kind: "api", resource: "run", runId: RUN_ID });
   });
 });

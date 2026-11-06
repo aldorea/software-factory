@@ -26,6 +26,7 @@ export interface TesterRequest {
   sha: string;
   criteria: CriterionRecord[];
   onPhase?: (phase: TesterPhase) => Promise<void>;
+  onAgentStart?: (logPath: string) => Promise<void>;
 }
 
 export type TesterOutcome = { kind: "tested"; record: TesterRecord } | PlanLimitHit;
@@ -68,7 +69,10 @@ export async function acceptanceTest(context: RunContext, request: TesterRequest
         await request.onPhase?.("testing");
         const deadline = new Date(context.ports.clock.now().getTime() + TESTER_TIMEOUT_MS);
         const limits = { deadline, idleTimeoutMs: config.limits.attemptIdleTimeoutMs };
-        const hooks = { onActivity: (event: ActivityEvent) => context.ports.activity?.({ source: "tester", at: context.ports.clock.now(), event }) };
+        const hooks = {
+          onActivity: (event: ActivityEvent) => context.ports.activity?.({ source: "tester", at: context.ports.clock.now(), event }),
+          onStart: async ({ logPath }: { logPath: string }) => request.onAgentStart?.(relative(context.runDir, logPath)),
+        };
         const agent = { kind: tester.agent, model: tester.model };
         return { kind: "attempted", result: await inStage("attempt", () => worker.attempt(agent, prompt, limits, hooks)) };
       },

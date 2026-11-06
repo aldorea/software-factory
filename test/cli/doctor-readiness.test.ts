@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readiness, readinessLines, type ReadinessFacts } from "../../src/cli/readiness.ts";
 
 const READY: ReadinessFacts = {
-  probes: { docker: null, gh: null, claudeSession: null, originHead: null, workerImage: null, push: null, node: null, config: null },
+  probes: { docker: null, gh: null, claudeSession: null, originHead: null, workerImage: null, push: null, node: null, config: null, webClient: null },
   roles: {
     workers: { agent: "claude-code", model: "sonnet" },
     verifier: { agent: "claude-code", model: "opus" },
@@ -35,6 +35,13 @@ describe("readiness of factory doctor", () => {
       { kind: "ok", text: "origin/HEAD is set" },
       { kind: "ok", text: "CLAUDE_CODE_OAUTH_TOKEN is set for claude-code" },
       { kind: "ok", text: "the worker image is built from the current base image" },
+      { kind: "ok", text: "the web client is built from the current sources" },
+    ]);
+  });
+
+  it("should fail with pnpm build:web when the build of the web client is missing or stale, as factory web does", () => {
+    expect(failures(facts({ probes: { webClient: "the web client is not built" } }))).toEqual([
+      { kind: "fail", text: "the web client is not built", command: "pnpm build:web" },
     ]);
   });
 

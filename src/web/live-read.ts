@@ -1,0 +1,40 @@
+import { open, realpath } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { readRunEntries, type RunEntry } from "../coordinator/run-history.ts";
+import { liveResponse, rawLogsOf, runsInProgress, type LiveResponse, type RawLogTails } from "./live.ts";
+import { isInside } from "./log-path.ts";
+
+export const RAW_LOG_TAIL_BYTES = 64 * 1024;
+
+export async function rawLogTail(runDir: string, logPath: string, maxBytes: number = RAW_LOG_TAIL_BYTES): Promise<string[]> {
+  const file = await realpath(resolve(runDir, logPath)).catch(() => null);
+  const dir = await realpath(runDir).catch(() => null);
+  if (file === null || dir === null || !isInside(dir, file)) return [];
+  const handle = await open(file, "r").catch(() => null);
+  if (handle === null) return [];
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - maxBytes);
+    const buffer = Buffer.alloc(size - start);
+    await handle.read(buffer, 0, buffer.length, start);
+    const lines = buffer.toString("utf8").split("\n");
+    return (start > 0 ? lines.slice(1) : lines).filter((line) => line.trim() !== "");
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function readRawLogTails(logsDir: string, entries: readonly RunEntry[]): Promise<RawLogTails> {
+  const tails = new Map<string, string[]>();
+  for (const entry of entries) {
+    for (const logPath of rawLogsOf(entry)) {
+      tails.set(logPath, await rawLogTail(join(logsDir, entry.dir), logPath));
+    }
+  }
+  return tails;
+}
+
+export async function readLive(logsDir: string, now: Date): Promise<LiveResponse> {
+  const { runs } = await readRunEntries(logsDir);
+  return liveResponse(runs, await readRawLogTails(logsDir, runsInProgress(runs, now)), now);
+}

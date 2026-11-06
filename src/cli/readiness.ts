@@ -1,15 +1,16 @@
 import type { Role, RoleChoice } from "../config/config.ts";
 import { CREDENTIAL_VARIABLES, type CredentialsProblem } from "../config/credentials.ts";
 import { ROLES } from "../config/roles.ts";
+import { BUILD_FIX } from "../web/build-fix.ts";
 import { dockerignoreProblem } from "../workers/dockerignore.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { EnvFacts } from "./env-facts.ts";
 import type { SetupLine } from "./setup-render.ts";
 
-export type ReadinessCommand = "refine" | "run" | "publish" | "doctor";
+export type ReadinessCommand = "refine" | "run" | "publish" | "web" | "doctor";
 
-export type ProbeName = "docker" | "gh" | "claudeSession" | "originHead" | "push" | "workerImage" | "node" | "config";
+export type ProbeName = "docker" | "gh" | "claudeSession" | "originHead" | "push" | "workerImage" | "node" | "config" | "webClient";
 
 export type Probes = Record<ProbeName, () => Promise<string | null>>;
 
@@ -160,6 +161,7 @@ export const CHECKS: Check[] = [
   probeCheck("originHead", ["refine", "doctor"], "origin/HEAD is set", "git remote set-head origin --auto"),
   credentialCheck,
   workerImageCheck,
+  probeCheck("webClient", ["web", "doctor"], "the web client is built from the current sources", BUILD_FIX),
 ];
 
 function checksOf(command: ReadinessCommand): Check[] {

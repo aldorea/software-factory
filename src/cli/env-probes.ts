@@ -1,4 +1,5 @@
 import { loadConfig } from "../config/load.ts";
+import { clientBuildProblem } from "../web/client-build.ts";
 import type { CliEnv } from "./main.ts";
 import { nodeProblemOf } from "./node-probe.ts";
 import type { Probes } from "./readiness.ts";
@@ -14,5 +15,6 @@ export function envProbes(repoDir: string, env: CliEnv, image: string | null = n
     workerImage: () => workerImageProblem(image, env.images),
     node: () => nodeProblemOf(env.factoryRoot, process.versions.node),
     config: () => loadConfig(repoDir).then(() => null, (error: unknown) => (error as Error).message),
+    webClient: () => clientBuildProblem(env.factoryRoot),
   };
 }

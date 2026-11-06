@@ -8,13 +8,13 @@ function isAbsent(error: unknown): boolean {
   return error instanceof Error && "code" in error && ABSENT.has(String(error.code));
 }
 
-export async function resolveRunFile(runDir: string, segments: readonly string[]): Promise<string | null> {
+export async function resolveFileInside(dir: string, segments: readonly string[]): Promise<string | null> {
   const safe = safeSegments(segments);
   if (safe === null) return null;
   try {
-    const realRunDir = await realpath(runDir);
-    const realFile = await realpath(join(realRunDir, ...safe));
-    if (!isInside(realRunDir, realFile)) return null;
+    const realDir = await realpath(dir);
+    const realFile = await realpath(join(realDir, ...safe));
+    if (!isInside(realDir, realFile)) return null;
     return (await stat(realFile)).isFile() ? realFile : null;
   } catch (error) {
     if (isAbsent(error)) return null;
@@ -22,7 +22,7 @@ export async function resolveRunFile(runDir: string, segments: readonly string[]
   }
 }
 
-export async function readRunFile(runDir: string, segments: readonly string[]): Promise<string | null> {
-  const file = await resolveRunFile(runDir, segments);
+export async function readFileInside(dir: string, segments: readonly string[]): Promise<string | null> {
+  const file = await resolveFileInside(dir, segments);
   return file === null ? null : readFile(file, "utf8");
 }

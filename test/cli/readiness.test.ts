@@ -28,6 +28,18 @@ function failures(command: ReadinessCommand, given: ReadinessFacts) {
   return readiness(command, given).filter((result) => result.kind === "fail");
 }
 
+describe("readiness of factory web", () => {
+  it("should pass when the build of the web client comes from the current sources", () => {
+    expect(failures("web", facts({ probes: { webClient: null } }))).toEqual([]);
+  });
+
+  it("should fail with pnpm build:web and check nothing else when the build is missing or stale", () => {
+    expect(readiness("web", facts({ probes: { webClient: "the web client is not built", docker: "Docker is not running" } }))).toEqual([
+      { kind: "fail", text: "the web client is not built", command: "pnpm build:web" },
+    ]);
+  });
+});
+
 describe("readiness of factory refine", () => {
   it("should pass when gh, the Claude Code session and origin/HEAD are all fine", () => {
     expect(failures("refine", READY)).toEqual([]);
@@ -230,12 +242,14 @@ describe("probes a command needs", () => {
     push: async () => "push",
     node: async () => "node",
     config: async () => "config",
+    webClient: async () => "web client",
   };
 
   it("should list only the probes of the checks of that command", () => {
     expect(neededProbes("refine").sort()).toEqual(["claudeSession", "gh", "originHead"]);
     expect(neededProbes("run").sort()).toEqual(["docker", "gh", "push", "workerImage"]);
-    expect(neededProbes("doctor").sort()).toEqual(["claudeSession", "config", "docker", "gh", "node", "originHead", "push", "workerImage"]);
+    expect(neededProbes("web")).toEqual(["webClient"]);
+    expect(neededProbes("doctor").sort()).toEqual(["claudeSession", "config", "docker", "gh", "node", "originHead", "push", "webClient", "workerImage"]);
   });
 
   it("should run only those probes", async () => {

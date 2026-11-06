@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { emptyUsage } from "../workers/agent-adapter.ts";
 import type { ActivityEvent, ActivitySink, TokenUsage } from "../workers/types.ts";
 import { criterionTest } from "./criterion-test.ts";
-import type { CriterionRecord, VerifierRecord } from "./run-log.ts";
+import type { CriterionRecord, VerifierQuestionRecord, VerifierRecord } from "./run-log.ts";
 import { addUsage } from "./run-totals.ts";
 import type { Verifier, VerifierAnswer, VerifierQuestion, VerifierVerdict } from "./verifier.ts";
 
@@ -23,6 +23,8 @@ export interface JudgmentInput {
   logDir: string;
   label: string;
   onActivity?: (criterion: string, event: ActivityEvent) => void;
+  now: () => Date;
+  onQuestion?: (question: VerifierQuestionRecord | null) => Promise<void>;
 }
 
 export const NO_JUDGMENT: TestJudgment = { records: [], missingTests: [], usageProblems: [] };
@@ -38,14 +40,17 @@ export async function judgeTests(verifier: Verifier, input: JudgmentInput): Prom
     }
     const logPath = join(input.logDir, `${input.label}-verifier-${criterion.id}.jsonl`);
     const question = { id: criterion.id, criterion: input.texts[criterion.id] ?? criterion.id, test, logPath };
+    const startedAt = input.now().toISOString();
+    await input.onQuestion?.({ id: criterion.id, logPath, startedAt });
     const answer = await ask(verifier, question, input.onActivity === undefined ? undefined : (event) => input.onActivity?.(criterion.id, event));
+    await input.onQuestion?.(null);
     judgment.usage = addUsage(judgment.usage ?? emptyUsage(), answer.usage);
     if (answer.usageProblem !== undefined) judgment.usageProblems.push(answer.usageProblem);
     if (answer.kind === "plan-limit") {
       const resetsAt = answer.resetsAt !== undefined ? { resetsAt: answer.resetsAt } : {};
       return { ...judgment, planLimit: { message: answer.message, ...resetsAt } };
     }
-    judgment.records.push(recordOf(criterion.id, logPath, answer));
+    judgment.records.push({ ...recordOf(criterion.id, logPath, answer), startedAt, endedAt: input.now().toISOString() });
   }
   return judgment;
 }

@@ -149,4 +149,31 @@ describe("factory run: the phase of the acceptance tester in run.json", () => {
     expect(report.log.verification?.testerPhase).toBeUndefined();
     expect(report.log.verification?.tester?.verdicts).toEqual([expect.objectContaining({ id: "A1", passed: true })]);
   });
+
+  it("should record when the tester started and the raw log of its agent while it works, and keep its times in its record when it ends, so the web shows the tester at work", async () => {
+    const target = await targetRepo({ config: WITH_APP });
+    const seen: Array<[string, string | undefined, string | undefined]> = [];
+    const tester: TesterScript = async (call) => {
+      const { verification } = await currentRunLog(target);
+      seen.push(["attempt", verification?.testerStartedAt, verification?.testerLogPath]);
+      return passingTester(call);
+    };
+    const { run } = harness(target, writesHello, {}, tester, async (spec, command) => {
+      if (!spec.id.endsWith("-verification-tester") || command !== INSTALL) return;
+      const { verification } = await currentRunLog(target);
+      seen.push(["install", verification?.testerStartedAt, verification?.testerLogPath]);
+    });
+
+    const report = await run();
+
+    const startedAt = seen[0]?.[1];
+    expect(startedAt).toEqual(expect.any(String));
+    expect(seen).toEqual([
+      ["install", startedAt, undefined],
+      ["attempt", startedAt, expect.stringMatching(/-verification-tester-attempt-1\.jsonl$/)],
+    ]);
+    const { verification } = report.log;
+    expect([verification?.testerStartedAt, verification?.testerLogPath]).toEqual([undefined, undefined]);
+    expect(verification?.tester).toMatchObject({ startedAt, endedAt: expect.any(String), logPath: expect.stringMatching(/-verification-tester-attempt-1\.jsonl$/) });
+  });
 });

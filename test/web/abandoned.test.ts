@@ -1,13 +1,14 @@
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { RunsResponse } from "../../src/web/api.ts";
 import { handleRequest } from "../../src/web/handler.ts";
 import { writeRunningRun, type RunningRun } from "../coordinator/running-run.ts";
-import { NOW, request, temp, visibleText } from "./web-helpers.ts";
+import type { RunDetail } from "../../src/web/run-detail.ts";
+import { NOW, request, runDetailIn, temp } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 
 const TIMEOUT = 10 * 60_000;
-const RELOAD = "http-equiv";
 
 function before(ms: number): Date {
   return new Date(NOW.getTime() - ms);
@@ -28,52 +29,50 @@ async function repoWith(
   return { dir, run };
 }
 
-async function homeText(dir: string): Promise<string> {
-  const response = await handleRequest(request(dir, "/"));
+async function runsOf(dir: string): Promise<RunsResponse> {
+  const response = await handleRequest(request(dir, "/api/runs"));
   expect(response.status).toBe(200);
-  return response.body;
+  return JSON.parse(response.body) as RunsResponse;
 }
 
-async function runBody(dir: string, run: RunningRun): Promise<string> {
-  const response = await handleRequest(request(dir, `/runs/${run.runId}`));
-  expect(response.status).toBe(200);
-  return response.body;
+async function statuses(dir: string): Promise<string[]> {
+  return (await runsOf(dir)).runs.map((row) => row.status);
+}
+
+async function runOf(dir: string, run: RunningRun): Promise<RunDetail> {
+  return runDetailIn(dir, run.runId);
 }
 
 describe("an abandoned run in factory web", () => {
-  it("should show abandoned and not running in the list of runs of the home page", async () => {
+  it("should give abandoned and not running in the list of runs", async () => {
     const { dir } = await repoWith(TIMEOUT + 60_000, TIMEOUT + 60_000);
 
-    const body = await homeText(dir);
-
-    expect(body).toContain('<span class="badge warn">abandoned</span>');
-    expect(body).not.toContain(">running<");
+    expect(await statuses(dir)).toEqual(["abandoned"]);
   });
 
-  it("should count it apart from the running and the finished runs in the statistics of the home page", async () => {
+  it("should count it apart from the running and the finished runs in the statistics", async () => {
     const { dir } = await repoWith(TIMEOUT + 60_000, TIMEOUT + 60_000);
 
-    const text = visibleText(await homeText(dir));
+    const { stats } = await runsOf(dir);
 
-    expect(text).toContain("Abandoned 1");
-    expect(text).toContain("Running 0");
+    expect(stats?.results.abandoned).toBe(1);
+    expect(stats?.results.running).toBe(0);
   });
 
-  it("should show abandoned and not running in the page of the run, and in its attempt in progress", async () => {
+  it("should give abandoned and not running in the run of the API, and in its attempt in progress", async () => {
     const { dir, run } = await repoWith(TIMEOUT + 60_000, TIMEOUT + 60_000);
 
-    const body = await runBody(dir, run);
+    const detail = await runOf(dir, run);
 
-    expect(body).toContain("Resultado: <span class=\"badge warn\">abandoned</span>");
-    expect(visibleText(body)).toContain("Resultado: abandoned");
-    expect(visibleText(body)).not.toContain("running");
+    expect(detail.status).toBe("abandoned");
+    expect(detail.subtasks.flatMap((subtask) => subtask.attempts.map((attempt) => attempt.outcome))).toEqual(["abandoned"]);
   });
 
-  it("should not reload the home page nor the page of the run, which no process is changing", async () => {
+  it("should not ask again for the list nor reload the page of the run, which no process is changing", async () => {
     const { dir, run } = await repoWith(TIMEOUT + 60_000, TIMEOUT + 60_000);
 
-    expect(await homeText(dir)).not.toContain(RELOAD);
-    expect(await runBody(dir, run)).not.toContain(RELOAD);
+    expect((await runsOf(dir)).inProgress).toBe(false);
+    expect((await runOf(dir, run)).inProgress).toBe(false);
   });
 });
 
@@ -81,26 +80,24 @@ describe("a run in progress in factory web", () => {
   it("should show running while the raw log of its attempt keeps growing although run.json did not change", async () => {
     const { dir, run } = await repoWith(2 * 60 * 60_000, 30_000);
 
-    const home = await homeText(dir);
-    const page = await runBody(dir, run);
+    const detail = await runOf(dir, run);
 
-    expect(home).toContain('<span class="badge info">running</span>');
-    expect(home).not.toContain("abandoned");
-    expect(page).toContain("Resultado: <span class=\"badge info\">running</span>");
-    expect(visibleText(page)).toContain("Resultado: running");
-    expect(page).toContain(RELOAD);
+    expect(await statuses(dir)).toEqual(["running"]);
+    expect(detail.status).toBe("running");
+    expect(detail.subtasks.flatMap((subtask) => subtask.attempts.map((attempt) => attempt.outcome))).toEqual(["running"]);
+    expect(detail.inProgress).toBe(true);
   });
 
   it("should take attemptIdleTimeoutMs from the run log so a longer limit keeps the run in progress", async () => {
     const { dir, run } = await repoWith(TIMEOUT + 60_000, TIMEOUT + 60_000, 2 * TIMEOUT);
 
-    expect(await homeText(dir)).toContain('<span class="badge info">running</span>');
-    expect(await runBody(dir, run)).toContain("Resultado: <span class=\"badge info\">running</span>");
+    expect(await statuses(dir)).toEqual(["running"]);
+    expect((await runOf(dir, run)).status).toBe("running");
   });
 
   it("should use the 10 minute default for a run log without attemptIdleTimeoutMs, as the runs of older versions", async () => {
     const { dir } = await repoWith(TIMEOUT + 60_000, TIMEOUT + 60_000);
 
-    expect(await homeText(dir)).toContain('<span class="badge warn">abandoned</span>');
+    expect(await statuses(dir)).toEqual(["abandoned"]);
   });
 });
