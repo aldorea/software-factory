@@ -133,7 +133,7 @@ function liveAgent(entry: RunEntry, source: AgentSource, tails: RawLogTails, now
   const lastChange = (source.logPath === undefined ? undefined : entry.logTimes.get(source.logPath)) ?? source.quietSince;
   const silentMs = running ? Math.max(0, now.getTime() - lastChange.getTime()) : 0;
   const endedAt = source.ended?.endedAt === undefined ? now.getTime() : Date.parse(source.ended.endedAt);
-  const tail = running && source.logPath !== undefined ? (tails.get(source.logPath) ?? []) : [];
+  const tail = source.logPath === undefined ? [] : (tails.get(source.logPath) ?? []);
   const kind = source.choice.agent;
   const events = rawLogEvents(kind, tail, lastChange);
   const lastMessage = lastOf(events, "message");
@@ -264,8 +264,8 @@ export function runsInProgress(entries: readonly RunEntry[], now: Date): RunEntr
   return entries.filter((entry) => entry.log.result === "running" && !runAbandoned(entry, now));
 }
 
-export function rawLogsInProgress(entry: RunEntry): string[] {
-  return agentSources(entry).flatMap((source) => (source.ended === null && source.logPath !== undefined ? [source.logPath] : []));
+export function rawLogsOf(entry: RunEntry): string[] {
+  return agentSources(entry).flatMap((source) => (source.logPath === undefined ? [] : [source.logPath]));
 }
 
 export function isAtWork(agent: LiveAgent): boolean {
