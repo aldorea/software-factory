@@ -2,7 +2,7 @@ import { safeSegments } from "./log-path.ts";
 
 const RUN_ID_FORMAT = /^[1-9][0-9]*-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}Z$/;
 
-export type ApiResource = "runs";
+export type ApiResource = "runs" | "live";
 
 export type Route =
   | { kind: "client" }
@@ -14,7 +14,7 @@ export type Route =
 
 const NOT_FOUND: Route = { kind: "not-found" };
 const CLIENT: Route = { kind: "client" };
-const API_RESOURCES: readonly ApiResource[] = ["runs"];
+const API_RESOURCES: readonly ApiResource[] = ["runs", "live"];
 
 export function parseRunId(candidate: string): string | null {
   return RUN_ID_FORMAT.test(candidate) ? candidate : null;

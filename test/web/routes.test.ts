@@ -44,6 +44,7 @@ describe("matchRoute", () => {
 
   it("should match the API by its resource", () => {
     expect(matchRoute("/api/runs")).toEqual({ kind: "api", resource: "runs" });
+    expect(matchRoute("/api/live")).toEqual({ kind: "api", resource: "live" });
   });
 
   it("should match the run of the API by its run ID", () => {

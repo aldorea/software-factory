@@ -14,6 +14,7 @@ export type {
   TesterView,
   VerificationView,
 } from "../../run-detail.ts";
+export type { AgentState, LiveAgent, LiveEvent, LiveResponse, LiveRole, LiveRun } from "../../live.ts";
 
 export const POLL_MS = 2000;
 

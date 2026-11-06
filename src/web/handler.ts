@@ -4,6 +4,7 @@ import { readRunEntries, readRunEntry } from "../coordinator/run-history.ts";
 import { runsResponse, type ApiError } from "./api.ts";
 import { readFileInside } from "./file-inside.ts";
 import { hostAllowed } from "./host.ts";
+import { readLive } from "./live-read.ts";
 import { logLinks } from "./log-links.ts";
 import { runDetail } from "./run-detail.ts";
 import { matchRoute, type Route } from "./routes.ts";
@@ -78,6 +79,7 @@ async function api(route: Extract<Route, { kind: "api" }>, request: WebRequest, 
   if (request.method !== "GET") return apiError(405, "method not allowed");
   if (route.resource === "run") return runResponse(logsDir, route.runId, request.now);
   if (route.resource === "runs") return json(200, runsResponse(await readRunEntries(logsDir), request.now));
+  if (route.resource === "live") return json(200, await readLive(logsDir, request.now));
   return apiError(404, "not found");
 }
 

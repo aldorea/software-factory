@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink } from "react-router";
 import { Activity, Factory, LayoutDashboard, ListChecks, Moon, Play, Settings, Sun, type LucideIcon } from "lucide-react";
+import { Badge } from "./components/ui/badge.tsx";
 import { Button } from "./components/ui/button.tsx";
+import { useLive } from "./live-data.tsx";
 import { cn } from "./cn.ts";
 
 export interface NavItem {
@@ -41,6 +43,16 @@ function useTheme(): [Theme, () => void] {
   return [theme, () => setTheme((current) => (current === "dark" ? "light" : "dark"))];
 }
 
+function AtWork() {
+  const { data } = useLive();
+  if (data === null || data.atWork === 0) return null;
+  return (
+    <Badge tone="info" className="ml-auto" title="Agentes trabajando">
+      {data.atWork}
+    </Badge>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const [theme, toggle] = useTheme();
   return (
@@ -64,6 +76,7 @@ export function Shell({ children }: { children: ReactNode }) {
             >
               <item.icon className="size-4" />
               {item.label}
+              {item.path === "/live" && <AtWork />}
             </NavLink>
           ))}
         </nav>
