@@ -13,6 +13,7 @@ import { FakeNotifier } from "../fakes/notifier.ts";
 import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
 import { tempDirs } from "../temp-dirs.ts";
+import { writeClientBuild } from "../web/client-build-fixtures.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.removeAll());
@@ -60,6 +61,7 @@ async function repo(
 async function factoryRoot(floor: string): Promise<string> {
   const dir = await temp.make("doctor-factory-");
   await writeFile(join(dir, "package.json"), JSON.stringify({ engines: { node: floor } }));
+  await writeClientBuild(dir);
   return dir;
 }
 
@@ -123,6 +125,7 @@ describe("factory doctor", () => {
       "✓ CLAUDE_CODE_OAUTH_TOKEN is set for claude-code",
       "✓ OPENCODE_API_KEY is set for opencode",
       "✓ the worker image is built from the current base image",
+      "✓ the web client is built from the current sources",
     ]);
   });
 
@@ -149,7 +152,20 @@ describe("factory doctor", () => {
       "✗ OPENCODE_API_KEY not set; roles.verifier uses opencode → factory auth opencode",
       "✗ worker:dev built from an older base image → factory image",
     ]);
-    expect(out.filter((line) => line.startsWith("✓"))).toHaveLength(9);
+    expect(out.filter((line) => line.startsWith("✓"))).toHaveLength(10);
+  });
+
+  it("should report a build of the web client made from older sources with its fix, as factory web does", async () => {
+    const dir = await repo();
+    const root = await factoryRoot(">=1.0.0");
+    await writeClientBuild(root, "stale");
+    const { env, out } = await cli(dir, { factoryRoot: root });
+
+    expect(await main(["doctor"], env)).toBe(1);
+
+    expect(out.filter((line) => line.startsWith("✗"))).toEqual([
+      "✗ the build of the web client comes from older sources than the current ones → pnpm build:web",
+    ]);
   });
 
   it("should list the push problem with its fix when the GitHub repo of origin cannot be reached", async () => {

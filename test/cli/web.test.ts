@@ -4,6 +4,7 @@ import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { main, type CliEnv } from "../../src/cli/main.ts";
+import type { RunsResponse } from "../../src/web/api.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeImageDocker } from "../fakes/image-docker.ts";
@@ -12,6 +13,7 @@ import { FakeVerifier } from "../fakes/verifier.ts";
 import { FakeWorkerRunner } from "../fakes/worker-runner.ts";
 import { cleanRun, failedRun } from "../coordinator/run-log-fixtures.ts";
 import { writeRunningRun } from "../coordinator/running-run.ts";
+import { writeClientBuild, type BuildState } from "../web/client-build-fixtures.ts";
 import { repoWithRuns, temp } from "../web/web-helpers.ts";
 
 const stops: AbortController[] = [];
@@ -23,7 +25,13 @@ afterEach(async () => {
   await temp.removeAll();
 });
 
-function cli(cwd: string) {
+async function factoryRoot(state: BuildState = "built"): Promise<string> {
+  const root = await temp.make("web-cli-factory-");
+  await writeClientBuild(root, state);
+  return root;
+}
+
+async function cli(cwd: string, build: BuildState = "built") {
   const out: string[] = [];
   const err: string[] = [];
   const stop = new AbortController();
@@ -34,7 +42,7 @@ function cli(cwd: string) {
   });
   const env: CliEnv = {
     cwd,
-    factoryRoot: "/factory",
+    factoryRoot: await factoryRoot(build),
     clock: new FakeClock("2026-10-24T08:00:00.000Z"),
     github: () => new FakeGitHub([]),
     runner: () => new FakeWorkerRunner(),
@@ -58,21 +66,28 @@ function cli(cwd: string) {
   return { env, out, err, stop, firstLine };
 }
 
+async function runIds(url: string): Promise<string[]> {
+  const response = await fetch(new URL("/api/runs", url));
+  expect(response.status).toBe(200);
+  return ((await response.json()) as RunsResponse).runs.map((row) => `${row.runId} ${row.status}`);
+}
+
 function urlOf(line: string): string {
   return /http:\/\/\S+/.exec(line)?.[0] ?? "";
 }
 
 describe("factory web", () => {
-  it("should listen on 127.0.0.1, print the URL, serve the run list and stop on the abort signal leaving no server open", async () => {
+  it("should listen on 127.0.0.1, print the URL, serve the client and the run list and stop on the abort signal leaving no server open", async () => {
     const dir = await repoWithRuns([{ log: cleanRun(0) }, { log: failedRun(1) }]);
-    const { env, err, stop, firstLine } = cli(dir);
+    const { env, err, stop, firstLine } = await cli(dir);
     const exit = main(["web", "--port", "0"], env);
 
     const url = urlOf(await firstLine);
     expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
-    const response = await fetch(url);
-    expect(response.status).toBe(200);
-    expect(await response.text()).toContain("1-run-01");
+    const page = await fetch(url);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('<div id="root"></div>');
+    expect(await runIds(url)).toEqual(["1-run-01 ready", "1-run-00 ready"]);
 
     stop.abort();
     expect(await exit).toBe(0);
@@ -91,18 +106,18 @@ describe("factory web", () => {
       logAt: silent,
       attemptIdleTimeoutMs: 3_600_000,
     });
-    const pages: string[] = [];
+    const lists: string[][] = [];
 
     for (const dir of [abandonedDir, patientDir]) {
-      const { env, firstLine, stop } = cli(dir);
+      const { env, firstLine, stop } = await cli(dir);
       const exit = main(["web", "--port", "0"], env);
-      pages.push(await (await fetch(urlOf(await firstLine))).text());
+      lists.push(await runIds(urlOf(await firstLine)));
       stop.abort();
       expect(await exit).toBe(0);
     }
 
-    expect(pages[0]).toContain(">abandoned<");
-    expect(pages[1]).toContain(">running<");
+    expect(lists[0]?.[0]).toMatch(/ abandoned$/);
+    expect(lists[1]?.[0]).toMatch(/ running$/);
   });
 
   it.each([
@@ -115,12 +130,10 @@ describe("factory web", () => {
       await mkdir(join(dir, ".factory"), { recursive: true });
       await writeFile(join(dir, ".factory", "config.ts"), config);
     }
-    const { env, err, stop, firstLine } = cli(dir);
+    const { env, err, stop, firstLine } = await cli(dir);
     const exit = main(["web", "--port", "0"], env);
 
-    const response = await fetch(urlOf(await firstLine));
-    expect(response.status).toBe(200);
-    expect(await response.text()).toContain("1-run-00");
+    expect(await runIds(urlOf(await firstLine))).toEqual(["1-run-00 ready"]);
     stop.abort();
     expect(await exit).toBe(0);
     expect(err).toEqual([]);
@@ -128,11 +141,10 @@ describe("factory web", () => {
 
   it("should take the target repo from the argument", async () => {
     const dir = await repoWithRuns([{ log: cleanRun(0) }]);
-    const { env, firstLine } = cli(await temp.make("web-cli-elsewhere-"));
+    const { env, firstLine } = await cli(await temp.make("web-cli-elsewhere-"));
     const exit = main(["web", dir, "--port", "0"], env);
 
-    const response = await fetch(urlOf(await firstLine));
-    expect(await response.text()).toContain("1-run-00");
+    expect(await runIds(urlOf(await firstLine))).toEqual(["1-run-00 ready"]);
     stops[0]?.abort();
     expect(await exit).toBe(0);
   });
@@ -143,7 +155,7 @@ describe("factory web", () => {
     await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
     const free = (probe.address() as { port: number }).port;
     await new Promise((resolve) => probe.close(resolve));
-    const { env, stop, firstLine } = cli(dir);
+    const { env, stop, firstLine } = await cli(dir);
     const exit = main(["web", "--port", String(free)], env);
 
     expect(urlOf(await firstLine)).toBe(`http://127.0.0.1:${free}/`);
@@ -156,7 +168,7 @@ describe("factory web", () => {
     blockers.push(blocker);
     await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
     const taken = (blocker.address() as { port: number }).port;
-    const { env, err, out } = cli(await temp.make("web-cli-busy-"));
+    const { env, err, out } = await cli(await temp.make("web-cli-busy-"));
 
     expect(await main(["web", "--port", String(taken)], env)).toBe(1);
     expect(err.join("\n")).toContain(`port ${taken} is already in use`);
@@ -166,7 +178,7 @@ describe("factory web", () => {
   it.each([["--port", "abc"], ["--port", "70000"], ["--port", "-1"], ["a", "b"]])(
     "should print the usage when the arguments are %j",
     async (...args) => {
-      const { env, err } = cli(await temp.make("web-cli-usage-"));
+      const { env, err } = await cli(await temp.make("web-cli-usage-"));
 
       expect(await main(["web", ...args], env)).toBe(2);
       expect(err.join("\n")).toContain("factory web [target-repo] [--port <port>]");
@@ -174,24 +186,23 @@ describe("factory web", () => {
   );
 
   it("should list factory web in the usage of factory", async () => {
-    const { env, err } = cli(await temp.make("web-cli-help-"));
+    const { env, err } = await cli(await temp.make("web-cli-help-"));
 
     expect(await main([], env)).toBe(2);
     expect(err.join("\n")).toContain("factory web [target-repo] [--port <port>]");
   });
 
-  it("should serve an empty home page for a repo that has no run log", async () => {
-    const { env, stop, firstLine } = cli(await temp.make("web-cli-none-"));
+  it("should serve an empty run list for a repo that has no run log", async () => {
+    const { env, stop, firstLine } = await cli(await temp.make("web-cli-none-"));
     const exit = main(["web", "--port", "0"], env);
 
-    const response = await fetch(urlOf(await firstLine));
-    expect(response.status).toBe(200);
+    expect(await runIds(urlOf(await firstLine))).toEqual([]);
     stop.abort();
     expect(await exit).toBe(0);
   });
 
   it("should refuse a request whose Host header is not the loopback address of the port", async () => {
-    const { env, stop, firstLine } = cli(await temp.make("web-cli-host-"));
+    const { env, stop, firstLine } = await cli(await temp.make("web-cli-host-"));
     const exit = main(["web", "--port", "0"], env);
     const url = new URL(urlOf(await firstLine));
 
@@ -209,5 +220,17 @@ describe("factory web", () => {
     expect(status).toBe(403);
     stop.abort();
     expect(await exit).toBe(0);
+  });
+
+  it.each([
+    ["missing", "the web client is not built"],
+    ["stale", "the build of the web client comes from older sources than the current ones"],
+  ] as const)("should refuse to start with pnpm build:web as the fix when the build of the client is %s", async (state, problem) => {
+    const { env, err, out } = await cli(await temp.make("web-cli-build-"), state);
+
+    expect(await main(["web", "--port", "0"], env)).toBe(1);
+    expect(err.join("\n")).toContain(problem);
+    expect(err.join("\n")).toContain("→ pnpm build:web");
+    expect(out).toEqual([]);
   });
 });

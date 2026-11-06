@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
+import type { RunsResponse } from "../../src/web/api.ts";
 import { handleRequest } from "../../src/web/handler.ts";
 import { aRun, repoWithRuns, request, runPage, temp, visibleText } from "./web-helpers.ts";
 
@@ -12,12 +13,12 @@ const FAILURE: RunLog["publicationFailure"] = {
 };
 
 describe("a run whose publication failed in factory web", () => {
-  it("should show not published in the list of runs, in place of the pull request", async () => {
+  it("should give not published in the list of runs of the API, in place of the pull request", async () => {
     const dir = await repoWithRuns([{ log: aRun(0, { publicationFailure: FAILURE }) }, { log: aRun(1) }]);
 
-    const { body } = await handleRequest(request(dir));
+    const { runs } = JSON.parse((await handleRequest(request(dir, "/api/runs"))).body) as RunsResponse;
 
-    expect(body.match(/<span class="badge bad">not published<\/span>/g)).toHaveLength(1);
+    expect(runs.map((row) => row.pullRequest.kind)).toEqual(["none", "not-published"]);
   });
 
   it("should show the phase, the message, the time and the command that publishes again on the page of the run", async () => {
@@ -36,12 +37,12 @@ describe("a run whose publication failed in factory web", () => {
     expect(body).not.toContain("<script>alert(1)</script>");
   });
 
-  it("should count the runs not published in the statistics of the home page", async () => {
+  it("should count the runs not published in the statistics of the API", async () => {
     const dir = await repoWithRuns([{ log: aRun(0, { publicationFailure: FAILURE }) }, { log: aRun(1) }]);
 
-    const text = visibleText((await handleRequest(request(dir))).body);
+    const { stats } = JSON.parse((await handleRequest(request(dir, "/api/runs"))).body) as RunsResponse;
 
-    expect(text).toContain("Sin publicar 1");
+    expect(stats?.unpublished).toBe(1);
   });
 
   it("should show nothing about a publication in a run that has no failure", async () => {

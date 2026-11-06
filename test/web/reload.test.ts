@@ -33,26 +33,6 @@ describe("the decision to reload", () => {
   });
 });
 
-describe("the reload of the home page", () => {
-  it("should reload every 5 seconds from the HTML when a run is running", async () => {
-    const body = await pageOf([aRun(0, { result: "ready" }), aRun(1, { result: "running" })], () => "/");
-
-    expect(body).toContain(RELOAD);
-  });
-
-  it("should not reload when no run is running", async () => {
-    const body = await pageOf([aRun(0, { result: "ready" }), aRun(1, { result: "paused" })], () => "/");
-
-    expect(body).not.toContain("http-equiv");
-  });
-
-  it("should not reload with no runs", async () => {
-    const body = await pageOf([], () => "/");
-
-    expect(body).not.toContain("http-equiv");
-  });
-});
-
 describe("the reload of the page of a run", () => {
   it("should reload every 5 seconds from the HTML when the run is running", async () => {
     const body = await pageOf([aRun(0, { result: "running" })], firstRunPath);

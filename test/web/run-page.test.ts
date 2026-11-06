@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
+import type { RunsResponse } from "../../src/web/api.ts";
 import { handleRequest } from "../../src/web/handler.ts";
 import { cleanRun } from "../coordinator/run-log-fixtures.ts";
 import { aRun, NOW, repoWithRuns, request, runPage, temp, visibleText } from "./web-helpers.ts";
@@ -267,35 +268,15 @@ describe("the escaping of a run", () => {
   });
 });
 
-describe("the links from the home page", () => {
-  it("should link each run of the list to its page", async () => {
-    const first = aRun(0);
-    const second = aRun(1);
-    const dir = await repoWithRuns([{ log: first }, { log: second }]);
-
-    const { body } = await handleRequest(request(dir, "/"));
-
-    expect(body).toContain(`<a href="/runs/${first.runId}">${first.runId}</a>`);
-    expect(body).toContain(`<a href="/runs/${second.runId}">${second.runId}</a>`);
-  });
-
-  it("should serve the page that each link of the home page points to", async () => {
+describe("the links from the list of runs", () => {
+  it("should link each run to a page that the server serves", async () => {
     const log = aRun(0);
     const dir = await repoWithRuns([{ log }]);
-    const home = await handleRequest(request(dir, "/"));
-    const href = /href="(\/runs\/[^"]+)"/.exec(home.body)?.[1];
+    const { runs } = JSON.parse((await handleRequest(request(dir, "/api/runs"))).body) as RunsResponse;
+    const href = runs[0]?.href;
 
-    expect(href).toBeDefined();
+    expect(href).toBe(`/runs/${log.runId}`);
     expect((await handleRequest(request(dir, href as string))).status).toBe(200);
-  });
-
-  it("should not link a run whose directory is not a run ID, because its page would answer 404", async () => {
-    const dir = await repoWithRuns([{ log: { ...cleanRun(0), runId: "1-run-00" } }]);
-
-    const { body } = await handleRequest(request(dir, "/"));
-
-    expect(body).toContain("1-run-00");
-    expect(body).not.toContain('href="/runs/');
   });
 });
 
@@ -318,14 +299,23 @@ describe("the page of a run", () => {
     expect(response.status).toBe(404);
   });
 
-  it.each(["/runs/..", "/runs/%2e%2e", "/runs/..%2F..%2Fetc", "/runs/a/b", "/runs/1-run-00", "/runs/%zz"])(
-    "should answer 404 to the path %s, which is not a run ID",
+  it.each(["/runs/..", "/runs/%2e%2e", "/runs/..%2F..%2Fetc", "/runs/1-run-00", "/runs/%zz"])(
+    "should give the path %s, which is not a run ID, to the client, which draws its not found page",
     async (path) => {
       const dir = await repoWithRuns([{ log: aRun(0) }]);
 
-      expect((await handleRequest(request(dir, path))).status).toBe(404);
+      const response = await handleRequest(request(dir, path));
+
+      expect(response.status).toBe(200);
+      expect(response.body).toContain('<div id="root"></div>');
     },
   );
+
+  it("should answer 404 to a path below a run ID that is not the format of a run ID, because it reads no file", async () => {
+    const dir = await repoWithRuns([{ log: aRun(0) }]);
+
+    expect((await handleRequest(request(dir, "/runs/a/b"))).status).toBe(404);
+  });
 
   it("should answer 404 to a run whose run.json cannot be read", async () => {
     const log = { ...aRun(0), version: 0 as 1 };
