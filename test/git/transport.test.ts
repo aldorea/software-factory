@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,7 +15,7 @@ const servers: Server[] = [];
 
 afterEach(async () => {
   await temp.removeAll();
-  await Promise.all(servers.splice(0).map((server) => new Promise((done) => { server.close(done); server.closeAllConnections(); })));
+  await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
 });
 
 async function repoWithBranch(): Promise<string> {
@@ -308,5 +308,25 @@ describe("lsRemote", () => {
 
     expect(listed.exitCode).not.toBe(0);
     expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it("should close its connection to a server that never answers when it times out, because it kills the remote helper of git too, whatever the git version", async () => {
+    const repo = await repoWithBranch();
+    const sockets: Socket[] = [];
+    const silent = createServer(() => undefined);
+    silent.on("connection", (socket) => sockets.push(socket));
+    servers.push(silent);
+    await new Promise<void>((ready) => silent.listen(0, "127.0.0.1", ready));
+    const url = `http://127.0.0.1:${(silent.address() as AddressInfo).port}/aldorea/repo.git`;
+
+    const listed = await lsRemote(repo, { url, gitArgs: [] }, { timeoutMs: 500 });
+
+    expect(listed).toMatchObject({ exitCode: 1, stderr: "git ls-remote timed out after 0.5s" });
+    expect(sockets.length).toBeGreaterThan(0);
+    const closed = await Promise.race([
+      Promise.all(sockets.map((socket) => (socket.closed ? Promise.resolve() : new Promise((done) => socket.once("close", done))))).then(() => true),
+      new Promise<boolean>((done) => setTimeout(() => done(false), 3000)),
+    ]);
+    expect(closed).toBe(true);
   });
 });
