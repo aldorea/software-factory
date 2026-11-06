@@ -1,6 +1,6 @@
 # Software factory: design, version 2
 
-Status: agreed on 2026-11-03, not built. Version 1 is [`design.md`](design.md), and it stays as it is until the pilot in `askwell` closes. This document says only what version 2 adds or changes; what it does not mention works as in version 1. Nothing here holds before it is built. Specs: #105 (engagements), #106 (the `test` evidence type), #107 (the warning for an issue of another developer).
+Status: agreed on 2026-11-03, not built, and on hold since 2026-11-06: it will be reviewed after the web view drives the whole loop of version 1 (refinement, run, verification, publication and preview). Version 1 is [`design.md`](design.md). This document says only what version 2 adds or changes; what it does not mention works as in version 1. Nothing here holds before it is built. Specs: #105 (engagements), #106 (the `test` evidence type), #107 (the warning for an issue of another developer).
 
 ## Goal
 
@@ -246,3 +246,14 @@ Not decided, and not needed to build version 2:
 - the default allowed agents of an engagement;
 - whether `.factory/` stays in the repo at the delivery;
 - whether the contract with the client declares the agents.
+
+## Ideas, not decided
+
+Raised on 2026-11-06, to review when version 2 is reviewed. None of them is a decision, and none adds a term to the glossary yet.
+
+- **A proposal phase between the brief and the PRD.** Roles that do no code, such as a researcher, a brainstorming role, a content writer, a UX role and a content designer, produce the material from which the PRD comes.
+- **A lead role.** A conversation in the web with an agent that delegates to other roles. It asks for each delegation as data, and the coordinator validates it and starts that role in its own container, with the agent and model chosen for it, so the coordinator stays deterministic and each role keeps its own agent ([ADR 0003](adr/0003-interchangeable-agents.md)).
+- **Conversations grouped by target repo**, and groups that belong to no target repo, such as brainstorming.
+- **Files and pages.** Files are the files that enter or are produced in a target repo or a group, in folders. Pages are HTML documents that a role writes and the web shows in an isolated `iframe` (`sandbox` with no `allow-same-origin`), so that a script of a page cannot send a form to the server with its token.
+- **The client stays out of the factory**, as [ADR 0012](adr/0012-the-client-sees-no-implementation.md) says. A client portal or a web beyond `127.0.0.1` needs its own ADR.
+
