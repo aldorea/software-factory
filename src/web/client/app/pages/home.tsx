@@ -1,4 +1,5 @@
 import { GitPullRequest, Loader2 } from "lucide-react";
+import { Link } from "react-router";
 import { Badge } from "../components/ui/badge.tsx";
 import { Card } from "../components/ui/card.tsx";
 import { usePoll, type PullRequestCell, type RunRow, type RunsResponse } from "../api.ts";
@@ -24,9 +25,9 @@ function Row({ row, now }: { row: RunRow; now: string }) {
       <td className="px-4 py-3">#{row.issue}</td>
       <td className="px-4 py-3 font-mono text-xs">
         {row.href === null ? row.runId : (
-          <a href={row.href} className="text-primary hover:underline">
+          <Link to={row.href} className="text-primary hover:underline">
             {row.runId}
-          </a>
+          </Link>
         )}
       </td>
       <td className="px-4 py-3">

@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeRunLog, type RunLog } from "../../src/coordinator/run-log.ts";
 import { handleRequest } from "../../src/web/handler.ts";
 import { attemptRecord, subtaskRecord } from "../coordinator/run-log-fixtures.ts";
-import { aRun, request, temp } from "./web-helpers.ts";
+import type { RunDetail } from "../../src/web/run-detail.ts";
+import { aRun, request, runDetailIn, temp } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 
@@ -12,7 +13,7 @@ interface Page {
   dir: string;
   runDir: string;
   runId: string;
-  body: string;
+  run: RunDetail;
 }
 
 async function pageWith(build: (runDir: string) => Partial<RunLog>, files: Record<string, string> = {}): Promise<Page> {
@@ -25,25 +26,34 @@ async function pageWith(build: (runDir: string) => Partial<RunLog>, files: Recor
   }
   const log = { ...base, ...build(runDir) };
   await writeRunLog(join(runDir, "run.json"), log);
-  const response = await handleRequest(request(dir, `/runs/${base.runId}`));
-  expect(response.status).toBe(200);
-  return { dir, runDir, runId: base.runId, body: response.body };
+  return { dir, runDir, runId: base.runId, run: await runDetailIn(dir, base.runId) };
 }
 
-function logHrefs(body: string): string[] {
-  return [...body.matchAll(/<a href="(\/runs\/[^"]*)">/g)].map((match) => match[1] as string);
+type Linked = { logUrl?: string | null; outputUrl?: string | null };
+
+function logHrefs(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(logHrefs);
+  if (value === null || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, field]) =>
+    (key === "logUrl" || key === "outputUrl") && typeof field === "string" ? [field] : logHrefs(field),
+  );
 }
 
-function itemsOf(body: string, className: string): string[] {
-  return [...body.matchAll(new RegExp(`<li class="${className}">([\\s\\S]*?)</li>`, "g"))].map((match) => match[1] as string);
+function itemsOf(run: RunDetail, kind: "attempt" | "check" | "criterion" | "verifier"): Linked[] {
+  const gates = run.subtasks.flatMap((subtask) => (subtask.gate === null ? [] : [subtask.gate]));
+  if (kind === "attempt") return run.subtasks.flatMap((subtask) => subtask.attempts);
+  if (kind === "verifier") return gates.flatMap((gate) => gate.verifier);
+  if (kind === "criterion") return [...gates.flatMap((gate) => gate.criteria), ...(run.verification?.criteria ?? [])];
+  return [...gates.flatMap((gate) => gate.checks), ...(run.verification?.checks ?? []), ...(run.block?.checks ?? []), ...(run.verification?.tester?.checks ?? [])];
 }
 
-function hrefIn(html: string): string | undefined {
-  return html.match(/<a href="(\/runs\/[^"]*)">/)?.[1];
+function hrefIn(item: Linked | undefined): string | undefined {
+  return item?.logUrl ?? item?.outputUrl ?? undefined;
 }
 
-async function open(page: Page, href: string) {
-  return handleRequest(request(page.dir, href));
+async function open(page: Page, href: string | undefined) {
+  expect(href).toBeDefined();
+  return handleRequest(request(page.dir, href ?? ""));
 }
 
 describe("the link of an attempt to its raw log", () => {
@@ -55,9 +65,9 @@ describe("the link of an attempt to its raw log", () => {
       { "S1-attempt-1.jsonl": '{"type":"assistant"}\n' },
     );
 
-    const href = hrefIn(itemsOf(page.body, "attempt")[0] as string);
+    const href = hrefIn(itemsOf(page.run, "attempt")[0]);
     expect(href).toBe(`/runs/${page.runId}/S1-attempt-1.jsonl`);
-    const response = await open(page, href as string);
+    const response = await open(page, href);
 
     expect(response.status).toBe(200);
     expect(response.contentType).toMatch(/^text\/plain/);
@@ -79,7 +89,7 @@ describe("the link of an attempt to its raw log", () => {
       { "S1-attempt-1.jsonl": "one", "S1-attempt-2.jsonl": "two" },
     );
 
-    expect(itemsOf(page.body, "attempt").map(hrefIn)).toEqual([`/runs/${page.runId}/S1-attempt-1.jsonl`, `/runs/${page.runId}/S1-attempt-2.jsonl`]);
+    expect(itemsOf(page.run, "attempt").map(hrefIn)).toEqual([`/runs/${page.runId}/S1-attempt-1.jsonl`, `/runs/${page.runId}/S1-attempt-2.jsonl`]);
   });
 
   it("should encode a log name that has characters of a URL", async () => {
@@ -90,9 +100,9 @@ describe("the link of an attempt to its raw log", () => {
       { "a b#c?.jsonl": "odd name" },
     );
 
-    const href = hrefIn(itemsOf(page.body, "attempt")[0] as string);
+    const href = hrefIn(itemsOf(page.run, "attempt")[0]);
     expect(href).toBe(`/runs/${page.runId}/a%20b%23c%3F.jsonl`);
-    expect((await open(page, href as string)).body).toBe("odd name");
+    expect((await open(page, href)).body).toBe("odd name");
   });
 });
 
@@ -108,13 +118,13 @@ describe("the link of an attempt in progress to its raw log", () => {
       { "S1-attempt-1.jsonl": '{"type":"assistant"}\n' },
     );
 
-    const item = itemsOf(page.body, "attempt")[0] as string;
-    expect(item).toContain("Resultado: running");
-    expect(item).not.toContain("Fin:");
+    const item = page.run.subtasks[0]?.attempts[0];
+    expect(item?.outcome).toBe("running");
+    expect(item?.endedAt).toBeNull();
     const href = hrefIn(item);
     expect(href).toBe(`/runs/${page.runId}/S1-attempt-1.jsonl`);
     await appendFile(join(page.runDir, "S1-attempt-1.jsonl"), '{"type":"result"}\n');
-    const response = await open(page, href as string);
+    const response = await open(page, href);
     expect(response.status).toBe(200);
     expect(response.contentType).toMatch(/^text\/plain/);
     expect(response.body).toBe('{"type":"assistant"}\n{"type":"result"}\n');
@@ -125,8 +135,8 @@ describe("the link of an attempt in progress to its raw log", () => {
       subtasks: [subtaskRecord("S1", { state: "working", attempts: [running("../../../secret.txt")] })],
     }));
 
-    expect(itemsOf(page.body, "attempt")).toHaveLength(1);
-    expect(logHrefs(page.body)).toEqual([]);
+    expect(itemsOf(page.run, "attempt")).toHaveLength(1);
+    expect(logHrefs(page.run)).toEqual([]);
   });
 });
 
@@ -147,8 +157,8 @@ describe("a log path that is not inside the run folder", () => {
       { "a.log": "inside" },
     );
 
-    expect(itemsOf(page.body, "attempt")).toHaveLength(1);
-    expect(logHrefs(page.body)).toEqual([]);
+    expect(itemsOf(page.run, "attempt")).toHaveLength(1);
+    expect(logHrefs(page.run)).toEqual([]);
   });
 
   it("should not be linked when it goes through a symlink that points outside the run", async () => {
@@ -162,11 +172,10 @@ describe("a log path that is not inside the run folder", () => {
     const attempts = ["leak.jsonl", "linked/secret.txt"].map((name) => ({ ...attemptRecord("claude-code", 10, 5), logPath: join(runDir, name) }));
     await writeRunLog(join(runDir, "run.json"), { ...base, subtasks: [subtaskRecord("S1", { attempts })] });
 
-    const response = await handleRequest(request(dir, `/runs/${base.runId}`));
+    const run = await runDetailIn(dir, base.runId);
 
-    expect(response.status).toBe(200);
-    expect(itemsOf(response.body, "attempt")).toHaveLength(2);
-    expect(logHrefs(response.body)).toEqual([]);
+    expect(itemsOf(run, "attempt")).toHaveLength(2);
+    expect(logHrefs(run)).toEqual([]);
   });
 
   it("should not be linked, and should not break the page, when run.json holds something that is not a string", async () => {
@@ -174,8 +183,8 @@ describe("a log path that is not inside the run folder", () => {
       subtasks: [subtaskRecord("S1", { attempts: [{ ...attemptRecord("claude-code", 10, 5), logPath: 42 as unknown as string }] })],
     }));
 
-    expect(itemsOf(page.body, "attempt")).toHaveLength(1);
-    expect(logHrefs(page.body)).toEqual([]);
+    expect(itemsOf(page.run, "attempt")).toHaveLength(1);
+    expect(logHrefs(page.run)).toEqual([]);
   });
 
   it("should not be linked when the file does not exist, so the page has no dead link", async () => {
@@ -183,7 +192,7 @@ describe("a log path that is not inside the run folder", () => {
       subtasks: [subtaskRecord("S1", { attempts: [{ ...attemptRecord("claude-code", 10, 5), logPath: join(runDir, "missing.jsonl") }] })],
     }));
 
-    expect(logHrefs(page.body)).toEqual([]);
+    expect(logHrefs(page.run)).toEqual([]);
   });
 
   it("should still link the logs that are inside the run on the same page", async () => {
@@ -201,7 +210,7 @@ describe("a log path that is not inside the run folder", () => {
       { "S1-attempt-2.jsonl": "two" },
     );
 
-    expect(logHrefs(page.body)).toEqual([`/runs/${page.runId}/S1-attempt-2.jsonl`]);
+    expect(logHrefs(page.run)).toEqual([`/runs/${page.runId}/S1-attempt-2.jsonl`]);
   });
 });
 
@@ -230,11 +239,11 @@ describe("the link of a check or a criterion to its full output", () => {
       { "output/gate/check-2-test.log": FULL_OUTPUT },
     );
 
-    const [passed, failed] = itemsOf(page.body, "check");
-    expect(hrefIn(passed as string)).toBeUndefined();
-    const href = hrefIn(failed as string);
+    const [passed, failed] = itemsOf(page.run, "check");
+    expect(hrefIn(passed)).toBeUndefined();
+    const href = hrefIn(failed);
     expect(href).toBe(`/runs/${page.runId}/output/gate/check-2-test.log`);
-    const response = await open(page, href as string);
+    const response = await open(page, href);
     expect(response.status).toBe(200);
     expect(response.contentType).toMatch(/^text\/plain/);
     expect(response.body).toBe(FULL_OUTPUT);
@@ -259,9 +268,9 @@ describe("the link of a check or a criterion to its full output", () => {
       { "output/gate/C1.log": "curl: (22) 404\n" },
     );
 
-    const href = hrefIn(itemsOf(page.body, "criterion")[0] as string);
+    const href = hrefIn(itemsOf(page.run, "criterion")[0]);
     expect(href).toBe(`/runs/${page.runId}/output/gate/C1.log`);
-    expect((await open(page, href as string)).body).toBe("curl: (22) 404\n");
+    expect((await open(page, href)).body).toBe("curl: (22) 404\n");
   });
 
   it("should open from a failed check and a failed criterion of the integrated verification", async () => {
@@ -278,8 +287,8 @@ describe("the link of a check or a criterion to its full output", () => {
       { "output/final/check-1-test.log": "check output", "output/final/C2.log": "criterion output" },
     );
 
-    expect((await open(page, hrefIn(itemsOf(page.body, "check")[0] as string) as string)).body).toBe("check output");
-    expect((await open(page, hrefIn(itemsOf(page.body, "criterion")[0] as string) as string)).body).toBe("criterion output");
+    expect((await open(page, hrefIn(itemsOf(page.run, "check")[0]))).body).toBe("check output");
+    expect((await open(page, hrefIn(itemsOf(page.run, "criterion")[0]))).body).toBe("criterion output");
   });
 
   it("should open from a failed check of the integration-check block of the run", async () => {
@@ -296,8 +305,8 @@ describe("the link of a check or a criterion to its full output", () => {
       { "output/final/check-1-test.log": "block output" },
     );
 
-    expect(logHrefs(page.body)).toEqual([`/runs/${page.runId}/output/final/check-1-test.log`]);
-    expect((await open(page, logHrefs(page.body)[0] as string)).body).toBe("block output");
+    expect(logHrefs(page.run)).toEqual([`/runs/${page.runId}/output/final/check-1-test.log`]);
+    expect((await open(page, logHrefs(page.run)[0])).body).toBe("block output");
   });
 
   it("should not link a failed check whose full output was not kept", async () => {
@@ -311,8 +320,8 @@ describe("the link of a check or a criterion to its full output", () => {
       },
     }));
 
-    expect(itemsOf(page.body, "check")).toHaveLength(1);
-    expect(logHrefs(page.body)).toEqual([]);
+    expect(itemsOf(page.run, "check")).toHaveLength(1);
+    expect(logHrefs(page.run)).toEqual([]);
   });
 
   it("should not link an output log that is outside the run folder", async () => {
@@ -326,9 +335,9 @@ describe("the link of a check or a criterion to its full output", () => {
       },
     }));
 
-    expect(itemsOf(page.body, "check")).toHaveLength(1);
-    expect(itemsOf(page.body, "criterion")).toHaveLength(1);
-    expect(logHrefs(page.body)).toEqual([]);
+    expect(itemsOf(page.run, "check")).toHaveLength(1);
+    expect(itemsOf(page.run, "criterion")).toHaveLength(1);
+    expect(logHrefs(page.run)).toEqual([]);
   });
 });
 
@@ -356,10 +365,10 @@ describe("the link of the independent verifier and the acceptance tester to thei
       { "gate-verifier-C1.jsonl": "accept log", "gate-verifier-C2.jsonl": "refute log" },
     );
 
-    const [accepted, refuted, errored] = itemsOf(page.body, "verifier");
-    expect((await open(page, hrefIn(accepted as string) as string)).body).toBe("accept log");
-    expect((await open(page, hrefIn(refuted as string) as string)).body).toBe("refute log");
-    expect(hrefIn(errored as string)).toBeUndefined();
+    const [accepted, refuted, errored] = itemsOf(page.run, "verifier");
+    expect((await open(page, hrefIn(accepted))).body).toBe("accept log");
+    expect((await open(page, hrefIn(refuted))).body).toBe("refute log");
+    expect(hrefIn(errored)).toBeUndefined();
   });
 
   it("should open the log of the acceptance tester, which run.json keeps relative to the run folder", async () => {
@@ -377,8 +386,8 @@ describe("the link of the independent verifier and the acceptance tester to thei
       { "final-tester.jsonl": "tester log" },
     );
 
-    expect(logHrefs(page.body)).toEqual([`/runs/${page.runId}/final-tester.jsonl`]);
-    const response = await open(page, logHrefs(page.body)[0] as string);
+    expect(logHrefs(page.run)).toEqual([`/runs/${page.runId}/final-tester.jsonl`]);
+    const response = await open(page, logHrefs(page.run)[0]);
     expect(response.status).toBe(200);
     expect(response.contentType).toMatch(/^text\/plain/);
     expect(response.body).toBe("tester log");
@@ -396,8 +405,8 @@ describe("the link of the independent verifier and the acceptance tester to thei
       },
     }));
 
-    expect(page.body).toContain("Acceptance tester");
-    expect(logHrefs(page.body)).toEqual([]);
+    expect(page.run.verification?.tester).not.toBeNull();
+    expect(logHrefs(page.run)).toEqual([]);
   });
 
   it("should leave the tester without a link when run.json keeps no log for it", async () => {
@@ -412,8 +421,8 @@ describe("the link of the independent verifier and the acceptance tester to thei
       },
     }));
 
-    expect(page.body).toContain("Acceptance tester");
-    expect(logHrefs(page.body)).toEqual([]);
+    expect(page.run.verification?.tester).not.toBeNull();
+    expect(logHrefs(page.run)).toEqual([]);
   });
 
   it("should open the output of the check that failed while the tester prepared the app", async () => {
@@ -445,7 +454,7 @@ describe("the link of the independent verifier and the acceptance tester to thei
       { "output/verification-tester/check-1-install.log": "ERR_PNPM_FETCH_404 the registry is unreachable" },
     );
 
-    expect(logHrefs(page.body)).toEqual([`/runs/${page.runId}/output/verification-tester/check-1-install.log`]);
-    expect((await open(page, logHrefs(page.body)[0] as string)).body).toBe("ERR_PNPM_FETCH_404 the registry is unreachable");
+    expect(logHrefs(page.run)).toEqual([`/runs/${page.runId}/output/verification-tester/check-1-install.log`]);
+    expect((await open(page, logHrefs(page.run)[0])).body).toBe("ERR_PNPM_FETCH_404 the registry is unreachable");
   });
 });

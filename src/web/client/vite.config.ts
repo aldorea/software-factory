@@ -30,7 +30,7 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5179,
     strictPort: true,
-    proxy: { "/api": { target: apiTarget, changeOrigin: true }, "/runs": { target: apiTarget, changeOrigin: true } },
+    proxy: { "/api": { target: apiTarget, changeOrigin: true }, "^/runs/[^/?]+/.+": { target: apiTarget, changeOrigin: true } },
   },
   build: { outDir: buildDir, emptyOutDir: true },
 });

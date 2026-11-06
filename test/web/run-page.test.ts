@@ -2,13 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { RunLog } from "../../src/coordinator/run-log.ts";
 import type { RunsResponse } from "../../src/web/api.ts";
 import { handleRequest } from "../../src/web/handler.ts";
-import { cleanRun } from "../coordinator/run-log-fixtures.ts";
-import { aRun, NOW, repoWithRuns, request, runPage, temp, visibleText } from "./web-helpers.ts";
+import { aRun, NOW, repoWithRuns, request, runDetail, temp } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 
 describe("the agents of a run", () => {
-  it("should show the agent and the model of each role that run.json brings", async () => {
+  it("should give the agent and the model of each role that run.json brings", async () => {
     const log = aRun(0, {
       agents: {
         workers: { agent: "opencode", model: "opencode-go/kimi-k2" },
@@ -18,126 +17,80 @@ describe("the agents of a run", () => {
       },
     });
 
-    const body = await runPage(log);
+    const { agents } = await runDetail(log);
 
-    expect(body).toContain("workers: opencode / opencode-go/kimi-k2");
-    expect(body).toContain("verifier: claude-code / opus");
-    expect(body).toContain("tester: claude-code / sonnet");
+    expect(agents.roles).toEqual([
+      { role: "workers", agent: "opencode", model: "opencode-go/kimi-k2" },
+      { role: "verifier", agent: "claude-code", model: "opus" },
+      { role: "tester", agent: "claude-code", model: "sonnet" },
+    ]);
   });
 
   it("should list only the roles that run.json brings", async () => {
     const log = aRun(0, { agents: { workers: { agent: "claude-code", model: "sonnet" }, changes: [] } });
 
-    const body = await runPage(log);
+    const { agents } = await runDetail(log);
 
-    expect(body).toContain("workers: claude-code / sonnet");
-    expect(body).not.toContain("verifier:");
-    expect(body).not.toContain("tester:");
+    expect(agents.roles).toEqual([{ role: "workers", agent: "claude-code", model: "sonnet" }]);
   });
 
-  it("should show each change of agent made when the run resumed, with its role, both choices and time", async () => {
-    const log = aRun(0, {
-      agents: {
-        workers: { agent: "opencode", model: "opencode-go/kimi-k2" },
-        changes: [
-          {
-            role: "workers",
-            from: { agent: "claude-code", model: "sonnet" },
-            to: { agent: "opencode", model: "opencode-go/kimi-k2" },
-            at: "2026-10-24T07:30:00.000Z",
-          },
-        ],
-      },
-    });
+  it("should give each change of agent made when the run resumed, with its role, both choices and time", async () => {
+    const change = {
+      role: "workers" as const,
+      from: { agent: "claude-code" as const, model: "sonnet" },
+      to: { agent: "opencode" as const, model: "opencode-go/kimi-k2" },
+      at: "2026-10-24T07:30:00.000Z",
+    };
+    const log = aRun(0, { agents: { workers: { agent: "opencode", model: "opencode-go/kimi-k2" }, changes: [change] } });
 
-    const body = await runPage(log);
+    const { agents } = await runDetail(log);
 
-    expect(body).toContain("Cambios de agente");
-    expect(body).toContain("workers: claude-code / sonnet");
-    expect(body).toContain("opencode / opencode-go/kimi-k2");
-    expect(body).toContain("2026-10-24T07:30:00.000Z");
-  });
-
-  it("should not show a section of agent changes when the run never changed agent", async () => {
-    const body = await runPage(aRun(0));
-
-    expect(body).not.toContain("Cambios de agente");
+    expect(agents.changes).toEqual([change]);
   });
 });
 
 describe("the criteria of a run", () => {
-  it("should show the passing, blocked, human and pending criteria each under its own heading", async () => {
-    const log = aRun(0, { criteria: { passing: ["C1", "C2"], blocked: ["C3"], human: ["C4"], pending: ["C5", "C6"] } });
+  it("should give the passing, blocked, human and pending criteria, each even when empty, because the run still reports it", async () => {
+    const criteria = { passing: ["C1", "C2"], blocked: [], human: ["C4"], pending: ["C5", "C6"] };
 
-    const body = await runPage(log);
-
-    const section = (heading: string, next: string | null): string => {
-      const start = body.indexOf(`<h3>${heading}</h3>`);
-      expect(start).toBeGreaterThan(-1);
-      return body.slice(start, next === null ? undefined : body.indexOf(`<h3>${next}</h3>`));
-    };
-    expect(section("Pasan", "Bloqueados")).toMatch(/C1[\s\S]*C2/);
-    expect(section("Bloqueados", "Human")).toContain("C3");
-    expect(section("Human", "Pendientes")).toContain("C4");
-    expect(section("Pendientes", null)).toMatch(/C5[\s\S]*C6/);
-    expect(section("Pasan", "Bloqueados")).not.toContain("C3");
-  });
-
-  it("should show a heading with no criteria as empty, because the run still reports it", async () => {
-    const log = aRun(0, { criteria: { passing: ["C1"], blocked: [], human: [], pending: [] } });
-
-    const body = await runPage(log);
-
-    expect(body).toContain("<h3>Bloqueados</h3>");
-    expect(body).toContain("Ninguno");
+    expect((await runDetail(aRun(0, { criteria }))).criteria).toEqual(criteria);
   });
 });
 
 describe("the last change of a run", () => {
-  it("should show the age of run.json relative to now for a running run", async () => {
+  it("should give the time of the last change of run.json and the now of the server, so the client draws the age", async () => {
     const { endedAt: _ended, ...base } = aRun(0);
     const log: RunLog = { ...base, result: "running" };
+    const modifiedAt = new Date(NOW.getTime() - 7 * 60_000);
 
-    const body = await runPage(log, new Date(NOW.getTime() - 7 * 60_000));
+    const run = await runDetail(log, modifiedAt);
 
-    expect(body).toContain("running");
-    expect(body).toContain("Último cambio");
-    expect(body).toContain("hace 7 min");
+    expect(run.status).toBe("running");
+    expect(run.modifiedAt).toBe(modifiedAt.toISOString());
+    expect(run.now).toBe(NOW.toISOString());
   });
 });
 
 describe("the pause of a run", () => {
-  it("should show the reason and the time when the plan limit resets", async () => {
-    const log = aRun(0, {
-      result: "paused",
-      pauseReason: "the plan limit of claude-code was reached",
-      resetsAt: "2026-10-24T13:00:00.000Z",
-    });
+  it("should give the reason and the time when the plan limit resets", async () => {
+    const log = aRun(0, { result: "paused", pauseReason: "the plan limit of claude-code was reached", resetsAt: "2026-10-24T13:00:00.000Z" });
 
-    const body = await runPage(log);
-
-    expect(body).toContain("the plan limit of claude-code was reached");
-    expect(body).toContain("2026-10-24T13:00:00.000Z");
+    expect((await runDetail(log)).pause).toEqual({ reason: "the plan limit of claude-code was reached", resetsAt: "2026-10-24T13:00:00.000Z" });
   });
 
-  it("should say that the reset time is unknown when run.json has none", async () => {
+  it("should give no reset time when run.json has none, so the client says it is unknown", async () => {
     const log = aRun(0, { result: "paused", pauseReason: "the plan limit of claude-code was reached" });
 
-    const body = await runPage(log);
-
-    expect(body).toContain("the plan limit of claude-code was reached");
-    expect(body).toContain("Reset del plan limit: desconocido");
+    expect((await runDetail(log)).pause).toEqual({ reason: "the plan limit of claude-code was reached", resetsAt: null });
   });
 
-  it("should show no pause for a run that is not paused", async () => {
-    const body = await runPage(aRun(0));
-
-    expect(body).not.toContain("Pausado");
+  it("should give no pause for a run that is not paused", async () => {
+    expect((await runDetail(aRun(0))).pause).toBeNull();
   });
 });
 
 describe("the block of a run", () => {
-  it("should show the type and the reason of an integration-check block with its checks", async () => {
+  it("should give the type, the reason, the sha and the checks of an integration-check block, with the first error of a failed check", async () => {
     const log = aRun(0, {
       result: "draft",
       block: {
@@ -146,57 +99,40 @@ describe("the block of a run", () => {
         sha: "abc1234",
         checks: [
           { name: "typecheck", command: "pnpm typecheck", exitCode: 0, passed: true },
-          { name: "unit-tests", command: "pnpm test", exitCode: 1, passed: false },
+          { name: "unit-tests", command: "pnpm test", exitCode: 1, passed: false, firstError: "2 tests failed" },
         ],
       },
     });
 
-    const body = await runPage(log);
-
-    expect(body).toContain("Bloqueo del run");
-    expect(body).toContain("integration-check");
-    expect(body).toContain("the checks failed on the integration branch");
-    expect(body).toContain("abc1234");
-    expect(body).toContain("unit-tests");
+    expect((await runDetail(log)).block).toEqual({
+      type: "integration-check",
+      reason: "the checks failed on the integration branch",
+      sha: "abc1234",
+      files: [],
+      checks: [
+        { name: "typecheck", passed: true, firstError: null, outputUrl: null },
+        { name: "unit-tests", passed: false, firstError: "2 tests failed", outputUrl: null },
+      ],
+    });
   });
 
-  it("should show the first error of a failed check of an integration-check block, as it does for the checks of a gate", async () => {
+  it("should give the type, the reason and the files of a default-branch-conflict block", async () => {
     const log = aRun(0, {
       result: "draft",
-      block: {
-        type: "integration-check",
-        reason: "the checks failed on the integration branch",
-        sha: "abc1234",
-        checks: [{ name: "unit-tests", command: "pnpm test", exitCode: 1, passed: false, firstError: "2 tests failed" }],
-      },
+      block: { type: "default-branch-conflict", reason: "the default branch moved and the merge conflicts", sha: "def5678", files: ["src/a.ts", "src/b.ts"] },
     });
 
-    expect(visibleText(await runPage(log))).toContain("unit-tests: falla (2 tests failed)");
-  });
-
-  it("should show the type, the reason and the files of a default-branch-conflict block", async () => {
-    const log = aRun(0, {
-      result: "draft",
-      block: {
-        type: "default-branch-conflict",
-        reason: "the default branch moved and the merge conflicts",
-        sha: "def5678",
-        files: ["src/a.ts", "src/b.ts"],
-      },
+    expect((await runDetail(log)).block).toEqual({
+      type: "default-branch-conflict",
+      reason: "the default branch moved and the merge conflicts",
+      sha: "def5678",
+      files: ["src/a.ts", "src/b.ts"],
+      checks: [],
     });
-
-    const body = await runPage(log);
-
-    expect(body).toContain("default-branch-conflict");
-    expect(body).toContain("the default branch moved and the merge conflicts");
-    expect(body).toContain("src/a.ts");
-    expect(body).toContain("src/b.ts");
   });
 
-  it("should show no block for a run without one", async () => {
-    const body = await runPage(aRun(0));
-
-    expect(body).not.toContain("Bloqueo del run");
+  it("should give no block for a run without one", async () => {
+    expect((await runDetail(aRun(0))).block).toBeNull();
   });
 });
 
@@ -207,96 +143,79 @@ describe("the pull request and the evidence branch of a run", () => {
       evidence: { branch: "factory-evidence/45", commit: "abc1234", repositoryUrl: "https://github.com/acme/app" },
     });
 
-    const body = await runPage(log);
+    const run = await runDetail(log);
 
-    expect(body).toContain('<a href="https://github.com/acme/app/pull/52">#52</a>');
-    expect(body).toContain('<a href="https://github.com/acme/app/tree/factory-evidence/45">factory-evidence/45</a>');
+    expect(run.pullRequest).toEqual({ number: 52, url: "https://github.com/acme/app/pull/52", draft: false });
+    expect(run.evidenceBranch).toEqual({ branch: "factory-evidence/45", url: "https://github.com/acme/app/tree/factory-evidence/45" });
   });
 
   it("should say that the pull request is a draft", async () => {
     const log = aRun(0, { pullRequest: { number: 52, url: "https://github.com/acme/app/pull/52", draft: true } });
 
-    const body = await runPage(log);
-
-    expect(body).toContain("#52</a> (draft)");
+    expect((await runDetail(log)).pullRequest?.draft).toBe(true);
   });
 
-  it("should show neither when the run has no pull request and no evidence branch", async () => {
-    const body = await runPage(aRun(0));
+  it("should give neither when the run has no pull request and no evidence branch", async () => {
+    const run = await runDetail(aRun(0));
 
-    expect(body).not.toContain("Pull request");
-    expect(body).not.toContain("Evidence branch");
+    expect(run.pullRequest).toBeNull();
+    expect(run.evidenceBranch).toBeNull();
   });
 
-  it("should not link a url that is not http or https, because an escaped javascript: link still runs", async () => {
+  it("should give the evidence branch with no link when run.json keeps no repository URL", async () => {
+    expect((await runDetail(aRun(0, { evidence: { branch: "factory-evidence/45" } }))).evidenceBranch).toEqual({ branch: "factory-evidence/45", url: null });
+  });
+
+  it("should give no url that is not http or https, because a javascript: link runs when clicked even if it is escaped", async () => {
     const log = aRun(0, {
       pullRequest: { number: 1, url: "javascript:alert(1)", draft: false },
       evidence: { branch: "b", repositoryUrl: "javascript:alert(2)" },
     });
 
-    const body = await runPage(log);
+    const run = await runDetail(log);
 
-    expect(body).not.toContain('href="javascript:');
-    expect(body).not.toContain("javascript:alert(2)");
+    expect(run.pullRequest?.url).toBeNull();
+    expect(run.evidenceBranch?.url).toBeNull();
   });
 });
 
-describe("the escaping of a run", () => {
-  it("should escape the HTML characters of every text that comes from run.json", async () => {
-    const hostile = "<script>alert(1)</script>";
-    const log = aRun(0, {
-      result: "paused",
-      pauseReason: hostile,
-      resetsAt: hostile,
-      agents: {
-        workers: { agent: "claude-code", model: hostile },
-        changes: [
-          { role: "workers", from: { agent: "claude-code", model: hostile }, to: { agent: "opencode", model: hostile }, at: hostile },
-        ],
-      },
-      criteria: { passing: [hostile], blocked: [hostile], human: [hostile], pending: [hostile] },
-      block: { type: "default-branch-conflict", reason: hostile, sha: hostile, files: [hostile] },
-      pullRequest: { number: 1, url: `https://x.test/"><script>alert(1)</script>`, draft: false },
-      evidence: { branch: hostile, repositoryUrl: `https://x.test/"><script>alert(1)</script>` },
-      publicationFailure: { phase: "evidence-push", message: hostile, at: hostile },
-    });
-
-    const body = await runPage(log);
-
-    expect(body).not.toContain("<script>alert(1)");
-    expect(body).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+describe("the refresh of the page of a run", () => {
+  it("should say the run is in progress while it is running, so the client keeps asking", async () => {
+    expect((await runDetail(aRun(0, { result: "running" }))).inProgress).toBe(true);
   });
-});
 
-describe("the links from the list of runs", () => {
-  it("should link each run to a page that the server serves", async () => {
-    const log = aRun(0);
-    const dir = await repoWithRuns([{ log }]);
-    const { runs } = JSON.parse((await handleRequest(request(dir, "/api/runs"))).body) as RunsResponse;
-    const href = runs[0]?.href;
+  it.each(["ready", "draft", "paused"] as const)("should say the run is not in progress when it is %s, so the page can be read without jumps", async (result) => {
+    expect((await runDetail(aRun(0, { result }))).inProgress).toBe(false);
+  });
 
-    expect(href).toBe(`/runs/${log.runId}`);
-    expect((await handleRequest(request(dir, href as string))).status).toBe(200);
+  it("should not keep asking for a finished run because another run is running", async () => {
+    const finished = aRun(0, { result: "ready" });
+    const dir = await repoWithRuns([{ log: finished }, { log: aRun(1, { result: "running" }) }]);
+
+    const response = await handleRequest(request(dir, `/api/runs/${finished.runId}`));
+
+    expect(JSON.parse(response.body).inProgress).toBe(false);
   });
 });
 
 describe("the page of a run", () => {
-  it("should show the issue, the run ID and the result of the run", async () => {
-    const log = aRun(0, { issue: 45, result: "ready" });
+  it("should give the page of the client for the URL of a run, so the link of a notification keeps working", async () => {
+    const log = aRun(0);
+    const dir = await repoWithRuns([{ log }]);
 
-    const body = await runPage(log);
+    const response = await handleRequest(request(dir, `/runs/${log.runId}`));
 
-    expect(body).toContain("#45");
-    expect(body).toContain(log.runId);
-    expect(body).toContain("ready");
+    expect(response.status).toBe(200);
+    expect(response.contentType).toBe("text/html; charset=utf-8");
+    expect(response.body).toContain('<div id="root"></div>');
   });
 
-  it("should answer 404 to a run ID that is valid but has no run.json", async () => {
+  it("should give the page of the client for a run ID with no run.json, whose not found page the client draws from the API", async () => {
     const dir = await repoWithRuns([{ log: aRun(0) }]);
 
     const response = await handleRequest(request(dir, "/runs/45-2026-10-01T00-00-00-000Z"));
 
-    expect(response.status).toBe(404);
+    expect(response.body).toContain('<div id="root"></div>');
   });
 
   it.each(["/runs/..", "/runs/%2e%2e", "/runs/..%2F..%2Fetc", "/runs/1-run-00", "/runs/%zz"])(
@@ -317,18 +236,22 @@ describe("the page of a run", () => {
     expect((await handleRequest(request(dir, "/runs/a/b"))).status).toBe(404);
   });
 
-  it("should answer 404 to a run whose run.json cannot be read", async () => {
-    const log = { ...aRun(0), version: 0 as 1 };
-    const dir = await repoWithRuns([{ log }]);
-
-    expect((await handleRequest(request(dir, `/runs/${log.runId}`))).status).toBe(404);
-  });
-
-  it("should check the Host header and the method before it reads the run", async () => {
+  it("should check the Host header and the method of the page of a run", async () => {
     const log = aRun(0);
     const dir = await repoWithRuns([{ log }]);
 
     expect((await handleRequest(request(dir, `/runs/${log.runId}`, { host: "evil.example" }))).status).toBe(403);
     expect((await handleRequest(request(dir, `/runs/${log.runId}`, { method: "POST" }))).status).toBe(405);
+  });
+});
+
+describe("the links from the list of runs", () => {
+  it("should link each run to a run that the API serves", async () => {
+    const log = aRun(0);
+    const dir = await repoWithRuns([{ log }]);
+    const { runs } = JSON.parse((await handleRequest(request(dir, "/api/runs"))).body) as RunsResponse;
+
+    expect(runs[0]?.href).toBe(`/runs/${log.runId}`);
+    expect((await handleRequest(request(dir, `/api${runs[0]?.href as string}`))).status).toBe(200);
   });
 });

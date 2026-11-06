@@ -29,3 +29,27 @@ export const STATUS_TONE: Record<RunStatus, Tone> = {
   paused: "info",
   running: "info",
 };
+
+const TONES = new Map<string, Tone>([
+  ["ready", "ok"],
+  ["merged", "ok"],
+  ["pasa", "ok"],
+  ["aceptado", "ok"],
+  ["accept", "ok"],
+  ["draft", "warn"],
+  ["interrupted", "warn"],
+  ["abandoned", "warn"],
+  ["paused", "info"],
+  ["running", "info"],
+  ["working", "info"],
+  ["gating", "info"],
+  ["blocked", "bad"],
+  ["falla", "bad"],
+  ["rechazado", "bad"],
+  ["refute", "bad"],
+  ["error", "bad"],
+]);
+
+export function toneOf(value: string): Tone {
+  return TONES.get(value) ?? "neutral";
+}

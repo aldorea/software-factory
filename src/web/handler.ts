@@ -3,11 +3,10 @@ import { extname, join } from "node:path";
 import { readRunEntries, readRunEntry } from "../coordinator/run-history.ts";
 import { runsResponse, type ApiError } from "./api.ts";
 import { readFileInside } from "./file-inside.ts";
-import { page } from "./html.ts";
 import { hostAllowed } from "./host.ts";
 import { logLinks } from "./log-links.ts";
-import { matchRoute, type ApiResource } from "./routes.ts";
-import { runView } from "./run-view.ts";
+import { runDetail } from "./run-detail.ts";
+import { matchRoute, type Route } from "./routes.ts";
 
 export interface WebRequest {
   method: string;
@@ -48,14 +47,14 @@ function apiError(status: number, error: string): WebResponse {
 }
 
 function refusal(status: number, title: string): WebResponse {
-  return html(status, page(title, `<h1>${title}</h1>`));
+  return html(status, `<!doctype html>\n<html lang="es">\n<meta charset="utf-8">\n<title>${title}</title>\n<h1>${title}</h1>\n</html>\n`);
 }
 
-async function runPage(logsDir: string, runId: string, now: Date): Promise<WebResponse | null> {
+async function runResponse(logsDir: string, runId: string, now: Date): Promise<WebResponse> {
   const read = await readRunEntry(logsDir, runId);
-  if (read.kind !== "found") return null;
+  if (read.kind !== "found") return apiError(404, "not found");
   const logUrl = await logLinks(runId, join(logsDir, runId), read.entry.log);
-  return html(200, runView({ entry: read.entry, now, logUrl }));
+  return json(200, runDetail(read.entry, now, logUrl));
 }
 
 async function runLog(logsDir: string, runId: string, segments: string[]): Promise<WebResponse | null> {
@@ -75,9 +74,10 @@ async function clientPage(clientDir: string): Promise<WebResponse> {
   return html(200, await readFile(join(clientDir, "index.html"), "utf8"));
 }
 
-async function api(resource: ApiResource | null, request: WebRequest, logsDir: string): Promise<WebResponse> {
+async function api(route: Extract<Route, { kind: "api" }>, request: WebRequest, logsDir: string): Promise<WebResponse> {
   if (request.method !== "GET") return apiError(405, "method not allowed");
-  if (resource === "runs") return json(200, runsResponse(await readRunEntries(logsDir), request.now));
+  if (route.resource === "run") return runResponse(logsDir, route.runId, request.now);
+  if (route.resource === "runs") return json(200, runsResponse(await readRunEntries(logsDir), request.now));
   return apiError(404, "not found");
 }
 
@@ -87,11 +87,10 @@ export async function handleRequest(request: WebRequest): Promise<WebResponse> {
     return route.kind === "api" ? apiError(403, "forbidden") : refusal(403, "403 Forbidden");
   }
   const logsDir = join(request.repoDir, ".factory", "logs");
-  if (route.kind === "api") return api(route.resource, request, logsDir);
+  if (route.kind === "api") return api(route, request, logsDir);
   if (request.method !== "GET") return refusal(405, "405 Method Not Allowed");
   if (route.kind === "client") return clientPage(request.clientDir);
   if (route.kind === "asset") return (await asset(request.clientDir, route.segments)) ?? refusal(404, "404 Not Found");
-  if (route.kind === "run") return (await runPage(logsDir, route.runId, request.now)) ?? refusal(404, "404 Not Found");
   if (route.kind === "log") return (await runLog(logsDir, route.runId, route.segments)) ?? refusal(404, "404 Not Found");
   return refusal(404, "404 Not Found");
 }

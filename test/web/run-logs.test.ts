@@ -134,11 +134,11 @@ describe("a path that leaves the run folder", () => {
     expect(response.body).not.toContain(SECRET);
   });
 
-  it("should answer 404 for a file of a run whose run.json cannot be read, as the page of that run does", async () => {
+  it("should answer 404 for a file of a run whose run.json cannot be read, as the run of the API does", async () => {
     const { dir, runDir, runId } = await repoWithLog({ "S1-attempt-1.jsonl": SECRET });
     await writeFile(join(runDir, "run.json"), "not json");
 
-    const page = await handleRequest(request(dir, `/runs/${runId}`));
+    const page = await handleRequest(request(dir, `/api/runs/${runId}`));
     const response = await handleRequest(request(dir, `/runs/${runId}/S1-attempt-1.jsonl`));
 
     expect(page.status).toBe(404);

@@ -7,8 +7,8 @@ export type ApiResource = "runs";
 export type Route =
   | { kind: "client" }
   | { kind: "api"; resource: ApiResource | null }
+  | { kind: "api"; resource: "run"; runId: string }
   | { kind: "asset"; segments: string[] }
-  | { kind: "run"; runId: string }
   | { kind: "log"; runId: string; segments: string[] }
   | { kind: "not-found" };
 
@@ -34,14 +34,18 @@ function decodedSegments(parts: readonly (string | null)[]): string[] | null {
 
 function apiRoute(parts: readonly (string | null)[]): Route {
   const [resource, ...rest] = parts;
+  if (resource === "runs" && rest.length === 1) {
+    const runId = rest[0] === null || rest[0] === undefined ? null : parseRunId(rest[0]);
+    return runId === null ? { kind: "api", resource: null } : { kind: "api", resource: "run", runId };
+  }
   const known = API_RESOURCES.find((candidate) => candidate === resource);
   return { kind: "api", resource: known !== undefined && rest.length === 0 ? known : null };
 }
 
 function runRoute(segment: string | null | undefined, rest: readonly (string | null)[]): Route {
+  if (rest.length === 0) return CLIENT;
   const runId = segment === undefined || segment === null ? null : parseRunId(segment);
-  if (runId === null) return rest.length === 0 ? CLIENT : NOT_FOUND;
-  if (rest.length === 0) return { kind: "run", runId };
+  if (runId === null) return NOT_FOUND;
   const segments = decodedSegments(rest);
   return segments === null ? NOT_FOUND : { kind: "log", runId, segments };
 }
