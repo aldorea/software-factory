@@ -1,6 +1,6 @@
 import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { Badge } from "../components/ui/badge.tsx";
 import { Card } from "../components/ui/card.tsx";
 import { cn } from "../cn.ts";
@@ -10,12 +10,15 @@ import {
   type CheckView,
   type CriterionView,
   type GateView,
+  type LiveResponse,
+  type Polled,
   type RunDetail,
   type SubtaskView,
   type TesterView,
   type VerificationView,
 } from "../api.ts";
 import { relativeTime, STATUS_TONE, toneOf } from "../format.ts";
+import { RunAgents } from "./live.tsx";
 import { NotFound } from "./notices.tsx";
 
 const TABS = [
@@ -157,11 +160,40 @@ function Links({ run }: { run: RunDetail }) {
   );
 }
 
+function useRunActivity(runId: string): Polled<LiveResponse> {
+  return usePoll<LiveResponse>(`/api/runs/${encodeURIComponent(runId)}/activity`);
+}
+
+function CurrentStep({ runId }: { runId: string }) {
+  const { data } = useRunActivity(runId);
+  return (
+    <Section title="Paso actual">
+      <p>{data?.runs[0]?.step ?? "Cargando…"}</p>
+      <Link to={{ search: "?tab=activity" }} className="text-primary hover:underline">
+        Ver la actividad
+      </Link>
+    </Section>
+  );
+}
+
+function Activity({ runId }: { runId: string }) {
+  const { data } = useRunActivity(runId);
+  const run = data?.runs[0];
+  if (run === undefined) return <p className="text-sm text-muted-foreground">Cargando…</p>;
+  if (run.agents.length === 0) return <p className="text-sm text-muted-foreground">Ningún agente de este run ha empezado todavía.</p>;
+  return <RunAgents run={run} />;
+}
+
 function Summary({ run }: { run: RunDetail }) {
-  const { publicationFailure, pause, block, agents, criteria } = run;
+  const { agents, criteria } = run;
+  const working = run.status === "running";
+  const publicationFailure = working ? null : run.publicationFailure;
+  const pause = working ? null : run.pause;
+  const block = working ? null : run.block;
   return (
     <div className="space-y-4">
       <Links run={run} />
+      {working && <CurrentStep key={run.modifiedAt} runId={run.runId} />}
       {publicationFailure !== null && (
         <Section title="Sin publicar">
           <p>Fase: {publicationFailure.phase}</p>
@@ -397,15 +429,13 @@ function Verification({ verification }: { verification: VerificationView | null 
   );
 }
 
-function Empty() {
-  return <p className="text-sm text-muted-foreground">Esta pestaña todavía no tiene contenido.</p>;
-}
 
 function TabContent({ tab, run }: { tab: TabId; run: RunDetail }) {
   if (tab === "summary") return <Summary run={run} />;
   if (tab === "verification") return <Verification verification={run.verification} />;
   if (tab === "subtasks") return <Subtasks subtasks={run.subtasks} />;
-  return <Empty />;
+  if (tab === "activity") return <Activity key={run.modifiedAt} runId={run.runId} />;
+  return <p className="text-sm text-muted-foreground">Esta pestaña todavía no tiene contenido.</p>;
 }
 
 function Tabs({ run }: { run: RunDetail }) {

@@ -180,10 +180,10 @@ describe("the tabs of the page of a run", () => {
     expect(screen.getByRole("tab", { selected: true }).textContent).toBe("Verificación y evidencia");
   });
 
-  it("should keep Activity empty until the live activity of the run lands", async () => {
-    await openRun(aRun(0), "activity");
+  it("should say in Activity that no agent of a run with no attempt has started", async () => {
+    await openRun(aRun(0, { subtasks: [] }), "activity");
 
-    expect(panel()).toContain("Esta pestaña todavía no tiene contenido.");
+    expect(await screen.findByText("Ningún agente de este run ha empezado todavía.")).toBeDefined();
   });
 });
 

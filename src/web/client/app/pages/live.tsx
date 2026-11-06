@@ -109,7 +109,7 @@ function EndedRow({ agent }: { agent: LiveAgent }) {
   );
 }
 
-function RunAgents({ run }: { run: LiveRun }) {
+export function RunAgents({ run }: { run: LiveRun }) {
   const active = run.agents.filter((agent) => agent.state !== "ended");
   const ended = run.agents.filter((agent) => agent.state === "ended");
   return (

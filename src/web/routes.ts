@@ -7,7 +7,7 @@ export type ApiResource = "runs" | "live";
 export type Route =
   | { kind: "client" }
   | { kind: "api"; resource: ApiResource | null }
-  | { kind: "api"; resource: "run"; runId: string }
+  | { kind: "api"; resource: "run" | "run-activity"; runId: string }
   | { kind: "asset"; segments: string[] }
   | { kind: "log"; runId: string; segments: string[] }
   | { kind: "not-found" };
@@ -34,9 +34,10 @@ function decodedSegments(parts: readonly (string | null)[]): string[] | null {
 
 function apiRoute(parts: readonly (string | null)[]): Route {
   const [resource, ...rest] = parts;
-  if (resource === "runs" && rest.length === 1) {
+  if (resource === "runs" && (rest.length === 1 || (rest.length === 2 && rest[1] === "activity"))) {
     const runId = rest[0] === null || rest[0] === undefined ? null : parseRunId(rest[0]);
-    return runId === null ? { kind: "api", resource: null } : { kind: "api", resource: "run", runId };
+    if (runId === null) return { kind: "api", resource: null };
+    return { kind: "api", resource: rest.length === 1 ? "run" : "run-activity", runId };
   }
   const known = API_RESOURCES.find((candidate) => candidate === resource);
   return { kind: "api", resource: known !== undefined && rest.length === 0 ? known : null };
