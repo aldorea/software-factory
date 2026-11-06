@@ -1,7 +1,7 @@
 import { open, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { readRunEntries } from "../coordinator/run-history.ts";
-import { attemptsInProgress, liveResponse, runsInProgress, type LiveResponse } from "./live.ts";
+import { attemptsOf, liveResponse, runsInProgress, type LiveResponse } from "./live.ts";
 import { isInside } from "./log-path.ts";
 
 export const RAW_LOG_TAIL_BYTES = 64 * 1024;
@@ -28,7 +28,7 @@ export async function readLive(logsDir: string, now: Date): Promise<LiveResponse
   const { runs } = await readRunEntries(logsDir);
   const tails = new Map<string, string[]>();
   for (const entry of runsInProgress(runs, now)) {
-    for (const attempt of attemptsInProgress(entry)) {
+    for (const attempt of attemptsOf(entry)) {
       tails.set(attempt.logPath, await rawLogTail(join(logsDir, entry.dir), attempt.logPath));
     }
   }

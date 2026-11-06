@@ -18,7 +18,7 @@ import {
   type VerificationView,
 } from "../api.ts";
 import { relativeTime, STATUS_TONE, toneOf } from "../format.ts";
-import { RunAgents } from "./live.tsx";
+import { LiveAgents } from "./live.tsx";
 import { NotFound } from "./notices.tsx";
 
 const TABS = [
@@ -181,7 +181,7 @@ function Activity({ runId }: { runId: string }) {
   const run = data?.runs[0];
   if (run === undefined) return <p className="text-sm text-muted-foreground">Cargando…</p>;
   if (run.agents.length === 0) return <p className="text-sm text-muted-foreground">Ningún agente de este run ha empezado todavía.</p>;
-  return <RunAgents run={run} />;
+  return <LiveAgents runs={[run]} />;
 }
 
 function Summary({ run }: { run: RunDetail }) {

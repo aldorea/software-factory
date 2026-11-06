@@ -108,6 +108,17 @@ describe("the Activity tab of a run", () => {
     4 * POLL_MS,
   );
 
+  it("should open the detail of an ended agent beside its row with its last events, and stay on the Activity tab", async () => {
+    const { dir, runs } = await write([{ issue: 23, result: "ready", attempts: [{ subtask: "health", outcome: "completed", lines: await claudeLines(6) }] }]);
+    await open(dir, `/runs/${runs[0]?.runId}?tab=activity`);
+
+    fireEvent.click(within(await within(panel()).findByRole("list", { name: "Agentes que terminaron" })).getByRole("listitem"));
+
+    const detail = await within(panel()).findByRole("complementary", { name: "Detalle del agente" });
+    expect(within(detail).getByRole("list", { name: "Últimos eventos" }).firstElementChild?.textContent).toContain("All checks pass. Next I'll commit.");
+    expect(screen.getByRole("tab", { selected: true }).textContent).toBe("Actividad");
+  });
+
   it(
     "should ask again when run.json changes, so a run that waits between steps with no agent at work shows its next agent",
     async () => {

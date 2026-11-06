@@ -66,6 +66,18 @@ describe("the activity of a run in the API", () => {
     expect(live.runs).toEqual([]);
   });
 
+  it("should give an ended agent of a run that ended its last events, read from its raw log", async () => {
+    const lines = (await realLog("claude-activity.jsonl")).slice(0, 6);
+    const { dir, runIds } = await repoWith({ issue: 23, result: "ready", attempts: [{ subtask: "health", outcome: "completed", lines }] });
+
+    const activity = await activityOf(dir, runIds[0] as string);
+
+    const agent = activity.runs[0]?.agents[0];
+    expect(agent?.state).toBe("ended");
+    expect(agent?.lastMessage).toBe("All checks pass. Next I'll commit.");
+    expect(agent?.events.at(-1)).toEqual({ at: "2026-10-27T07:27:44.315Z", kind: "message", text: "All checks pass. Next I'll commit." });
+  });
+
   it("should answer a run that does not exist with a JSON 404", async () => {
     const { dir } = await repoWith();
 

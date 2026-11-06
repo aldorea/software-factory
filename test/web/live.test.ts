@@ -154,6 +154,29 @@ describe("the live agents of the API", () => {
     expect(live.atWork).toBe(0);
   });
 
+  it("should give a worker that ended its last events from the end of its raw log, so that its detail shows what it did", async () => {
+    const lines = await realLog("claude-activity.jsonl");
+    const { dir } = await repoWith({
+      attempts: [
+        { subtask: "health", number: 1, outcome: "completed", lines },
+        { subtask: "ui", number: 1, lines: lines.slice(0, 6) },
+      ],
+    });
+
+    const ended = (await liveOf(dir)).runs[0]?.agents[0];
+
+    expect(ended?.state).toBe("ended");
+    expect(ended?.events.map((event) => [event.at, event.kind])).toEqual([
+      ["2026-10-27T07:26:01.312Z", "tool"],
+      ["2026-10-27T07:26:02.877Z", "message"],
+      ["2026-10-27T07:27:44.315Z", "message"],
+      ["2026-10-27T07:27:57.404Z", "message"],
+      ["2026-10-27T07:27:57.404Z", "end"],
+    ]);
+    expect(ended?.events.at(-1)?.text).toBe("attempt ended");
+    expect(ended?.lastMessage).toMatch(/^`GET \/api\/health` is implemented/);
+  });
+
   it("should list only the runs in progress, the most recent first, and leave out a run abandoned as a whole", async () => {
     const lines = (await realLog("claude-activity.jsonl")).slice(0, 6);
     const { dir, runIds } = await repoWith(

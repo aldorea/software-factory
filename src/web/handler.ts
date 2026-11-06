@@ -4,7 +4,7 @@ import { readRunEntries, readRunEntry } from "../coordinator/run-history.ts";
 import { runsResponse, type ApiError } from "./api.ts";
 import { readFileInside } from "./file-inside.ts";
 import { hostAllowed } from "./host.ts";
-import { attemptsInProgress } from "./live.ts";
+import { attemptsOf } from "./live.ts";
 import { rawLogTail, readLive } from "./live-read.ts";
 import { logLinks } from "./log-links.ts";
 import { runActivity } from "./run-activity.ts";
@@ -64,7 +64,7 @@ async function runActivityResponse(logsDir: string, runId: string, now: Date): P
   const read = await readRunEntry(logsDir, runId);
   if (read.kind !== "found") return apiError(404, "not found");
   const tails = new Map<string, string[]>();
-  for (const attempt of attemptsInProgress(read.entry)) {
+  for (const attempt of attemptsOf(read.entry)) {
     tails.set(attempt.logPath, await rawLogTail(join(logsDir, read.entry.dir), attempt.logPath));
   }
   return json(200, runActivity(read.entry, tails, now));
