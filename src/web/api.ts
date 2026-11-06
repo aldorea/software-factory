@@ -3,7 +3,7 @@ import type { RunEntries, RunEntry } from "../coordinator/run-history.ts";
 import { isUnpublished } from "../coordinator/run-log.ts";
 import { summarizeRuns, type RunStats } from "../coordinator/stats.ts";
 import { WORKER_LAYER_FAILURE_KINDS } from "../workers/failures.ts";
-import { safeLink } from "./html.ts";
+import { safeLink } from "./safe-link.ts";
 import { parseRunId } from "./routes.ts";
 
 export type PullRequestCell =

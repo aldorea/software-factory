@@ -38,8 +38,8 @@ describe("matchRoute", () => {
     },
   );
 
-  it("should match the page of a run", () => {
-    expect(matchRoute(`/runs/${RUN_ID}`)).toEqual({ kind: "run", runId: RUN_ID });
+  it("should give the page of a run to the client, so the link of a notification opens it", () => {
+    expect(matchRoute(`/runs/${RUN_ID}`)).toEqual({ kind: "client" });
   });
 
   it("should match the API by its resource", () => {
@@ -47,7 +47,11 @@ describe("matchRoute", () => {
     expect(matchRoute("/api/live")).toEqual({ kind: "api", resource: "live" });
   });
 
-  it.each(["/api", "/api/", "/api/nope", "/api/runs/", "/api/runs/x", "/api/%zz"])("should match %s as an unknown resource of the API", (path) => {
+  it("should match the run of the API by its run ID", () => {
+    expect(matchRoute(`/api/runs/${RUN_ID}`)).toEqual({ kind: "api", resource: "run", runId: RUN_ID });
+  });
+
+  it.each(["/api", "/api/", "/api/nope", "/api/runs/", "/api/runs/x", "/api/runs/..", "/api/runs/1-run-00", `/api/runs/${RUN_ID}/x`, "/api/%zz"])("should match %s as an unknown resource of the API", (path) => {
     expect(matchRoute(path)).toEqual({ kind: "api", resource: null });
   });
 
@@ -108,7 +112,7 @@ describe("matchRoute", () => {
     expect(matchRoute(`/runs/${RUN_ID}/my%20file.log`)).toEqual({ kind: "log", runId: RUN_ID, segments: ["my file.log"] });
   });
 
-  it("should decode the segment before it validates it", () => {
-    expect(matchRoute(`/runs/${RUN_ID.replace(/-/g, "%2D")}`)).toEqual({ kind: "run", runId: RUN_ID });
+  it("should decode the run ID of the API before it validates it", () => {
+    expect(matchRoute(`/api/runs/${RUN_ID.replace(/-/g, "%2D")}`)).toEqual({ kind: "api", resource: "run", runId: RUN_ID });
   });
 });
