@@ -55,7 +55,7 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: stri
   );
 }
 
-function Detail({ card, run }: { card: AgentCard; run: LiveRun }) {
+export function Detail({ card, run }: { card: AgentCard; run: LiveRun }) {
   const quiet = silence(card);
   const ratio = Math.min(1, card.silentMs / card.abandonAfterMs);
   return (

@@ -1,5 +1,5 @@
 // PROTOTYPE (throwaway, branch prototype/web-react-live): three variants of the shell and of the Live page of factory web,
-// plus the run page re-skinned, switchable with ?variant=A|B|C on the real routes (/live, /, /runs/:runId).
+// plus the run page re-skinned, switchable with ?variant=A|B|C|D on the real routes (/live, /, /runs/:runId).
 import { StrictMode, type ComponentType, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useSearchParams } from "react-router";
@@ -10,6 +10,7 @@ import { PrototypeSwitcher } from "./switcher";
 import * as A from "./variants/a-console";
 import * as B from "./variants/b-terminal";
 import * as C from "./variants/c-focus";
+import * as D from "./variants/d-combined";
 import "./styles.css";
 
 interface Variant {
@@ -19,7 +20,7 @@ interface Variant {
   dense?: boolean;
 }
 
-const VARIANTS: Record<string, Variant> = { A, B: { ...B, dense: true }, C };
+const VARIANTS: Record<string, Variant> = { A, B: { ...B, dense: true }, C, D };
 const KEYS = Object.keys(VARIANTS);
 const NAMES = Object.fromEntries(KEYS.map((key) => [key, VARIANTS[key]!.name]));
 

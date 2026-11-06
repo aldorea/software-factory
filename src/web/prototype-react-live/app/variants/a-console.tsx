@@ -55,7 +55,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </aside>
       <main className="min-w-0 flex-1 px-8 py-6 pb-24">
-        <div className="mx-auto max-w-6xl">{children}</div>
+        <div className="mx-auto max-w-[90rem]">{children}</div>
       </main>
     </div>
   );
@@ -74,12 +74,15 @@ function Events({ card }: { card: AgentCard }) {
   );
 }
 
-function AgentTile({ card }: { card: AgentCard }) {
+export function AgentTile({ card, selected = false, onSelect }: { card: AgentCard; selected?: boolean; onSelect?: () => void }) {
   const [open, setOpen] = useState(false);
   const tone = stateTone(card);
   const quiet = silence(card);
   return (
-    <Card className={cn("flex flex-col border-t-4", tone === "bad" ? "border-t-bad" : tone === "warn" ? "border-t-warn" : "border-t-info")}>
+    <Card
+      onClick={onSelect}
+      className={cn("flex flex-col border-t-4", tone === "bad" ? "border-t-bad" : tone === "warn" ? "border-t-warn" : "border-t-info", onSelect && "cursor-pointer transition-shadow hover:shadow-md", selected && "ring-2 ring-ring")}
+    >
       <div className="flex items-start justify-between gap-2 px-4 pt-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-xs font-medium">
@@ -123,9 +126,13 @@ function AgentTile({ card }: { card: AgentCard }) {
             {quiet}
           </span>
         )}
-        <button className="ml-auto cursor-pointer text-primary hover:underline" onClick={() => setOpen((v) => !v)}>
-          {open ? "ocultar" : `últimos ${card.events.length} eventos`}
-        </button>
+        {onSelect ? (
+          <span className="ml-auto text-primary">{selected ? "en detalle" : "ver detalle →"}</span>
+        ) : (
+          <button className="ml-auto cursor-pointer text-primary hover:underline" onClick={() => setOpen((v) => !v)}>
+            {open ? "ocultar" : `últimos ${card.events.length} eventos`}
+          </button>
+        )}
       </div>
       {open && (
         <div className="border-t px-4 py-2">
@@ -136,7 +143,7 @@ function AgentTile({ card }: { card: AgentCard }) {
   );
 }
 
-function FinishedRow({ card }: { card: AgentCard }) {
+export function FinishedRow({ card }: { card: AgentCard }) {
   const ok = card.outcome === "completed";
   return (
     <div className="flex items-center gap-3 px-4 py-2 text-sm">
