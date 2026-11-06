@@ -11,7 +11,7 @@ const servers: Server[] = [];
 
 afterEach(async () => {
   await temp.removeAll();
-  await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
+  await Promise.all(servers.splice(0).map((server) => new Promise((done) => { server.close(done); server.closeAllConnections(); })));
 });
 
 async function repoWithOrigin(origin: string | null): Promise<string> {

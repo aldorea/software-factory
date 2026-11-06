@@ -107,7 +107,7 @@ describe("the web server", () => {
     }
   });
 
-  it("should answer 500 and report the error to the terminal when a request fails for a reason that is not a missing file", async () => {
+  it.skipIf(process.getuid?.() === 0)("should answer 500 and report the error to the terminal when a request fails for a reason that is not a missing file, which only a user that permissions bind can cause", async () => {
     const { dir, runId } = await repoWithLog();
     const locked = join(dir, ".factory", "logs", runId, "locked");
     await mkdir(locked);
