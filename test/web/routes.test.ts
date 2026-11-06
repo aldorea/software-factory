@@ -44,6 +44,7 @@ describe("matchRoute", () => {
 
   it("should match the API by its resource", () => {
     expect(matchRoute("/api/runs")).toEqual({ kind: "api", resource: "runs" });
+    expect(matchRoute("/api/live")).toEqual({ kind: "api", resource: "live" });
   });
 
   it.each(["/api", "/api/", "/api/nope", "/api/runs/", "/api/runs/x", "/api/%zz"])("should match %s as an unknown resource of the API", (path) => {

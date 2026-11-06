@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 export type { PullRequestCell, RunRow, RunsResponse } from "../../api.ts";
 export type { RunStats } from "../../../coordinator/stats.ts";
 export type { RunStatus } from "../../../coordinator/abandoned.ts";
+export type { AgentState, LiveAgent, LiveEvent, LiveResponse, LiveRole, LiveRun } from "../../live.ts";
 
 export const POLL_MS = 2000;
 

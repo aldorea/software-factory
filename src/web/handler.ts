@@ -5,6 +5,7 @@ import { runsResponse, type ApiError } from "./api.ts";
 import { readFileInside } from "./file-inside.ts";
 import { page } from "./html.ts";
 import { hostAllowed } from "./host.ts";
+import { readLive } from "./live-read.ts";
 import { logLinks } from "./log-links.ts";
 import { matchRoute, type ApiResource } from "./routes.ts";
 import { runView } from "./run-view.ts";
@@ -78,6 +79,7 @@ async function clientPage(clientDir: string): Promise<WebResponse> {
 async function api(resource: ApiResource | null, request: WebRequest, logsDir: string): Promise<WebResponse> {
   if (request.method !== "GET") return apiError(405, "method not allowed");
   if (resource === "runs") return json(200, runsResponse(await readRunEntries(logsDir), request.now));
+  if (resource === "live") return json(200, await readLive(logsDir, request.now));
   return apiError(404, "not found");
 }
 
