@@ -23,7 +23,7 @@ async function targetRepo(): Promise<string> {
   await git(dir, "add", ".");
   await git(dir, "commit", "-q", "-m", "init");
   const remoteDir = await temp.make("refine-remote-");
-  await execOk("git", ["init", "-q", "--bare", remoteDir]);
+  await execOk("git", ["init", "-q", "--bare", "-b", "main", remoteDir]);
   await git(dir, "remote", "add", "origin", remoteDir);
   await git(dir, "push", "-q", "origin", "main");
   await git(dir, "remote", "set-head", "origin", "--auto");

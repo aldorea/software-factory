@@ -2,7 +2,7 @@ import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promis
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { deleteCredential, loadCredentials, readSavedCredentials, saveCredential } from "../../src/config/credentials-store.ts";
-import { exec } from "../../src/workers/sh.ts";
+import { exec, execOk } from "../../src/workers/sh.ts";
 import { tempDirs } from "../temp-dirs.ts";
 
 const temp = tempDirs();
@@ -77,29 +77,42 @@ describe("saveCredential", () => {
   });
 });
 
+async function lockFolder(dir: string): Promise<() => Promise<void>> {
+  if (process.getuid?.() === 0) {
+    await execOk("chattr", ["+i", dir]);
+    return async () => {
+      await execOk("chattr", ["-i", dir]);
+    };
+  }
+  await chmod(dir, 0o500);
+  return async () => {
+    await chmod(dir, 0o700);
+  };
+}
+
 describe("a write that fails", () => {
   async function failingWrite(change: (path: string) => Promise<unknown>): Promise<{ left: string[]; text: string; rejected: boolean }> {
     const path = await credentialsPath();
     await seed(path, "OPENCODE_API_KEY=a\n");
-    await chmod(dirname(path), 0o500);
+    const unlock = await lockFolder(dirname(path));
     let rejected = false;
     try {
       await change(path);
     } catch {
       rejected = true;
     } finally {
-      await chmod(dirname(path), 0o700);
+      await unlock();
     }
     return { left: await readdir(dirname(path)), text: await readFile(path, "utf8"), rejected };
   }
 
-  it("should leave no temporary file and the old file as it was when saving in a read-only folder fails", async () => {
+  it("should leave no temporary file and the old file as it was when saving in a folder it cannot write fails, read-only or, for root, immutable", async () => {
     const result = await failingWrite((path) => saveCredential(path, "opencode", "b"));
 
     expect(result).toEqual({ left: ["credentials"], text: "OPENCODE_API_KEY=a\n", rejected: true });
   });
 
-  it("should leave no temporary file and the old file as it was when deleting in a read-only folder fails", async () => {
+  it("should leave no temporary file and the old file as it was when deleting in a folder it cannot write fails, read-only or, for root, immutable", async () => {
     const result = await failingWrite((path) => deleteCredential(path, "opencode"));
 
     expect(result).toEqual({ left: ["credentials"], text: "OPENCODE_API_KEY=a\n", rejected: true });

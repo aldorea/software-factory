@@ -93,7 +93,7 @@ async function mainRepo(): Promise<string> {
   await git(dir, "add", ".");
   await git(dir, "commit", "-q", "-m", "init");
   const remoteDir = await temp.make("cli-refine-remote-");
-  await execOk("git", ["init", "-q", "--bare", remoteDir]);
+  await execOk("git", ["init", "-q", "--bare", "-b", "main", remoteDir]);
   await git(dir, "remote", "add", "origin", remoteDir);
   await git(dir, "push", "-q", "origin", "main");
   await git(dir, "remote", "set-head", "origin", "--auto");
@@ -141,7 +141,7 @@ const valid = () => readFile(join(import.meta.dirname, "..", "spec", "fixtures",
 async function runnableRepo(config: string = CONFIG): Promise<string> {
   const repoDir = await targetRepo(ONE_SUBTASK_SPEC, config);
   const remoteDir = await temp.make("cli-remote-");
-  await execOk("git", ["init", "-q", "--bare", remoteDir]);
+  await execOk("git", ["init", "-q", "--bare", "-b", "main", remoteDir]);
   await git(repoDir, "remote", "add", "origin", remoteDir);
   await git(repoDir, "branch", "main");
   await git(repoDir, "push", "-q", "origin", "main");
@@ -844,7 +844,7 @@ describe("factory CLI", () => {
   it("should run an approved spec and print the link of the pull request", async () => {
     const repoDir = await targetRepo(ONE_SUBTASK_SPEC);
     const remoteDir = await temp.make("cli-remote-");
-    await execOk("git", ["init", "-q", "--bare", remoteDir]);
+    await execOk("git", ["init", "-q", "--bare", "-b", "main", remoteDir]);
     await git(repoDir, "remote", "add", "origin", remoteDir);
     await git(repoDir, "branch", "main");
     await git(repoDir, "push", "-q", "origin", "main");
