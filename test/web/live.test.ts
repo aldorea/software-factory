@@ -74,7 +74,7 @@ describe("the live agents of the API", () => {
         abandonAfterMs: 10 * MINUTE,
         state: "working",
         outcome: null,
-        tokens: null,
+        tokens: { input: 13_103, output: 98 },
       },
     ]);
   });
@@ -137,6 +137,24 @@ describe("the live agents of the API", () => {
       ["2026-10-28T09:11:10.818Z", "message"],
       ["2026-10-28T09:11:10.872Z", "tool"],
     ]);
+  });
+
+  it("should count the tokens of a Claude Code attempt in progress from the usage of its assistant lines, each message once though it repeats for each content block", async () => {
+    const lines = await realLog("claude-message-blocks.jsonl");
+    const { dir } = await repoWith({ attempts: [{ subtask: "health", agent: "claude-code", lines }] });
+
+    const agent = (await liveOf(dir)).runs[0]?.agents[0];
+
+    expect(agent?.tokens).toEqual({ input: 9_890, output: 64 });
+  });
+
+  it("should give no tokens for a Claude Code attempt in progress whose read end holds no usage yet", async () => {
+    const lines = await realLog("claude-init-no-tools.jsonl");
+    const { dir } = await repoWith({ attempts: [{ subtask: "health", agent: "claude-code", lines }] });
+
+    const agent = (await liveOf(dir)).runs[0]?.agents[0];
+
+    expect(agent?.tokens).toBeNull();
   });
 
   it("should fold a worker that ended into its outcome, its time and its tokens, and stop asking when no agent works", async () => {
@@ -209,6 +227,170 @@ describe("the live agents of the API", () => {
 
     expect(agent?.events).toEqual([]);
     expect(agent?.lastMessage).toBeNull();
+  });
+});
+
+describe("the independent verifier in Live", () => {
+  it("should give a question in progress as a card with its criterion, and its last message in the line of the last tool, since the verifier uses no tool", async () => {
+    const lines = await realLog("opencode-run.jsonl");
+    const { dir, runIds } = await repoWith({
+      attempts: [{ subtask: "health", outcome: "completed" }],
+      verifierQuestions: [{ subtask: "health", criterion: "C2", agent: "opencode", model: "opencode-go/glm-5.1", lines, startedAgoMs: 2 * MINUTE, silentMs: 5_000 }],
+    });
+    const runId = runIds[0] as string;
+
+    const live = await liveOf(dir);
+    const verifier = live.runs[0]?.agents.find((agent) => agent.role === "independent-verifier");
+
+    expect(verifier).toEqual({
+      id: `${runId}:independent-verifier:health:C2`,
+      runId,
+      issue: 23,
+      role: "independent-verifier",
+      agent: "opencode",
+      model: "opencode-go/glm-5.1",
+      subtask: "health",
+      criterion: "C2",
+      attempt: 1,
+      step: "gating",
+      lastTool: "OK",
+      lastMessage: "OK",
+      events: [{ at: "2026-10-25T08:58:49.286Z", kind: "message", text: "OK" }],
+      startedAt: new Date(NOW.getTime() - 2 * MINUTE).toISOString(),
+      elapsedMs: 2 * MINUTE,
+      silentMs: 5_000,
+      abandonAfterMs: 10 * MINUTE,
+      state: "working",
+      outcome: null,
+      tokens: null,
+    });
+    expect(live.atWork).toBe(1);
+    expect(live.inProgress).toBe(true);
+  });
+
+  it("should call a question silent after a minute with no change of its raw log, and abandoned past the threshold of its run", async () => {
+    const lines = await realLog("opencode-run.jsonl");
+    const { dir } = await repoWith({
+      attemptIdleTimeoutMs: 3 * MINUTE,
+      verifierQuestions: [
+        { subtask: "health", criterion: "C1", lines, silentMs: 2 * MINUTE },
+        { subtask: "ui", criterion: "C4", lines, silentMs: 3 * MINUTE + 1 },
+      ],
+      attempts: [{ subtask: "core", lines: await realLog("claude-activity.jsonl"), silentMs: 0 }],
+    });
+
+    const agents = (await liveOf(dir)).runs[0]?.agents.filter((agent) => agent.role === "independent-verifier") ?? [];
+
+    expect(agents.map((agent) => [agent.criterion, agent.state, agent.silentMs])).toEqual([
+      ["C1", "silent", 2 * MINUTE],
+      ["C4", "abandoned", 3 * MINUTE + 1],
+    ]);
+  });
+
+  it("should fold a question that ended into a row with its verdict and its time", async () => {
+    const { dir } = await repoWith({
+      attempts: [{ subtask: "health", outcome: "completed" }],
+      endedVerifiers: [{ subtask: "health", criterion: "C2", verdict: "refute", startedAgoMs: 4 * MINUTE, durationMs: 90_000 }],
+    });
+
+    const live = await liveOf(dir);
+    const verifier = live.runs[0]?.agents.find((agent) => agent.role === "independent-verifier");
+
+    expect(verifier).toMatchObject({ criterion: "C2", state: "ended", outcome: "refute", elapsedMs: 90_000, silentMs: 0, events: [] });
+    expect(live.inProgress).toBe(false);
+  });
+});
+
+describe("the acceptance tester in Live", () => {
+  it("should give the acceptance tester in progress as a card with its phase as its step and its activity from its raw log", async () => {
+    const lines = await realLog("opencode-tester.jsonl");
+    const { dir, runIds } = await repoWith({
+      attempts: [{ subtask: "health", outcome: "completed" }],
+      tester: { agent: "opencode", model: "opencode-go/glm-5.1", phase: "testing", lines, startedAgoMs: 3 * MINUTE, silentMs: 10_000 },
+    });
+    const runId = runIds[0] as string;
+
+    const live = await liveOf(dir);
+    const tester = live.runs[0]?.agents.find((agent) => agent.role === "acceptance-tester");
+
+    expect(tester).toMatchObject({
+      id: `${runId}:acceptance-tester:def456`,
+      role: "acceptance-tester",
+      agent: "opencode",
+      model: "opencode-go/glm-5.1",
+      subtask: null,
+      criterion: null,
+      step: "testing",
+      startedAt: new Date(NOW.getTime() - 3 * MINUTE).toISOString(),
+      elapsedMs: 3 * MINUTE,
+      silentMs: 10_000,
+      state: "working",
+      outcome: null,
+      tokens: null,
+    });
+    expect(tester?.events.map((event) => [event.at, event.kind])).toEqual([
+      ["2026-11-02T11:02:22.029Z", "tool"],
+      ["2026-11-02T11:02:22.032Z", "tool"],
+      ["2026-11-02T11:02:26.085Z", "tool"],
+      ["2026-11-02T11:02:26.087Z", "tool"],
+    ]);
+    expect(tester?.lastTool).toBe("shell cd /Users/sito/Documents/askwell/.factory/worktrees/28-2026-11-02T10-57-18-161Z-verification-tester…");
+    expect(live.runs[0]?.step).toBe("Acceptance tester · testing");
+    expect(live.atWork).toBe(1);
+  });
+
+  it("should show the acceptance tester in the install phase before its agent writes a raw log, silent from the last change of run.json", async () => {
+    const { dir } = await repoWith({
+      runJsonSilentMs: 90_000,
+      attempts: [{ subtask: "health", outcome: "completed" }],
+      tester: { phase: "install", startedAgoMs: 2 * MINUTE },
+    });
+
+    const tester = (await liveOf(dir)).runs[0]?.agents.find((agent) => agent.role === "acceptance-tester");
+
+    expect(tester).toMatchObject({ step: "install", state: "silent", silentMs: 90_000, events: [], lastTool: null, lastMessage: null, tokens: null });
+  });
+
+  it("should call the acceptance tester abandoned when its raw log has not changed for longer than the threshold of its run", async () => {
+    const lines = await realLog("opencode-tester.jsonl");
+    const { dir } = await repoWith({
+      attemptIdleTimeoutMs: 3 * MINUTE,
+      attempts: [{ subtask: "health", outcome: "completed" }],
+      tester: { phase: "testing", lines, startedAgoMs: 5 * MINUTE, silentMs: 3 * MINUTE + 1 },
+    });
+
+    const live = await liveOf(dir);
+
+    expect(live.runs[0]?.agents.find((agent) => agent.role === "acceptance-tester")?.state).toBe("abandoned");
+    expect(live.atWork).toBe(0);
+  });
+
+  it("should fold the acceptance tester that ended into a row with its verdict, its time and its tokens", async () => {
+    const { dir } = await repoWith(
+      {
+        issue: 21,
+        startedAgoMs: 60 * MINUTE,
+        attempts: [{ subtask: "health", outcome: "completed" }],
+        tester: { verdicts: [{ id: "C1", passed: true }, { id: "C2", passed: false }], durationMs: 4 * MINUTE, usage: { inputTokens: 300, cacheCreationInputTokens: 200, outputTokens: 70 } },
+      },
+      { issue: 22, startedAgoMs: 50 * MINUTE, attempts: [{ subtask: "ui", outcome: "completed" }], tester: { verdicts: [{ id: "C1", passed: true }] } },
+      { issue: 24, startedAgoMs: 40 * MINUTE, attempts: [{ subtask: "ui", outcome: "completed" }], tester: { error: "The app did not start for the acceptance tester." } },
+    );
+
+    const live = await liveOf(dir);
+    const testers = live.runs.map((run) => [run.issue, run.agents.find((agent) => agent.role === "acceptance-tester")]);
+
+    expect(testers.map(([issue, tester]) => [issue, typeof tester === "object" ? tester?.outcome : null])).toEqual([
+      [24, "error"],
+      [22, "passed"],
+      [21, "failed"],
+    ]);
+    expect(live.runs.find((run) => run.issue === 21)?.agents.find((agent) => agent.role === "acceptance-tester")).toMatchObject({
+      state: "ended",
+      step: "testing",
+      elapsedMs: 4 * MINUTE,
+      tokens: { input: 500, output: 70 },
+    });
   });
 });
 

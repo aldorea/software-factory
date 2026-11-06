@@ -1,7 +1,7 @@
 import { mkdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AttemptRecord, RunLog, SubtaskRecord } from "../../src/coordinator/run-log.ts";
+import type { AttemptRecord, RunLog, SubtaskRecord, TesterPhase, TesterVerdictRecord, VerificationRecord, VerifierRecord } from "../../src/coordinator/run-log.ts";
 import { writeRunLog } from "../../src/coordinator/run-log.ts";
 import { emptyUsage } from "../../src/workers/agent-adapter.ts";
 import type { AgentKind, TokenUsage } from "../../src/workers/types.ts";
@@ -31,6 +31,35 @@ export interface AttemptFixture {
   usage?: Partial<TokenUsage>;
 }
 
+export interface RoleFixture {
+  agent?: AgentKind;
+  model?: string;
+  lines?: string[];
+  startedAgoMs?: number;
+  silentMs?: number;
+}
+
+export interface VerifierQuestionFixture extends RoleFixture {
+  subtask: string;
+  criterion: string;
+}
+
+export interface EndedVerifierFixture {
+  subtask: string;
+  criterion: string;
+  verdict: VerifierRecord["verdict"];
+  startedAgoMs: number;
+  durationMs: number;
+}
+
+export interface TesterFixture extends RoleFixture {
+  phase?: TesterPhase;
+  verdicts?: Array<Pick<TesterVerdictRecord, "id" | "passed">>;
+  error?: string;
+  durationMs?: number;
+  usage?: Partial<TokenUsage>;
+}
+
 export interface LiveRunFixture {
   issue?: number;
   integrationBranch?: string;
@@ -39,6 +68,9 @@ export interface LiveRunFixture {
   startedAgoMs?: number;
   result?: RunLog["result"];
   attempts: AttemptFixture[];
+  verifierQuestions?: VerifierQuestionFixture[];
+  endedVerifiers?: EndedVerifierFixture[];
+  tester?: TesterFixture;
 }
 
 export interface LiveRun {
@@ -78,6 +110,30 @@ export async function writeLiveRun(logsDir: string, fixture: LiveRunFixture): Pr
     subtask.attempts.push(attemptRecordOf(attempt, logPath));
     subtasks.set(attempt.subtask, subtask);
   }
+  const subtaskOf = (id: string): SubtaskRecord => {
+    const subtask = subtasks.get(id) ?? subtaskRecord(id, { state: "gating" });
+    subtasks.set(id, subtask);
+    return subtask;
+  };
+  for (const question of fixture.verifierQuestions ?? []) {
+    const logPath = join(runDir, `${question.subtask}-attempt-1-verifier-${question.criterion}.jsonl`);
+    await writeFile(logPath, (question.lines ?? []).map((line) => `${line}\n`).join(""));
+    times.push([logPath, ago(question.silentMs ?? 0)]);
+    Object.assign(subtaskOf(question.subtask), { state: "gating" }).verifierQuestion = { id: question.criterion, logPath, startedAt: ago(question.startedAgoMs ?? 60_000).toISOString() };
+  }
+  for (const ended of fixture.endedVerifiers ?? []) {
+    const subtask = subtaskOf(ended.subtask);
+    const startedAt = ago(ended.startedAgoMs);
+    const record: VerifierRecord = {
+      id: ended.criterion,
+      verdict: ended.verdict,
+      logPath: join(runDir, `${ended.subtask}-attempt-1-verifier-${ended.criterion}.jsonl`),
+      startedAt: startedAt.toISOString(),
+      endedAt: new Date(startedAt.getTime() + ended.durationMs).toISOString(),
+    };
+    subtask.gate = { sha: "abc123", accepted: true, reasons: [], checks: [], criteria: [], verifier: [...(subtask.gate?.verifier ?? []), record] };
+  }
+  const tester = fixture.tester === undefined ? undefined : await testerVerification(runDir, fixture.tester, times);
   const { endedAt: _endedAt, ...base } = runRecord(0, [...subtasks.values()], {
     issue,
     runId,
@@ -88,6 +144,14 @@ export async function writeLiveRun(logsDir: string, fixture: LiveRunFixture): Pr
     ...base,
     startedAt: startedAt.toISOString(),
     ...(fixture.attemptIdleTimeoutMs !== undefined ? { attemptIdleTimeoutMs: fixture.attemptIdleTimeoutMs } : {}),
+    ...(tester === undefined ? {} : { verification: tester.verification, testerUsage: tester.usage }),
+    agents: {
+      ...base.agents,
+      ...(tester === undefined ? {} : { tester: tester.agent }),
+      ...(fixture.verifierQuestions === undefined && fixture.endedVerifiers === undefined
+        ? {}
+        : { verifier: { agent: fixture.verifierQuestions?.[0]?.agent ?? "opencode", model: fixture.verifierQuestions?.[0]?.model ?? "opencode-go/glm-5.1" } }),
+    },
   };
   const runJson = join(runDir, "run.json");
   await writeRunLog(runJson, log);
@@ -95,4 +159,34 @@ export async function writeLiveRun(logsDir: string, fixture: LiveRunFixture): Pr
   await utimes(runJson, runJsonAt, runJsonAt);
   for (const [path, at] of times) await utimes(path, at, at);
   return { runId, runDir, log };
+}
+
+async function testerVerification(
+  runDir: string,
+  fixture: TesterFixture,
+  times: Array<[string, Date]>,
+): Promise<{ verification: VerificationRecord; agent: { agent: AgentKind; model: string }; usage: Partial<Record<AgentKind, TokenUsage>> }> {
+  const agent = { agent: fixture.agent ?? "opencode", model: fixture.model ?? "opencode-go/glm-5.1" };
+  const startedAt = ago(fixture.startedAgoMs ?? 3 * 60_000);
+  const logPath = join(runDir, "verification-tester-attempt-1.jsonl");
+  const usage = { [agent.agent]: { ...emptyUsage(), ...fixture.usage } };
+  const base = { sha: "def456", passed: true, checks: [], criteria: [], humanCriteria: [] };
+  if (fixture.verdicts !== undefined || fixture.error !== undefined) {
+    const tester = {
+      agent: { agent: agent.agent, model: agent.model },
+      verdicts: (fixture.verdicts ?? []).map((verdict) => ({ ...verdict, observation: "seen", evidence: [] })),
+      ...(fixture.error === undefined ? {} : { error: fixture.error }),
+      logPath,
+      startedAt: startedAt.toISOString(),
+      endedAt: new Date(startedAt.getTime() + (fixture.durationMs ?? 60_000)).toISOString(),
+    };
+    return { verification: { ...base, tester }, agent, usage };
+  }
+  const verification: VerificationRecord = { ...base, testerPhase: fixture.phase ?? "testing", testerStartedAt: startedAt.toISOString() };
+  if (fixture.lines !== undefined) {
+    await writeFile(logPath, fixture.lines.map((line) => `${line}\n`).join(""));
+    times.push([logPath, ago(fixture.silentMs ?? 0)]);
+    verification.testerLogPath = logPath;
+  }
+  return { verification, agent, usage };
 }

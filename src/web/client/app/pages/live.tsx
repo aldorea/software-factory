@@ -28,9 +28,16 @@ const EDGE: Record<AgentState, string> = {
 };
 
 function name(agent: LiveAgent): string {
-  const target = agent.subtask ?? agent.criterion;
+  const target = agent.criterion ?? agent.subtask;
   return `${ROLE_LABEL[agent.role]}${target === null ? "" : ` ${target}`} · attempt ${agent.attempt}`;
 }
+
+function heading(agent: LiveAgent): string {
+  if (agent.criterion !== null) return `Criterion ${agent.criterion}${agent.subtask === null ? "" : ` · Subtask ${agent.subtask}`}`;
+  return agent.subtask === null ? agent.step : `Subtask ${agent.subtask} · ${agent.step}`;
+}
+
+const GOOD_OUTCOMES = new Set(["completed", "accept", "passed"]);
 
 function tokens(agent: LiveAgent): string {
   return agent.tokens === null ? "—" : `${agent.tokens.input} in · ${agent.tokens.output} out`;
@@ -54,7 +61,7 @@ function AgentCard({ agent }: { agent: LiveAgent }) {
             {agent.agent} · {agent.model}
           </div>
           <div className="mt-1.5 truncate text-sm font-semibold">
-            {agent.subtask === null ? agent.step : `Subtask ${agent.subtask} · ${agent.step}`}
+            {heading(agent)}
           </div>
         </div>
         <Badge tone={STATE_TONE[agent.state]}>{agent.state}</Badge>
@@ -101,7 +108,7 @@ function EndedRow({ agent }: { agent: LiveAgent }) {
       <span className="font-mono text-[11px] text-muted-foreground">
         {agent.agent} · {agent.model}
       </span>
-      <Badge tone={agent.outcome === "completed" ? "ok" : "bad"}>{agent.outcome}</Badge>
+      <Badge tone={agent.outcome !== null && GOOD_OUTCOMES.has(agent.outcome) ? "ok" : "bad"}>{agent.outcome}</Badge>
       <span className="ml-auto text-xs text-muted-foreground">
         {duration(agent.elapsedMs)} · {tokens(agent)}
       </span>

@@ -72,6 +72,8 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
     let tester: TesterRecord | undefined;
     if (passed) {
       if (criteria.length === 0) break;
+      const testerStartedAt = context.ports.clock.now().toISOString();
+      verification.testerStartedAt = testerStartedAt;
       const tested = await acceptanceTest(context, {
         label,
         sha,
@@ -80,15 +82,21 @@ export async function verifyIntegration(context: RunContext, subtasks: Subtask[]
           verification.testerPhase = phase;
           await context.save();
         },
+        onAgentStart: async (logPath) => {
+          verification.testerLogPath = logPath;
+          await context.save();
+        },
       });
       delete verification.testerPhase;
+      delete verification.testerStartedAt;
+      delete verification.testerLogPath;
       if (tested.kind === "plan-limit") {
         verification.passed = false;
         pauseRun(context, tested);
         await context.save();
         break;
       }
-      tester = tested.record;
+      tester = { ...tested.record, startedAt: testerStartedAt, endedAt: context.ports.clock.now().toISOString() };
       verification.tester = tester;
       verification.passed = tester.error === undefined && tester.verdicts.every((verdict) => verdict.passed);
       await context.save();

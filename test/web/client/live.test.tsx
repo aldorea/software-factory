@@ -87,8 +87,34 @@ describe("the Live page", () => {
     expect(card).toContain("All checks pass. Next I'll commit.");
     expect(card).toContain("Tiempo 5 min");
     expect(card).toContain("Attempt 2");
-    expect(card).toContain("Tokens —");
+    expect(card).toContain("Tokens 13103 in · 98 out");
     expect(card).toContain("Sin actividad 4 min · abandonado en 6 min");
+  });
+
+  it("should show a card for a question of the independent verifier with its criterion and its last message in the line of the tool, and one for the acceptance tester with its phase", async () => {
+    await open([
+      {
+        attempts: [{ subtask: "health", outcome: "completed" }],
+        verifierQuestions: [{ subtask: "health", criterion: "C2", lines: await realLog("opencode-run.jsonl") }],
+        tester: { phase: "install" },
+      },
+    ]);
+
+    const verifier = await screen.findByRole("article", { name: "Independent verifier C2 · attempt 1" });
+    const tester = screen.getByRole("article", { name: "Acceptance tester · attempt 1" });
+
+    expect(text(verifier)).toContain("Criterion C2 · Subtask health");
+    expect(within(verifier).getAllByText("OK")).toHaveLength(2);
+    expect(text(tester)).toContain("install");
+    expect(text(tester)).toContain("Tokens —");
+  });
+
+  it("should fold the acceptance tester that ended into a row with its verdict", async () => {
+    await open([{ attempts: [{ subtask: "health", outcome: "completed" }], tester: { verdicts: [{ id: "C1", passed: false }], durationMs: 2 * MINUTE } }]);
+
+    const rows = within(await screen.findByRole("list", { name: "Agentes que terminaron" })).getAllByRole("listitem").map(text);
+
+    expect(rows).toContainEqual(expect.stringMatching(/^Acceptance tester · attempt 1opencode · opencode-go\/glm-5\.1failed2 min/));
   });
 
   it("should draw the text of a raw log as text, never as HTML", async () => {

@@ -146,6 +146,26 @@ export function claudeActivity(state: ClaudeStreamState, line: string): Activity
   });
 }
 
+export function claudeMessagesUsage(lines: readonly string[]): TokenUsage | null {
+  const byMessage = new Map<string, Record<string, unknown>>();
+  for (const line of lines) {
+    const event = parseJson(line);
+    if (event?.type !== "assistant" || !isRecord(event.message) || !isRecord(event.message.usage)) continue;
+    const id = typeof event.message.id === "string" ? event.message.id : `line-${byMessage.size}`;
+    byMessage.set(id, event.message.usage);
+  }
+  if (byMessage.size === 0) return null;
+  return [...byMessage.values()].reduce<TokenUsage>(
+    (total, usage) => ({
+      inputTokens: total.inputTokens + num(usage.input_tokens),
+      cacheCreationInputTokens: total.cacheCreationInputTokens + num(usage.cache_creation_input_tokens),
+      cacheReadInputTokens: total.cacheReadInputTokens + num(usage.cache_read_input_tokens),
+      outputTokens: total.outputTokens + num(usage.output_tokens),
+    }),
+    emptyUsage(),
+  );
+}
+
 const PLAN_LIMIT_TEXT = /usage limit|limit reached|rate limit/i;
 
 export function claudeOutcome(state: ClaudeStreamState, supervised: SupervisedProcess): AttemptOutcome {

@@ -1,7 +1,10 @@
-import { attemptAbandoned, idleTimeoutOf, runAbandoned } from "../coordinator/abandoned.ts";
+import { idleTimeoutOf, runAbandoned } from "../coordinator/abandoned.ts";
 import type { RunEntry } from "../coordinator/run-history.ts";
-import type { AttemptRecord, RunLog, SubtaskRecord } from "../coordinator/run-log.ts";
+import type { RoleChoice } from "../config/config.ts";
+import type { AttemptRecord, RunLog, SubtaskRecord, TesterRecord, VerifierRecord } from "../coordinator/run-log.ts";
+import { emptyUsage } from "../workers/agent-adapter.ts";
 import { adapterFor } from "../workers/agents.ts";
+import { claudeMessagesUsage } from "../workers/claude-code.ts";
 import type { ActivityEvent, AgentKind, TokenUsage } from "../workers/types.ts";
 
 export type AgentState = "working" | "silent" | "abandoned" | "ended";
@@ -97,42 +100,147 @@ function counted(usage: TokenUsage): { input: number; output: number } {
   return { input: usage.inputTokens + usage.cacheCreationInputTokens, output: usage.outputTokens };
 }
 
-function workerState(attempt: AttemptRecord, entry: RunEntry, silentMs: number, now: Date): AgentState {
-  if (attempt.outcome !== "running") return "ended";
-  if (attemptAbandoned(attempt, entry, now)) return "abandoned";
+function runningTokens(kind: AgentKind, lines: readonly string[]): LiveAgent["tokens"] {
+  if (kind !== "claude-code") return null;
+  const usage = claudeMessagesUsage(lines);
+  return usage === null ? null : counted(usage);
+}
+
+interface AgentSource {
+  id: string;
+  role: LiveRole;
+  choice: RoleChoice;
+  subtask: string | null;
+  criterion: string | null;
+  attempt: number;
+  step: string;
+  logPath: string | undefined;
+  startedAt: string;
+  quietSince: Date;
+  ended: { endedAt: string | undefined; outcome: string; tokens: LiveAgent["tokens"] } | null;
+}
+
+function agentState(source: AgentSource, silentMs: number, log: RunLog): AgentState {
+  if (source.ended !== null) return "ended";
+  if (silentMs > idleTimeoutOf(log)) return "abandoned";
   return silentMs > SILENT_AFTER_MS ? "silent" : "working";
 }
 
-function worker(entry: RunEntry, subtask: SubtaskRecord, attempt: AttemptRecord, tails: RawLogTails, now: Date): LiveAgent {
+function liveAgent(entry: RunEntry, source: AgentSource, tails: RawLogTails, now: Date): LiveAgent {
   const { log } = entry;
-  const running = attempt.outcome === "running";
-  const startedAt = Date.parse(attempt.startedAt);
-  const lastChange = entry.logTimes.get(attempt.logPath) ?? new Date(startedAt);
+  const running = source.ended === null;
+  const startedAt = Date.parse(source.startedAt);
+  const lastChange = (source.logPath === undefined ? undefined : entry.logTimes.get(source.logPath)) ?? source.quietSince;
   const silentMs = running ? Math.max(0, now.getTime() - lastChange.getTime()) : 0;
-  const endedAt = running || attempt.endedAt === undefined ? now.getTime() : Date.parse(attempt.endedAt);
-  const events = running ? rawLogEvents(attempt.agent.agent, tails.get(attempt.logPath) ?? [], lastChange) : [];
+  const endedAt = source.ended?.endedAt === undefined ? now.getTime() : Date.parse(source.ended.endedAt);
+  const tail = running && source.logPath !== undefined ? (tails.get(source.logPath) ?? []) : [];
+  const kind = source.choice.agent;
+  const events = rawLogEvents(kind, tail, lastChange);
+  const lastMessage = lastOf(events, "message");
   return {
-    id: `${log.runId}:worker:${subtask.id}:${attempt.number}`,
+    id: source.id,
     runId: log.runId,
     issue: log.issue,
+    role: source.role,
+    agent: kind,
+    model: source.choice.model,
+    subtask: source.subtask,
+    criterion: source.criterion,
+    attempt: source.attempt,
+    step: source.step,
+    lastTool: source.role === "independent-verifier" ? lastMessage : lastOf(events, "tool"),
+    lastMessage,
+    events,
+    startedAt: source.startedAt,
+    elapsedMs: Math.max(0, endedAt - startedAt),
+    silentMs,
+    abandonAfterMs: idleTimeoutOf(log),
+    state: agentState(source, silentMs, log),
+    outcome: source.ended?.outcome ?? null,
+    tokens: running ? runningTokens(kind, tail) : (source.ended?.tokens ?? null),
+  };
+}
+
+function workerSource(log: RunLog, subtask: SubtaskRecord, attempt: AttemptRecord): AgentSource {
+  return {
+    id: `${log.runId}:worker:${subtask.id}:${attempt.number}`,
     role: "worker",
-    agent: attempt.agent.agent,
-    model: attempt.agent.model,
+    choice: attempt.agent,
     subtask: subtask.id,
     criterion: null,
     attempt: attempt.number,
     step: subtask.state,
-    lastTool: lastOf(events, "tool"),
-    lastMessage: lastOf(events, "message"),
-    events,
+    logPath: attempt.logPath,
     startedAt: attempt.startedAt,
-    elapsedMs: Math.max(0, endedAt - startedAt),
-    silentMs,
-    abandonAfterMs: idleTimeoutOf(log),
-    state: workerState(attempt, entry, silentMs, now),
-    outcome: running ? null : attempt.outcome,
-    tokens: running ? null : counted(attempt.usage),
+    quietSince: new Date(attempt.startedAt),
+    ended: attempt.outcome === "running" ? null : { endedAt: attempt.endedAt, outcome: attempt.outcome, tokens: counted(attempt.usage) },
   };
+}
+
+function verifierSources(log: RunLog, subtask: SubtaskRecord): AgentSource[] {
+  const choice = log.agents.verifier;
+  if (choice === undefined) return [];
+  const source = (id: string, logPath: string, startedAt: string) => ({
+    id: `${log.runId}:independent-verifier:${subtask.id}:${id}`,
+    role: "independent-verifier" as const,
+    choice,
+    subtask: subtask.id,
+    criterion: id,
+    attempt: Math.max(1, subtask.attempts.length),
+    step: subtask.state,
+    logPath,
+    startedAt,
+    quietSince: new Date(startedAt),
+  });
+  const question = subtask.verifierQuestion;
+  const ended = (subtask.gate?.verifier ?? [])
+    .filter((record): record is VerifierRecord & { startedAt: string } => record.startedAt !== undefined && record.id !== question?.id)
+    .map((record) => ({ ...source(record.id, record.logPath, record.startedAt), ended: { endedAt: record.endedAt, outcome: record.verdict, tokens: null } }));
+  return question === undefined ? ended : [...ended, { ...source(question.id, question.logPath, question.startedAt), ended: null }];
+}
+
+function testerVerdict(tester: TesterRecord): string {
+  if (tester.error !== undefined) return "error";
+  return tester.verdicts.every((verdict) => verdict.passed) ? "passed" : "failed";
+}
+
+function testerSource(entry: RunEntry): AgentSource | null {
+  const { log } = entry;
+  const verification = log.verification;
+  if (verification === undefined) return null;
+  const { tester, testerPhase, testerStartedAt } = verification;
+  const base = { id: `${log.runId}:acceptance-tester:${verification.sha}`, role: "acceptance-tester" as const, subtask: null, criterion: null, attempt: 1 };
+  if (testerPhase !== undefined && testerStartedAt !== undefined && log.agents.tester !== undefined) {
+    return {
+      ...base,
+      choice: log.agents.tester,
+      step: testerPhase,
+      logPath: verification.testerLogPath,
+      startedAt: testerStartedAt,
+      quietSince: entry.modifiedAt,
+      ended: null,
+    };
+  }
+  if (tester?.startedAt === undefined) return null;
+  return {
+    ...base,
+    choice: tester.agent,
+    step: "testing",
+    logPath: tester.logPath,
+    startedAt: tester.startedAt,
+    quietSince: new Date(tester.startedAt),
+    ended: { endedAt: tester.endedAt, outcome: testerVerdict(tester), tokens: counted(log.testerUsage?.[tester.agent.agent] ?? emptyUsage()) },
+  };
+}
+
+function agentSources(entry: RunEntry): AgentSource[] {
+  const { log } = entry;
+  const subtasks = log.subtasks.flatMap((subtask) => [
+    ...subtask.attempts.map((attempt) => workerSource(log, subtask, attempt)),
+    ...verifierSources(log, subtask),
+  ]);
+  const tester = testerSource(entry);
+  return tester === null ? subtasks : [...subtasks, tester];
 }
 
 export function titleOf(log: RunLog): string {
@@ -140,12 +248,15 @@ export function titleOf(log: RunLog): string {
 }
 
 function runStep(agents: readonly LiveAgent[]): string {
-  const subtasks = [...new Set(agents.filter((agent) => agent.state !== "ended").map((agent) => agent.subtask))];
+  const active = agents.filter((agent) => agent.state !== "ended");
+  const tester = active.find((agent) => agent.role === "acceptance-tester");
+  if (tester !== undefined) return `Acceptance tester · ${tester.step}`;
+  const subtasks = [...new Set(active.flatMap((agent) => (agent.subtask === null ? [] : [agent.subtask])))];
   return subtasks.length === 0 ? "Waiting for the next step" : `Subtasks · ${subtasks.join(", ")}`;
 }
 
 function liveRun(entry: RunEntry, tails: RawLogTails, now: Date): LiveRun {
-  const agents = entry.log.subtasks.flatMap((subtask) => subtask.attempts.map((attempt) => worker(entry, subtask, attempt, tails, now)));
+  const agents = agentSources(entry).map((source) => liveAgent(entry, source, tails, now));
   return { runId: entry.log.runId, issue: entry.log.issue, title: titleOf(entry.log), step: runStep(agents), startedAt: entry.log.startedAt, agents };
 }
 
@@ -153,8 +264,8 @@ export function runsInProgress(entries: readonly RunEntry[], now: Date): RunEntr
   return entries.filter((entry) => entry.log.result === "running" && !runAbandoned(entry, now));
 }
 
-export function attemptsInProgress(entry: RunEntry): AttemptRecord[] {
-  return entry.log.subtasks.flatMap((subtask) => subtask.attempts.filter((attempt) => attempt.outcome === "running"));
+export function rawLogsInProgress(entry: RunEntry): string[] {
+  return agentSources(entry).flatMap((source) => (source.ended === null && source.logPath !== undefined ? [source.logPath] : []));
 }
 
 export function isAtWork(agent: LiveAgent): boolean {
