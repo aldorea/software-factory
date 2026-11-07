@@ -41,7 +41,7 @@ The secret that lets an agent run on its subscription inside a container. The de
 _Avoid_: API key (implies pay-per-use), token (too narrow), secret
 
 **Role**:
-What an agent acts as in the factory: the refinement, the workers of a run, the independent verifier, or the acceptance tester. The developer chooses the agent and the model of each role before a command starts.
+What an agent acts as in the factory: the refinement, the workers of a run, the independent verifier, or the acceptance tester. The settings give the agent and the model of each role, and the developer may choose others for one command before it starts.
 _Avoid_: stage
 
 **Worker**:
@@ -100,6 +100,18 @@ The branch `factory-evidence/<n>`, with no common history with the default branc
 
 **Run log**:
 The record of a run in `.factory/logs/<run-id>/`, outside git: `run.json` and the raw log of each attempt.
+
+**Workspace**:
+The folder of the developer's machine that holds the target repos. A git repo directly inside it, with its `origin` on GitHub, is a target repo of the web view; a repo outside it is not.
+_Avoid_: project folder, projects
+
+**Settings**:
+The defaults of the factory on the developer's machine, apart from any target repo: the workspace, the default agent and model of each role, and the integrations. Every run of every target repo starts from them.
+_Avoid_: config (that is `.factory/config.ts` of a target repo), preferences
+
+**Integration**:
+An outside service that the factory tells about its runs, configured in the settings. It only receives notices: nothing it sends starts work.
+_Avoid_: connector, plugin
 
 **Web action**:
 A command of the CLI that the developer starts from the web view. It runs as the same command, with the same checks, in a process of its own.

@@ -8,4 +8,5 @@ Raised on 2026-11-06, when version 2 (freelance engagements) was withdrawn. They
 - **Conversations grouped by target repo**, and groups that belong to no target repo, such as brainstorming.
 - **Files and pages.** Files are the files that enter or are produced in a target repo or a group, in folders. Pages are HTML documents that a role writes and the web shows in an isolated `iframe` (`sandbox` with no `allow-same-origin`), so that a script of a page cannot send a form to the server with its token.
 - **The client stays out of the factory**: I am the only one who talks to them. A client portal or a web beyond `127.0.0.1` needs its own ADR.
-
+- **Models per target repo.** A target repo that overrides the default models of the settings. Today the settings hold them for every repo, and a run changes them only for itself ([ADR 0015](adr/0015-workspace-and-settings-on-the-host.md)).
+- **More integrations** after Slack, in the Integrations section of the settings.
