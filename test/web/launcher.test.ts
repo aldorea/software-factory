@@ -18,9 +18,11 @@ const groups: number[] = [];
 
 afterEach(async () => {
   for (const group of groups.splice(0)) {
-    try {
-      process.kill(-group, "SIGKILL");
-    } catch {}
+    for (const target of [-group, group]) {
+      try {
+        process.kill(target, "SIGKILL");
+      } catch {}
+    }
   }
   await temp.removeAll();
 });

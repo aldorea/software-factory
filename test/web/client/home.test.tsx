@@ -147,12 +147,12 @@ describe("the statistics of the home page", () => {
 });
 
 describe("the shell of the client", () => {
-  it("should have a side menu with Live, Board, Runs, Web actions and Settings", async () => {
+  it("should have a side menu with Live, Board, Runs and Settings, and no page of web actions, which open in a panel", async () => {
     await open([]);
 
     const menu = screen.getByRole("navigation", { name: "Menú" });
 
-    expect(within(menu).getAllByRole("link").map(text)).toEqual(["Live", "Board", "Runs", "Web actions", "Settings"]);
+    expect(within(menu).getAllByRole("link").map(text)).toEqual(["Live", "Board", "Runs", "Settings"]);
   });
 
   it("should move between pages with the menu, and say that a page does not exist yet", async () => {

@@ -1,5 +1,6 @@
 import { GitPullRequest, Loader2 } from "lucide-react";
 import { Link } from "react-router";
+import { ActionLink } from "../components/action-panel.tsx";
 import { Badge } from "../components/ui/badge.tsx";
 import { Card } from "../components/ui/card.tsx";
 import { OfflineNotice } from "../components/offline-notice.tsx";
@@ -99,7 +100,12 @@ export function HomePage() {
         <>
           {data.stats !== null && <Statistics stats={data.stats} />}
           <section aria-label="Runs" className="space-y-3">
-            <h1 className="text-xl font-semibold">Runs</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="mr-auto text-xl font-semibold">Runs</h1>
+              {(["doctor", "image", "init"] as const).map((command) => (
+                <ActionLink key={command} command={command}>{`factory ${command}`}</ActionLink>
+              ))}
+            </div>
             <Runs data={data} />
           </section>
           <Unreadable files={data.unreadable} />

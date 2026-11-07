@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink } from "react-router";
-import { Activity, Factory, LayoutDashboard, ListChecks, Moon, Play, Settings, Sun, type LucideIcon } from "lucide-react";
+import { Activity, Factory, LayoutDashboard, ListChecks, Moon, Settings, Sun, type LucideIcon } from "lucide-react";
+import { ActionPanel } from "./components/action-panel.tsx";
 import { Badge } from "./components/ui/badge.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { useLive } from "./live-data.tsx";
@@ -16,7 +17,6 @@ export const NAV: readonly NavItem[] = [
   { label: "Live", path: "/live", icon: Activity },
   { label: "Board", path: "/board", icon: LayoutDashboard },
   { label: "Runs", path: "/", icon: ListChecks },
-  { label: "Web actions", path: "/actions", icon: Play },
   { label: "Settings", path: "/settings", icon: Settings },
 ];
 
@@ -94,6 +94,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <main className="min-w-0 flex-1 px-8 py-6 pb-24">
         <div className="mx-auto max-w-[90rem]">{children}</div>
       </main>
+      <ActionPanel />
     </div>
   );
 }

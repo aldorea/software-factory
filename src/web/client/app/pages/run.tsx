@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { Badge } from "../components/ui/badge.tsx";
 import { Card } from "../components/ui/card.tsx";
+import { ActionLink, ActionStateBadge } from "../components/action-panel.tsx";
 import { CriterionGroups } from "../components/criterion-groups.tsx";
 import { OfflineNotice } from "../components/offline-notice.tsx";
 import { Section } from "../components/section.tsx";
@@ -23,6 +24,7 @@ import {
   type SubtaskView,
   type TesterView,
   type VerificationView,
+  type WebActionsList,
 } from "../api.ts";
 import { relativeTime } from "../format.ts";
 import { runStatusTone, stepStateTone, subtaskStateTone, succeededTone } from "../tones.ts";
@@ -212,8 +214,11 @@ function NextStepLine({ next }: { next: NextStep | null }) {
   if (next === null) return null;
   if (next.kind === "command") {
     return (
-      <p>
-        Siguiente paso: <code>{next.text}</code>
+      <p className="flex items-center gap-2">
+        Siguiente paso:
+        <ActionLink command={next.command} issue={next.issue}>
+          <code>{next.text}</code>
+        </ActionLink>
       </p>
     );
   }
@@ -558,6 +563,26 @@ function Tabs({ run }: { run: RunDetail }) {
   );
 }
 
+function IssueActions({ issue }: { issue: number }) {
+  const { data } = usePoll<WebActionsList>("/api/actions");
+  const last = data?.actions.find((action) => action.issue === issue);
+  return (
+    <div role="region" aria-label="Acciones web" className="flex flex-wrap items-center gap-2">
+      {(["run", "approve", "validate", "publish"] as const).map((command) => (
+        <ActionLink key={command} command={command} issue={issue}>
+          {`factory ${command} ${issue}`}
+        </ActionLink>
+      ))}
+      {last !== undefined && (
+        <Link to={{ search: `?action=${encodeURIComponent(last.id)}` }} className="ml-auto inline-flex items-center gap-2 text-sm text-primary hover:underline">
+          Última acción web: <span className="font-mono text-xs">{last.command}</span>
+          <ActionStateBadge action={last} />
+        </Link>
+      )}
+    </div>
+  );
+}
+
 export function RunPage() {
   const { runId = "" } = useParams();
   const { data, failed, missing } = usePoll<RunDetail>(`/api/runs/${encodeURIComponent(runId)}`);
@@ -570,6 +595,7 @@ export function RunPage() {
       ) : (
         <>
           <Header run={data} />
+          <IssueActions issue={data.issue} />
           <Tabs run={data} />
         </>
       )}
