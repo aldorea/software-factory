@@ -162,7 +162,7 @@ describe("the check that the list of a Claude Code turn loaded", () => {
   });
 
   it("should fail closed when the agent acts before it reports its tools", () => {
-    const assistant = JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } });
+    const assistant = fixture("claude-activity.jsonl").split("\n")[4] ?? "";
 
     expect(claudeTurn().checker().onLine(assistant)).toEqual({
       kind: "refused",
