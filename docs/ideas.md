@@ -10,3 +10,4 @@ Raised on 2026-11-06, when version 2 (freelance engagements) was withdrawn. They
 - **The client stays out of the factory**: I am the only one who talks to them. A client portal or a web beyond `127.0.0.1` needs its own ADR.
 - **Models per target repo.** A target repo that overrides the default models of the settings. Today the settings hold them for every repo, and a run changes them only for itself ([ADR 0015](adr/0015-workspace-and-settings-on-the-host.md)).
 - **More integrations** after Slack, in the Integrations section of the settings.
+- **Edit the skills and prompts of the factory from the web.** Each save is a commit in the repo of the factory, so each change is a new version that the runs record. Until then the web only shows them.
