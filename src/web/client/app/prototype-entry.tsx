@@ -7,7 +7,7 @@ import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <MemoryRouter initialEntries={["/settings?variant=A"]}>
+    <MemoryRouter initialEntries={["/settings?variant=D"]}>
       <Shell>
         <SettingsPrototype />
       </Shell>

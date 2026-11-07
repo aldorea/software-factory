@@ -188,8 +188,8 @@ const B_SECTIONS = [
   { key: "integrations", label: "Integraciones", icon: Plug },
 ] as const;
 
-function VariantB() {
-  const [section, setSection] = useState<(typeof B_SECTIONS)[number]["key"]>("models");
+function VariantB({ mixed = false }: { mixed?: boolean }) {
+  const [section, setSection] = useState<(typeof B_SECTIONS)[number]["key"]>(mixed ? "workspace" : "models");
   const [roles, setRoles] = useRoles();
   const changed = ROLES.filter((r) => roles[r.key].agent !== DEFAULTS[r.key].agent || roles[r.key].model !== DEFAULTS[r.key].model);
   return (
@@ -209,7 +209,35 @@ function VariantB() {
             <Field label="Carpeta del workspace" hint="Puede ser la carpeta donde ya tienes tus repos.">
               <input className={cn(inputClass, "font-mono")} defaultValue="~/Code" />
             </Field>
-            <p className="text-sm text-muted-foreground">3 repos git con origin en GitHub · 1 sin inicializar</p>
+            {mixed ? (
+              <>
+                <ul className="divide-y rounded-md border text-sm">
+                  {REPOS.map((r) => (
+                    <li key={r.name} className="flex items-center gap-3 px-3 py-2">
+                      <FolderGit2 className="size-4 text-muted-foreground" />
+                      <span className="font-medium">{r.name}</span>
+                      <span className="text-muted-foreground">{r.origin}</span>
+                      <span className="ml-auto">{r.state === "ready" ? <Badge tone="ok">listo</Badge> : <Button variant="ghost">Inicializar</Button>}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Card className="space-y-3 p-4">
+                  <div className="font-medium">Añadir repo de GitHub</div>
+                  <Field label="Repo" hint="owner/repo o la URL de GitHub">
+                    <input className={inputClass} placeholder="aldorea/acme-web" />
+                  </Field>
+                  <Field label="Carpeta dentro del workspace">
+                    <input className={cn(inputClass, "font-mono")} placeholder="acme-web" />
+                  </Field>
+                  <div className="flex items-center gap-3">
+                    <Button><Plus /> Clonar</Button>
+                    <span className="text-xs text-muted-foreground">ejecutará <Command text="factory clone aldorea/acme-web" /></span>
+                  </div>
+                </Card>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">3 repos git con origin en GitHub · 1 sin inicializar</p>
+            )}
           </>
         )}
         {section === "models" && (
@@ -354,6 +382,7 @@ const VARIANTS = [
   { key: "A", name: "Una página", view: VariantA },
   { key: "B", name: "Subsecciones", view: VariantB },
   { key: "C", name: "Por repo, con la regla de config.ts", view: VariantC },
+  { key: "D", name: "Organización de B con los repos de A", view: () => <VariantB mixed /> },
 ];
 
 export function SettingsPrototype() {
