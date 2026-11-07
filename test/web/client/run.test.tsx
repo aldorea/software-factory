@@ -438,7 +438,7 @@ describe("the links of the page of a run to its files", () => {
     return log;
   }
 
-  it("should link the raw log of an attempt and the full output of a failed check to the files of the run", async () => {
+  it("should link the full output of a failed check to the files of the run, and never the raw log of an attempt", async () => {
     const log = await runWithFiles(
       (runDir) => ({
         subtasks: [
@@ -458,15 +458,16 @@ describe("the links of the page of a run to its files", () => {
       { "S1-attempt-1.jsonl": "{}\n", "output/gate/check-2-test.log": "boom\n" },
     );
 
-    expect(screen.getByRole("link", { name: "Log crudo" }).getAttribute("href")).toBe(`/runs/${log.runId}/S1-attempt-1.jsonl`);
+    expect(document.querySelector('a[href$=".jsonl"]')).toBeNull();
     expect(screen.getByRole("link", { name: "Salida completa" }).getAttribute("href")).toBe(`/runs/${log.runId}/output/gate/check-2-test.log`);
   });
 
   it("should not link a file that the API does not link, because it is outside the run folder", async () => {
-    await runWithFiles(() => ({ subtasks: [subtaskRecord("S1", { attempts: [{ ...attemptRecord("claude-code", 10, 5), logPath: "/etc/passwd" }] })] }), {});
+    const gate = { sha: "abc1234", accepted: false, reasons: [], criteria: [], verifier: [], checks: [{ name: "test", command: "pnpm test", exitCode: 1, passed: false, outputLog: "/etc/passwd" }] };
+    await runWithFiles(() => ({ subtasks: [subtaskRecord("S1", { attempts: [attemptRecord("claude-code", 10, 5)], gate })] }), {});
 
     expect(text(screen.getByRole("region", { name: "S1" }))).toContain("Intento 1");
-    expect(screen.queryByRole("link", { name: "Log crudo" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Salida completa" })).toBeNull();
   });
 });
 

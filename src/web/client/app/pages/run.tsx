@@ -12,7 +12,11 @@ import {
   type AttemptView,
   type CheckView,
   type CriterionView,
+  type EvidenceFileView,
   type GateView,
+  type NextStep,
+  type RunCause,
+  type RunStep,
   type LiveResponse,
   type Polled,
   type RunDetail,
@@ -21,7 +25,7 @@ import {
   type VerificationView,
 } from "../api.ts";
 import { relativeTime } from "../format.ts";
-import { runStatusTone, subtaskStateTone, succeededTone } from "../tones.ts";
+import { runStatusTone, stepStateTone, subtaskStateTone, succeededTone } from "../tones.ts";
 import { LiveAgents } from "./live.tsx";
 import { NotFound } from "./notices.tsx";
 
@@ -35,7 +39,6 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-const RAW_LOG = "Log crudo";
 const FULL_OUTPUT = "Salida completa";
 
 function ResultBadge({ succeeded, children }: { succeeded: boolean | null; children: ReactNode }) {
@@ -64,9 +67,9 @@ function ExternalLink({ url, text }: { url: string | null; text: string }) {
   );
 }
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
+function Group({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
   return (
-    <div className="space-y-1">
+    <div id={id} className="space-y-1">
       <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h4>
       {children}
     </div>
@@ -85,15 +88,39 @@ function names(values: readonly string[]): string {
   return values.length === 0 ? "ninguno" : values.join(", ");
 }
 
-function Checks({ checks }: { checks: readonly CheckView[] }) {
+function Output({ output }: { output: string | null }) {
+  if (output === null) return null;
+  return <pre className="mt-1 max-h-80 overflow-auto rounded-md bg-muted/60 p-2 font-mono text-xs whitespace-pre-wrap">{output}</pre>;
+}
+
+function EvidenceFiles({ files }: { files: readonly EvidenceFileView[] }) {
+  if (files.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-3">
+      {files.map((file) => {
+        if (file.media === "image") return <img key={file.url} src={file.url} alt={file.name} className="max-h-96 max-w-full rounded-md border" />;
+        if (file.media === "video") return <video key={file.url} src={file.url} controls aria-label={file.name} className="max-h-96 max-w-full rounded-md border" />;
+        return <FileLink key={file.url} url={file.url} label={file.name} />;
+      })}
+    </div>
+  );
+}
+
+function Checks({ checks, anchor }: { checks: readonly CheckView[]; anchor?: string }) {
   if (checks.length === 0) return null;
   return (
     <Group title="Checks">
       <Items>
         {checks.map((check, index) => (
-          <li key={index}>
+          <li key={index} id={anchor === undefined ? undefined : `${anchor}-${check.name}`}>
             {check.name}: <Verdict passed={check.passed} />
             {check.firstError === null ? "" : ` (${check.firstError})`} <FileLink url={check.outputUrl} label={FULL_OUTPUT} />
+            {!check.passed && (
+              <p className="text-xs text-muted-foreground">
+                <code>{check.command}</code> · exit code {check.exitCode}
+              </p>
+            )}
+            <Output output={check.output} />
           </li>
         ))}
       </Items>
@@ -101,14 +128,16 @@ function Checks({ checks }: { checks: readonly CheckView[] }) {
   );
 }
 
-function Criteria({ criteria }: { criteria: readonly CriterionView[] }) {
+function Criteria({ criteria, anchor }: { criteria: readonly CriterionView[]; anchor?: string }) {
   if (criteria.length === 0) return null;
   return (
     <Group title="Criterios con evidencia">
       <Items>
         {criteria.map((criterion, index) => (
-          <li key={index}>
+          <li key={index} id={anchor === undefined ? undefined : `${anchor}-${criterion.id}`}>
             {criterion.id}: <Verdict passed={criterion.passed} /> <FileLink url={criterion.outputUrl} label={FULL_OUTPUT} />
+            <Output output={criterion.output} />
+            <EvidenceFiles files={criterion.files} />
           </li>
         ))}
       </Items>
@@ -179,10 +208,45 @@ function Activity({ runId }: { runId: string }) {
   return <LiveAgents runs={[run]} />;
 }
 
+function NextStepLine({ next }: { next: NextStep | null }) {
+  if (next === null) return null;
+  if (next.kind === "command") {
+    return (
+      <p>
+        Siguiente paso: <code>{next.text}</code>
+      </p>
+    );
+  }
+  return <p>Siguiente paso: {next.text}</p>;
+}
+
+function Causes({ causes }: { causes: readonly RunCause[] }) {
+  if (causes.length === 0) return null;
+  return (
+    <Section title="Causas">
+      <ol className="space-y-3">
+        {causes.map((cause, index) => (
+          <li key={index} className="space-y-1">
+            <p className="font-medium">{`${cause.where}: ${cause.what}`}</p>
+            {cause.detail !== null && <p className="text-muted-foreground">{cause.detail}</p>}
+            <NextStepLine next={cause.next} />
+            {cause.evidence !== null && (
+              <Link to={{ search: `?tab=${cause.evidence.tab}`, hash: cause.evidence.anchor }} className="text-primary hover:underline">
+                Ver la evidencia
+              </Link>
+            )}
+          </li>
+        ))}
+      </ol>
+    </Section>
+  );
+}
+
 function Summary({ run }: { run: RunDetail }) {
   const { agents, criteria, publicationFailure, pause, block } = run;
   return (
     <div className="space-y-4">
+      <Causes causes={run.causes} />
       <Links run={run} />
       {run.inProgress && <CurrentStep runId={run.runId} />}
       {publicationFailure !== null && (
@@ -202,7 +266,7 @@ function Summary({ run }: { run: RunDetail }) {
         </Section>
       )}
       {block !== null && (
-        <Section title="Bloqueo del run">
+        <Section title="Bloqueo del run" id="run-block">
           <p>Tipo: {block.type}</p>
           <p>Motivo: {block.reason}</p>
           <p>Commit: {block.sha}</p>
@@ -265,7 +329,6 @@ function Attempt({ attempt }: { attempt: AttemptView }) {
       <p>Tokens: {attempt.tokens}</p>
       <p>Inicio: {attempt.startedAt}</p>
       {attempt.endedAt !== null && <p>Fin: {attempt.endedAt}</p>}
-      <FileLink url={attempt.logUrl} label={RAW_LOG} />
     </li>
   );
 }
@@ -291,7 +354,7 @@ function Gate({ gate }: { gate: GateView }) {
             {gate.verifier.map((record, index) => (
               <li key={index}>
                 {record.id}: <ResultBadge succeeded={record.accepted}>{record.verdict}</ResultBadge>
-                {record.reason === null ? "" : ` (${record.reason})`} <FileLink url={record.logUrl} label={RAW_LOG} />
+                {record.reason === null ? "" : ` (${record.reason})`}
               </li>
             ))}
           </Items>
@@ -303,48 +366,51 @@ function Gate({ gate }: { gate: GateView }) {
 
 function Subtask({ subtask }: { subtask: SubtaskView }) {
   return (
-    <Card role="region" aria-label={subtask.id} className="space-y-2 p-4 text-sm">
-      <h3 className="font-mono text-base font-semibold">{subtask.id}</h3>
-      <p>
-        Estado: <Badge tone={subtaskStateTone(subtask.state)}>{subtask.state}</Badge>
-      </p>
-      <p>Criterios: {names(subtask.criteria)}</p>
-      <p>Branch: {subtask.branch}</p>
-      <p>Scope extensions: {names(subtask.scopeExtensions)}</p>
-      {subtask.block !== null && (
-        <>
-          {subtask.block.type !== null && <p>Bloqueo: {subtask.block.type}</p>}
-          {subtask.block.reason !== null && <p>Motivo: {subtask.block.reason}</p>}
-          {subtask.block.lastFailure !== null && <p>Último fallo: {subtask.block.lastFailure}</p>}
-        </>
-      )}
-      {subtask.attempts.length > 0 && (
-        <Group title="Intentos">
-          <ul className="space-y-2">
-            {subtask.attempts.map((attempt, index) => (
-              <Attempt key={index} attempt={attempt} />
-            ))}
-          </ul>
-        </Group>
-      )}
-      <p>{subtask.gateRejections} rechazos del gate</p>
-      <p>{subtask.verifierRejections} rechazos del independent verifier</p>
-      {subtask.gate !== null && <Gate gate={subtask.gate} />}
-      {subtask.followUps.length > 0 && (
-        <Group title="Follow-up tasks">
-          <Items>
-            {subtask.followUps.map((followUp, index) => (
-              <li key={index}>
-                <p>Follow-up ronda {followUp.round}</p>
-                <p>Criterios: {names(followUp.criteria)}</p>
-                <p>Fallo: {followUp.failure}</p>
-                <p>Resultado: {followUp.outcome}</p>
-              </li>
-            ))}
-          </Items>
-        </Group>
-      )}
-    </Card>
+    <details id={`subtask-${subtask.id}`} open={subtask.state !== "merged"}>
+      <summary className="cursor-pointer font-mono text-sm font-semibold">{`${subtask.id} · ${subtask.state}`}</summary>
+      <Card role="region" aria-label={subtask.id} className="mt-2 space-y-2 p-4 text-sm">
+        <h3 className="font-mono text-base font-semibold">{subtask.id}</h3>
+        <p>
+          Estado: <Badge tone={subtaskStateTone(subtask.state)}>{subtask.state}</Badge>
+        </p>
+        <p>Criterios: {names(subtask.criteria)}</p>
+        <p>Branch: {subtask.branch}</p>
+        <p>Scope extensions: {names(subtask.scopeExtensions)}</p>
+        {subtask.block !== null && (
+          <>
+            {subtask.block.type !== null && <p>Bloqueo: {subtask.block.type}</p>}
+            {subtask.block.reason !== null && <p>Motivo: {subtask.block.reason}</p>}
+            {subtask.block.lastFailure !== null && <p>Último fallo: {subtask.block.lastFailure}</p>}
+          </>
+        )}
+        {subtask.attempts.length > 0 && (
+          <Group title="Intentos">
+            <ul className="space-y-2">
+              {subtask.attempts.map((attempt, index) => (
+                <Attempt key={index} attempt={attempt} />
+              ))}
+            </ul>
+          </Group>
+        )}
+        <p>{subtask.gateRejections} rechazos del gate</p>
+        <p>{subtask.verifierRejections} rechazos del independent verifier</p>
+        {subtask.gate !== null && <Gate gate={subtask.gate} />}
+        {subtask.followUps.length > 0 && (
+          <Group title="Follow-up tasks">
+            <Items>
+              {subtask.followUps.map((followUp, index) => (
+                <li key={index}>
+                  <p>Follow-up ronda {followUp.round}</p>
+                  <p>Criterios: {names(followUp.criteria)}</p>
+                  <p>Fallo: {followUp.failure}</p>
+                  <p>Resultado: {followUp.outcome}</p>
+                </li>
+              ))}
+            </Items>
+          </Group>
+        )}
+      </Card>
+    </details>
   );
 }
 
@@ -361,19 +427,19 @@ function Subtasks({ subtasks }: { subtasks: readonly SubtaskView[] }) {
 
 function Tester({ tester }: { tester: TesterView }) {
   return (
-    <Group title="Acceptance tester">
+    <Group title="Acceptance tester" id="tester">
       <p>
         Agente: {tester.agent} / {tester.model}
       </p>
-      <FileLink url={tester.logUrl} label={RAW_LOG} />
       {tester.error !== null && <p>Error: {tester.error}</p>}
       <Checks checks={tester.checks} />
       {tester.verdicts.length > 0 && (
         <Items>
           {tester.verdicts.map((testerVerdict, index) => (
-            <li key={index}>
+            <li key={index} id={`tester-verdict-${testerVerdict.id}`}>
               {testerVerdict.id}: <Verdict passed={testerVerdict.passed} />{" "}
               {`(${testerVerdict.observation})${testerVerdict.evidence.length === 0 ? "" : ` [${testerVerdict.evidence.join(", ")}]`}`}
+              <EvidenceFiles files={testerVerdict.files} />
             </li>
           ))}
         </Items>
@@ -391,20 +457,21 @@ function Verification({ verification }: { verification: VerificationView | null 
     );
   }
   return (
-    <Section title="Integrated verification">
+    <Section title="Integrated verification" id="verification">
       <p>SHA: {verification.sha}</p>
       <p>
         Resultado: <Verdict passed={verification.passed} />
       </p>
       {verification.environment !== null && <p>Entorno: {verification.environment}</p>}
-      <Checks checks={verification.checks} />
-      <Criteria criteria={verification.criteria} />
+      <Checks checks={verification.checks} anchor="verification-check" />
+      <Criteria criteria={verification.criteria} anchor="verification-criterion" />
       {verification.humanCriteria.length > 0 && (
-        <Group title="Criterios human">
+        <Group title="Criterios human" id="human-criteria">
           <Items>
             {verification.humanCriteria.map((criterion, index) => (
               <li key={index}>
                 {`${criterion.id}: ${criterion.reason}${criterion.attachments.length === 0 ? "" : ` (${criterion.attachments.join(", ")})`}`}
+                <EvidenceFiles files={criterion.files} />
               </li>
             ))}
           </Items>
@@ -415,12 +482,49 @@ function Verification({ verification }: { verification: VerificationView | null 
   );
 }
 
+function stepTitle(step: RunStep): string {
+  if (step.kind === "subtask") return `Subtarea ${step.id}`;
+  if (step.kind === "integrated-verification") return "Integrated verification";
+  if (step.kind === "acceptance-tester") return "Acceptance tester";
+  return "Publicación";
+}
+
+function stepDetail(step: RunStep): string | null {
+  if (step.kind === "subtask") {
+    const gate = step.gate === null ? "" : ` · gate ${step.gate === "accepted" ? "aceptado" : "rechazado"}`;
+    return `${step.mergedEarlier ? "Fusionada por un run anterior · " : ""}${step.attempts} intentos${gate}`;
+  }
+  if (step.kind === "integrated-verification") return `checks ${step.checks.passed}/${step.checks.total} · criterios ${step.criteria.passed}/${step.criteria.total}`;
+  if (step.kind === "acceptance-tester") {
+    if (step.phase !== null) return `fase ${step.phase}`;
+    return step.error ?? `veredictos ${step.verdicts.passed}/${step.verdicts.total}`;
+  }
+  if (step.failure !== null) return step.failure;
+  return step.pullRequest === null ? null : `PR #${step.pullRequest.number}${step.pullRequest.draft ? " (draft)" : ""}`;
+}
+
+function Steps({ steps }: { steps: readonly RunStep[] }) {
+  return (
+    <ol aria-label="Pasos del run" className="space-y-2 text-sm">
+      {steps.map((step) => (
+        <li key={step.anchor} id={step.anchor} className="rounded-md border px-3 py-2">
+          <p className="flex items-center gap-2 font-medium">
+            {stepTitle(step)} <Badge tone={stepStateTone(step.state)}>{step.state}</Badge>
+          </p>
+          {stepDetail(step) !== null && <p className="text-muted-foreground">{stepDetail(step)}</p>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function TabContent({ tab, run }: { tab: TabId; run: RunDetail }) {
   if (tab === "summary") return <Summary run={run} />;
+  if (tab === "steps") return <Steps steps={run.steps} />;
   if (tab === "verification") return <Verification verification={run.verification} />;
   if (tab === "subtasks") return <Subtasks subtasks={run.subtasks} />;
   if (tab === "activity") return <Activity runId={run.runId} />;
-  return <p className="text-sm text-muted-foreground">Esta pestaña todavía no tiene contenido.</p>;
+  return null;
 }
 
 function Tabs({ run }: { run: RunDetail }) {

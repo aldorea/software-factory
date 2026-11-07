@@ -7,6 +7,7 @@ export type {
   AttemptView,
   CheckView,
   CriterionView,
+  EvidenceFileView,
   GateView,
   RunBlockView,
   RunDetail,
@@ -14,6 +15,8 @@ export type {
   TesterView,
   VerificationView,
 } from "../../run-detail.ts";
+export type { NextStep, RunCause } from "../../run-causes.ts";
+export type { RunStep, StepState } from "../../run-steps.ts";
 export type { AgentState, LiveAgent, LiveEvent, LiveResponse, LiveRole, LiveRun } from "../../live.ts";
 
 export const POLL_MS = 2000;

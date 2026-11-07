@@ -1,3 +1,4 @@
+import { extname } from "node:path";
 import { attemptAbandoned, runStatus, type RunStatus } from "../coordinator/abandoned.ts";
 import type { RunEntry } from "../coordinator/run-history.ts";
 import type {
@@ -22,6 +23,8 @@ import type {
 } from "../coordinator/run-log.ts";
 import { countedTokens } from "../coordinator/stop-rules.ts";
 import type { LogUrl } from "./log-path.ts";
+import { runCauses, type RunCause } from "./run-causes.ts";
+import { runSteps, type RunStep } from "./run-steps.ts";
 import { safeLink } from "./safe-link.ts";
 
 export interface RoleAgent {
@@ -30,17 +33,40 @@ export interface RoleAgent {
   model: string;
 }
 
+export type MediaKind = "image" | "video" | "file";
+
+export interface EvidenceFileView {
+  name: string;
+  url: string;
+  media: MediaKind;
+}
+
 export interface CheckView {
   name: string;
+  command: string;
+  exitCode: number;
   passed: boolean;
   firstError: string | null;
+  output: string | null;
   outputUrl: string | null;
 }
 
 export interface CriterionView {
   id: string;
+  command: string;
+  exitCode: number;
   passed: boolean;
+  output: string | null;
   outputUrl: string | null;
+  files: EvidenceFileView[];
+}
+
+export interface TesterVerdictView extends TesterVerdictRecord {
+  files: EvidenceFileView[];
+}
+
+export interface HumanCriterionView extends HumanCriterionRecord {
+  files: EvidenceFileView[];
 }
 
 export interface AttemptView {
@@ -54,7 +80,6 @@ export interface AttemptView {
   tokens: number;
   startedAt: string;
   endedAt: string | null;
-  logUrl: string | null;
 }
 
 export interface VerifierView {
@@ -62,7 +87,6 @@ export interface VerifierView {
   verdict: VerifierRecord["verdict"];
   accepted: boolean;
   reason: string | null;
-  logUrl: string | null;
 }
 
 export interface GateView {
@@ -97,10 +121,9 @@ export interface SubtaskView {
 export interface TesterView {
   agent: string;
   model: string;
-  logUrl: string | null;
   error: string | null;
   checks: CheckView[];
-  verdicts: TesterVerdictRecord[];
+  verdicts: TesterVerdictView[];
 }
 
 export interface VerificationView {
@@ -109,7 +132,7 @@ export interface VerificationView {
   environment: string | null;
   checks: CheckView[];
   criteria: CriterionView[];
-  humanCriteria: HumanCriterionRecord[];
+  humanCriteria: HumanCriterionView[];
   tester: TesterView | null;
 }
 
@@ -135,19 +158,56 @@ export interface RunDetail {
   block: RunBlockView | null;
   agents: { roles: RoleAgent[]; changes: AgentChangeRecord[] };
   criteria: CriteriaRecord;
+  causes: RunCause[];
+  steps: RunStep[];
   subtasks: SubtaskView[];
   verification: VerificationView | null;
 }
 
+const MEDIA = new Map<string, MediaKind>([
+  [".png", "image"],
+  [".jpg", "image"],
+  [".jpeg", "image"],
+  [".webm", "video"],
+  [".mp4", "video"],
+]);
+
+function filesOf(paths: readonly string[], logUrl: LogUrl): EvidenceFileView[] {
+  return paths.flatMap((name) => {
+    const url = logUrl(name);
+    return url === null ? [] : [{ name, url, media: MEDIA.get(extname(name).toLowerCase()) ?? "file" }];
+  });
+}
+
+function failedOutput(record: CheckRecord | CriterionRecord): string | null {
+  return record.passed ? null : (record.outputTail ?? null);
+}
+
 function checkView(check: CheckRecord, logUrl: LogUrl): CheckView {
-  return { name: check.name, passed: check.passed, firstError: check.firstError ?? null, outputUrl: logUrl(check.outputLog) };
+  return {
+    name: check.name,
+    command: check.command,
+    exitCode: check.exitCode,
+    passed: check.passed,
+    firstError: check.firstError ?? null,
+    output: failedOutput(check),
+    outputUrl: logUrl(check.outputLog),
+  };
 }
 
 function criterionView(criterion: CriterionRecord, logUrl: LogUrl): CriterionView {
-  return { id: criterion.id, passed: criterion.passed, outputUrl: logUrl(criterion.outputLog) };
+  return {
+    id: criterion.id,
+    command: criterion.command,
+    exitCode: criterion.exitCode,
+    passed: criterion.passed,
+    output: failedOutput(criterion),
+    outputUrl: logUrl(criterion.outputLog),
+    files: filesOf(criterion.evidenceFiles ?? [], logUrl),
+  };
 }
 
-function attemptView(attempt: AttemptRecord, abandoned: boolean, logUrl: LogUrl): AttemptView {
+function attemptView(attempt: AttemptRecord, abandoned: boolean): AttemptView {
   return {
     number: attempt.number,
     agent: attempt.agent.agent,
@@ -159,7 +219,6 @@ function attemptView(attempt: AttemptRecord, abandoned: boolean, logUrl: LogUrl)
     tokens: countedTokens(attempt.usage),
     startedAt: attempt.startedAt,
     endedAt: attempt.endedAt ?? null,
-    logUrl: logUrl(attempt.logPath),
   };
 }
 
@@ -170,7 +229,7 @@ function gateView(gate: GateRecord, logUrl: LogUrl): GateView {
     reasons: gate.reasons,
     checks: gate.checks.map((check) => checkView(check, logUrl)),
     criteria: gate.criteria.map((criterion) => criterionView(criterion, logUrl)),
-    verifier: gate.verifier.map((record) => ({ id: record.id, verdict: record.verdict, accepted: record.verdict === "accept", reason: record.reason ?? null, logUrl: logUrl(record.logPath) })),
+    verifier: gate.verifier.map((record) => ({ id: record.id, verdict: record.verdict, accepted: record.verdict === "accept", reason: record.reason ?? null })),
   };
 }
 
@@ -191,7 +250,7 @@ function subtaskView(subtask: SubtaskRecord, entry: RunEntry, now: Date, logUrl:
     branch: subtask.branch,
     scopeExtensions: subtask.scopeExtensions,
     block: subtaskBlock(subtask),
-    attempts: subtask.attempts.map((attempt) => attemptView(attempt, attemptAbandoned(attempt, entry, now), logUrl)),
+    attempts: subtask.attempts.map((attempt) => attemptView(attempt, attemptAbandoned(attempt, entry, now))),
     gateRejections: subtask.gateRejections,
     verifierRejections: subtask.verifierRejections,
     gate: subtask.gate === undefined ? null : gateView(subtask.gate, logUrl),
@@ -203,10 +262,9 @@ function testerView(tester: TesterRecord, logUrl: LogUrl): TesterView {
   return {
     agent: tester.agent.agent,
     model: tester.agent.model,
-    logUrl: logUrl(tester.logPath),
     error: tester.error ?? null,
     checks: (tester.checks ?? []).map((check) => checkView(check, logUrl)),
-    verdicts: tester.verdicts,
+    verdicts: tester.verdicts.map((verdict) => ({ ...verdict, files: filesOf(verdict.evidence, logUrl) })),
   };
 }
 
@@ -217,7 +275,7 @@ function verificationView(verification: VerificationRecord, logUrl: LogUrl): Ver
     environment: verification.environment ?? null,
     checks: verification.checks.map((check) => checkView(check, logUrl)),
     criteria: verification.criteria.map((criterion) => criterionView(criterion, logUrl)),
-    humanCriteria: verification.humanCriteria,
+    humanCriteria: verification.humanCriteria.map((criterion) => ({ ...criterion, files: filesOf(criterion.attachments, logUrl) })),
     tester: verification.tester === undefined ? null : testerView(verification.tester, logUrl),
   };
 }
@@ -261,6 +319,8 @@ export function runDetail(entry: RunEntry, now: Date, logUrl: LogUrl): RunDetail
     block: working || log.block === undefined ? null : blockView(log.block, logUrl),
     agents: { roles: roles(log), changes: log.agents.changes },
     criteria: log.criteria,
+    causes: runCauses(entry, now),
+    steps: runSteps(entry, now),
     subtasks: log.subtasks.map((subtask) => subtaskView(subtask, entry, now, logUrl)),
     verification: log.verification === undefined ? null : verificationView(log.verification, logUrl),
   };

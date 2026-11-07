@@ -42,6 +42,7 @@ function Row({ row, now }: { row: RunRow; now: string }) {
       <td className="px-4 py-3">
         <PullRequest cell={row.pullRequest} />
       </td>
+      <td className="px-4 py-3 text-muted-foreground">{row.line ?? ""}</td>
     </tr>
   );
 }
@@ -60,6 +61,7 @@ function Runs({ data }: { data: RunsResponse }) {
             <th className="px-4 py-2 font-medium">Resultado</th>
             <th className="px-4 py-2 font-medium">Último cambio</th>
             <th className="px-4 py-2 font-medium">Pull request</th>
+            <th className="px-4 py-2 font-medium">Causa o último evento</th>
           </tr>
         </thead>
         <tbody>

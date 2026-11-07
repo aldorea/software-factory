@@ -1,5 +1,5 @@
 import type { Tone } from "./components/ui/badge.tsx";
-import type { AgentState, RunStatus, SubtaskView } from "./api.ts";
+import type { AgentState, RunStatus, StepState, SubtaskView } from "./api.ts";
 
 const RUN_STATUS_TONE: Record<RunStatus, Tone> = {
   ready: "ok",
@@ -7,6 +7,14 @@ const RUN_STATUS_TONE: Record<RunStatus, Tone> = {
   abandoned: "warn",
   paused: "info",
   running: "info",
+};
+
+const STEP_STATE_TONE: Record<StepState, Tone> = {
+  passed: "ok",
+  failed: "bad",
+  running: "info",
+  pending: "neutral",
+  "not-run": "neutral",
 };
 
 const AGENT_STATE_TONE: Record<AgentState, Tone> = {
@@ -53,6 +61,10 @@ function own<T>(map: Record<string, T>, key: string, fallback: T): T {
 
 export function runStatusTone(status: string): Tone {
   return own(RUN_STATUS_TONE, status, "neutral");
+}
+
+export function stepStateTone(state: string): Tone {
+  return own(STEP_STATE_TONE, state, "neutral");
 }
 
 export function agentStateTone(state: string): Tone {

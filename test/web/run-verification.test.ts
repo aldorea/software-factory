@@ -25,10 +25,10 @@ describe("the integrated verification of a run", () => {
       passed: false,
       environment: null,
       checks: [
-        { name: "typecheck", passed: true, firstError: null, outputUrl: null },
-        { name: "test", passed: false, firstError: "2 tests failed", outputUrl: null },
+        { name: "typecheck", command: "pnpm typecheck", exitCode: 0, passed: true, firstError: null, output: null, outputUrl: null },
+        { name: "test", command: "pnpm test", exitCode: 1, passed: false, firstError: "2 tests failed", output: null, outputUrl: null },
       ],
-      criteria: [{ id: "C1", passed: false, outputUrl: null }],
+      criteria: [{ id: "C1", command: "playwright test", exitCode: 1, passed: false, output: null, outputUrl: null, files: [] }],
       humanCriteria: [],
       tester: null,
     });
@@ -37,7 +37,7 @@ describe("the integrated verification of a run", () => {
   it("should give each human criterion with its reason and attachments", async () => {
     const humanCriteria = [{ id: "H1", reason: "the layout needs a human eye", attachments: ["screens/home.png", "screens/run.png"] }];
 
-    expect((await runDetail(aRun(0, { verification: verification({ humanCriteria }) }))).verification?.humanCriteria).toEqual(humanCriteria);
+    expect((await runDetail(aRun(0, { verification: verification({ humanCriteria }) }))).verification?.humanCriteria).toEqual(humanCriteria.map((criterion) => ({ ...criterion, files: [] })));
   });
 
   it("should give the result of the acceptance tester with its agent, verdicts and error", async () => {
@@ -52,10 +52,9 @@ describe("the integrated verification of a run", () => {
     expect((await runDetail(log)).verification?.tester).toEqual({
       agent: "claude-code",
       model: "sonnet",
-      logUrl: null,
       error: "the tester stopped early",
       checks: [],
-      verdicts,
+      verdicts: verdicts.map((verdict) => ({ ...verdict, files: [] })),
     });
   });
 

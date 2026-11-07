@@ -16,7 +16,7 @@ describe("a run whose publication failed in factory web", () => {
   it("should give not published in the list of runs of the API, in place of the pull request", async () => {
     const dir = await repoWithRuns([{ log: aRun(0, { publicationFailure: FAILURE }) }, { log: aRun(1) }]);
 
-    const { runs } = JSON.parse((await handleRequest(request(dir, "/api/runs"))).body) as RunsResponse;
+    const { runs } = JSON.parse(String((await handleRequest(request(dir, "/api/runs"))).body)) as RunsResponse;
 
     expect(runs.map((row) => row.pullRequest.kind)).toEqual(["none", "not-published"]);
   });
@@ -30,7 +30,7 @@ describe("a run whose publication failed in factory web", () => {
   it("should count the runs not published in the statistics of the API", async () => {
     const dir = await repoWithRuns([{ log: aRun(0, { publicationFailure: FAILURE }) }, { log: aRun(1) }]);
 
-    const { stats } = JSON.parse((await handleRequest(request(dir, "/api/runs"))).body) as RunsResponse;
+    const { stats } = JSON.parse(String((await handleRequest(request(dir, "/api/runs"))).body)) as RunsResponse;
 
     expect(stats?.unpublished).toBe(1);
   });

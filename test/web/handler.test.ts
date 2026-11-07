@@ -16,7 +16,7 @@ async function runsOf(repoDir: string): Promise<RunsResponse> {
   const response = await handleRequest(request(repoDir, "/api/runs"));
   expect(response.status).toBe(200);
   expect(response.contentType).toBe("application/json; charset=utf-8");
-  return JSON.parse(response.body) as RunsResponse;
+  return JSON.parse(String(response.body)) as RunsResponse;
 }
 
 describe("the list of runs of the API", () => {
@@ -187,7 +187,7 @@ describe("what the handler refuses", () => {
     const response = await handleRequest(request(dir, "/api/runs", { method }));
 
     expect(response.status).toBe(405);
-    expect(JSON.parse(response.body)).toEqual({ error: "method not allowed" });
+    expect(JSON.parse(String(response.body))).toEqual({ error: "method not allowed" });
   });
 
   it.each(["POST", "PUT", "DELETE", "HEAD"])("should answer 405 to the method %s on a page", async (method) => {
@@ -202,7 +202,7 @@ describe("what the handler refuses", () => {
     const response = await handleRequest(request(dir, path));
 
     expect(response.status).toBe(404);
-    expect(JSON.parse(response.body)).toEqual({ error: "not found" });
+    expect(JSON.parse(String(response.body))).toEqual({ error: "not found" });
   });
 
   it("should check the Host header before the method and the path", async () => {

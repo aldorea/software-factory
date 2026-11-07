@@ -20,7 +20,7 @@ async function activityOf(dir: string, runId: string): Promise<LiveResponse> {
   const response = await handleRequest(request(dir, `/api/runs/${runId}/activity`));
   expect(response.status).toBe(200);
   expect(response.contentType).toBe("application/json; charset=utf-8");
-  return JSON.parse(response.body) as LiveResponse;
+  return JSON.parse(String(response.body)) as LiveResponse;
 }
 
 describe("the activity of a run in the API", () => {
@@ -62,7 +62,7 @@ describe("the activity of a run in the API", () => {
       [`${runId}:worker:health:1`, "ended", "agent-error", 2 * MINUTE, { input: 1200, output: 300 }],
       [`${runId}:worker:health:2`, "ended", "completed", 3 * MINUTE, { input: 900, output: 250 }],
     ]);
-    const live = JSON.parse((await handleRequest(request(dir, "/api/live"))).body) as LiveResponse;
+    const live = JSON.parse(String((await handleRequest(request(dir, "/api/live"))).body)) as LiveResponse;
     expect(live.runs).toEqual([]);
   });
 
@@ -101,6 +101,6 @@ describe("the activity of a run in the API", () => {
     const response = await handleRequest(request(dir, "/api/runs/23-2026-10-24T07-00-00-000Z/activity"));
 
     expect(response.status).toBe(404);
-    expect(JSON.parse(response.body)).toEqual({ error: "not found" });
+    expect(JSON.parse(String(response.body))).toEqual({ error: "not found" });
   });
 });

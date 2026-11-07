@@ -110,8 +110,8 @@ describe("the block of a run", () => {
       sha: "abc1234",
       files: [],
       checks: [
-        { name: "typecheck", passed: true, firstError: null, outputUrl: null },
-        { name: "unit-tests", passed: false, firstError: "2 tests failed", outputUrl: null },
+        { name: "typecheck", command: "pnpm typecheck", exitCode: 0, passed: true, firstError: null, output: null, outputUrl: null },
+        { name: "unit-tests", command: "pnpm test", exitCode: 1, passed: false, firstError: "2 tests failed", output: null, outputUrl: null },
       ],
     });
   });
@@ -208,7 +208,7 @@ describe("the refresh of the page of a run", () => {
 
     const response = await handleRequest(request(dir, `/api/runs/${finished.runId}`));
 
-    expect(JSON.parse(response.body).inProgress).toBe(false);
+    expect(JSON.parse(String(response.body)).inProgress).toBe(false);
   });
 });
 
@@ -263,7 +263,7 @@ describe("the links from the list of runs", () => {
   it("should link each run to a run that the API serves", async () => {
     const log = aRun(0);
     const dir = await repoWithRuns([{ log }]);
-    const { runs } = JSON.parse((await handleRequest(request(dir, "/api/runs"))).body) as RunsResponse;
+    const { runs } = JSON.parse(String((await handleRequest(request(dir, "/api/runs"))).body)) as RunsResponse;
 
     expect(runs[0]?.href).toBe(`/runs/${log.runId}`);
     expect((await handleRequest(request(dir, `/api${runs[0]?.href as string}`))).status).toBe(200);

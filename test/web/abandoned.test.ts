@@ -32,7 +32,7 @@ async function repoWith(
 async function runsOf(dir: string): Promise<RunsResponse> {
   const response = await handleRequest(request(dir, "/api/runs"));
   expect(response.status).toBe(200);
-  return JSON.parse(response.body) as RunsResponse;
+  return JSON.parse(String(response.body)) as RunsResponse;
 }
 
 async function statuses(dir: string): Promise<string[]> {

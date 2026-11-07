@@ -19,7 +19,7 @@ describe("the run of the API", () => {
     const response = await handleRequest(request(dir, "/api/runs/45-2026-10-01T00-00-00-000Z"));
 
     expect(response.status).toBe(404);
-    expect(JSON.parse(response.body)).toEqual({ error: "not found" });
+    expect(JSON.parse(String(response.body))).toEqual({ error: "not found" });
   });
 
   it("should answer 404 to a run whose run.json cannot be read", async () => {

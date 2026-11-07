@@ -23,7 +23,7 @@ async function liveOf(dir: string): Promise<LiveResponse> {
   const response = await handleRequest(request(dir, "/api/live"));
   expect(response.status).toBe(200);
   expect(response.contentType).toBe("application/json; charset=utf-8");
-  return JSON.parse(response.body) as LiveResponse;
+  return JSON.parse(String(response.body)) as LiveResponse;
 }
 
 describe("the live agents of the API", () => {

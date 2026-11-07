@@ -48,7 +48,6 @@ describe("the subtasks of a run", () => {
         tokens: 1250,
         startedAt: "2026-10-24T08:00:00.000Z",
         endedAt: "2026-10-24T08:12:00.000Z",
-        logUrl: null,
       },
     ]);
   });
@@ -96,13 +95,13 @@ describe("the subtasks of a run", () => {
       accepted: false,
       reasons: ["the independent verifier refuted C2"],
       checks: [
-        { name: "typecheck", passed: true, firstError: null, outputUrl: null },
-        { name: "test", passed: false, firstError: "1 test failed", outputUrl: null },
+        { name: "typecheck", command: "pnpm typecheck", exitCode: 0, passed: true, firstError: null, output: null, outputUrl: null },
+        { name: "test", command: "pnpm test", exitCode: 1, passed: false, firstError: "1 test failed", output: null, outputUrl: null },
       ],
-      criteria: [{ id: "C1", passed: true, outputUrl: null }],
+      criteria: [{ id: "C1", command: "curl x", exitCode: 0, passed: true, output: null, outputUrl: null, files: [] }],
       verifier: [
-        { id: "C1", verdict: "accept", accepted: true, reason: null, logUrl: null },
-        { id: "C2", verdict: "refute", accepted: false, reason: "the button is missing", logUrl: null },
+        { id: "C1", verdict: "accept", accepted: true, reason: null },
+        { id: "C2", verdict: "refute", accepted: false, reason: "the button is missing" },
       ],
     });
     expect([subtask?.gateRejections, subtask?.verifierRejections]).toEqual([2, 1]);

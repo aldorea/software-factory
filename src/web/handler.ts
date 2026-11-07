@@ -2,9 +2,10 @@ import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { readRunEntries, readRunEntry } from "../coordinator/run-history.ts";
 import { runsResponse, type ApiError } from "./api.ts";
-import { readFileInside } from "./file-inside.ts";
+import { readFileInside, resolveFileInside } from "./file-inside.ts";
 import { hostAllowed } from "./host.ts";
 import { readLive, readRawLogTails } from "./live-read.ts";
+import { runsInProgress } from "./live.ts";
 import { logLinks } from "./log-links.ts";
 import { runActivity } from "./run-activity.ts";
 import { runDetail } from "./run-detail.ts";
@@ -23,7 +24,7 @@ export interface WebRequest {
 export interface WebResponse {
   status: number;
   contentType: string;
-  body: string;
+  body: string | Buffer;
 }
 
 const HTML = "text/html; charset=utf-8";
@@ -33,6 +34,14 @@ export const TEXT = "text/plain; charset=utf-8";
 const ASSET_TYPES = new Map<string, string>([
   [".js", "text/javascript; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
+]);
+
+const RUN_FILE_TYPES = new Map<string, string>([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webm", "video/webm"],
+  [".mp4", "video/mp4"],
 ]);
 
 function html(status: number, body: string): WebResponse {
@@ -67,8 +76,11 @@ async function runActivityResponse(logsDir: string, runId: string, now: Date): P
 
 async function runLog(logsDir: string, runId: string, segments: string[]): Promise<WebResponse | null> {
   if ((await readRunEntry(logsDir, runId)).kind !== "found") return null;
-  const content = await readFileInside(join(logsDir, runId), segments);
-  return content === null ? null : { status: 200, contentType: TEXT, body: content };
+  const file = await resolveFileInside(join(logsDir, runId), segments);
+  if (file === null) return null;
+  const binaryType = RUN_FILE_TYPES.get(extname(file).toLowerCase());
+  if (binaryType !== undefined) return { status: 200, contentType: binaryType, body: await readFile(file) };
+  return { status: 200, contentType: TEXT, body: await readFile(file, "utf8") };
 }
 
 async function asset(clientDir: string, segments: string[]): Promise<WebResponse | null> {
@@ -82,11 +94,16 @@ async function clientPage(clientDir: string): Promise<WebResponse> {
   return html(200, await readFile(join(clientDir, "index.html"), "utf8"));
 }
 
+async function runsList(logsDir: string, now: Date): Promise<WebResponse> {
+  const entries = await readRunEntries(logsDir);
+  return json(200, runsResponse(entries, now, await readRawLogTails(logsDir, runsInProgress(entries.runs, now))));
+}
+
 async function api(route: Extract<Route, { kind: "api" }>, request: WebRequest, logsDir: string): Promise<WebResponse> {
   if (request.method !== "GET") return apiError(405, "method not allowed");
   if (route.resource === "run") return runResponse(logsDir, route.runId, request.now);
   if (route.resource === "run-activity") return runActivityResponse(logsDir, route.runId, request.now);
-  if (route.resource === "runs") return json(200, runsResponse(await readRunEntries(logsDir), request.now));
+  if (route.resource === "runs") return runsList(logsDir, request.now);
   if (route.resource === "live") return json(200, await readLive(logsDir, request.now));
   return apiError(404, "not found");
 }
