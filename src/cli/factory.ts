@@ -17,7 +17,7 @@ import { terminalMenuScreen } from "./auth-screen.ts";
 import { launchInteractive } from "./launch.ts";
 import { recordWebActionEnd } from "../web/web-action-files.ts";
 import { main, webActionFlag } from "./main.ts";
-import { confirmInTerminal, readLineFromStdin, readSecretInTerminal } from "./secret-input.ts";
+import { confirmInTerminal, readAllFromStdin, readLineFromStdin, readSecretInTerminal } from "./secret-input.ts";
 import { reportFailure } from "./report.ts";
 import { colorEnabled } from "./setup-render.ts";
 import { CLEAR_LINE } from "./terminal-render.ts";
@@ -95,6 +95,7 @@ process.exitCode = await main(process.argv.slice(2), {
     readSecret: (prompt) => (hidesSecret({ stdin: stdinIsTerminal }) ? readSecretInTerminal(prompt) : readLineFromStdin()),
     confirm: confirmInTerminal,
   },
+  ...(stdinIsTerminal ? {} : { readStdin: readAllFromStdin }),
   color,
   errColor,
   ...(terminal ? { terminal } : {}),

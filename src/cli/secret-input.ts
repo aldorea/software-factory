@@ -58,6 +58,12 @@ export async function readLineFromStdin(): Promise<string | null> {
   }
 }
 
+export async function readAllFromStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function confirmInTerminal(question: string): Promise<boolean> {
   const lines = createInterface({ input: process.stdin, output: process.stdout });
   try {

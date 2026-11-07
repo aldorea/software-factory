@@ -170,6 +170,16 @@ describe("the check that the list of a Claude Code turn loaded", () => {
     });
   });
 
+  it("should fail closed when the agent skips the permission checks, because then the list allows nothing and denies nothing", () => {
+    const workerInit = fixture("claude-activity.jsonl").split("\n")[0] ?? "";
+    const line = JSON.stringify({ ...(JSON.parse(workerInit) as object), tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"], mcp_servers: [] });
+
+    expect(claudeTurn().checker().onLine(line)).toEqual({
+      kind: "refused",
+      problem: "the agent of the refinement runs in the permission mode bypassPermissions, not default",
+    });
+  });
+
   it("should keep waiting on a line that is not an event", () => {
     expect(claudeTurn().checker().onLine("starting…")).toEqual({ kind: "waiting" });
   });

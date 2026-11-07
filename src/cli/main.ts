@@ -41,6 +41,7 @@ import { specCredentialNeeds } from "./spec-needs.ts";
 import { runSummary } from "./run-summary.ts";
 import { runInProgressRefusal } from "./run-in-progress.ts";
 import { RunView } from "./run-view.ts";
+import { noTurnProblem, refineTurn } from "./refine-turn.ts";
 import { refused } from "./target-repo.ts";
 import { renderProgress } from "./terminal-render.ts";
 import { web, WEB_USAGE } from "./web.ts";
@@ -71,6 +72,8 @@ export interface CliEnv {
   images: ImageDocker;
   signal: AbortSignal;
   auth?: AuthInput;
+  readStdin?: () => Promise<string>;
+  agentCommand?: (kind: AgentKind) => string;
   color?: boolean;
   errColor?: boolean;
   out(text: string): void;
@@ -82,7 +85,7 @@ export const WEB_ACTION_FLAG = "--web-action";
 const COMMANDS = ["refine", "approve", "validate", "run"];
 const USAGE = [
   `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`,
-  "       factory refine <issue> [target-repo] [--refinement-agent <agent>:<model>]",
+  "       factory refine <issue> [target-repo] [--refinement-agent <agent>:<model>] [--turn]   --turn: one turn of the refinement with no terminal, the answer on stdin",
   "       factory run <issue> [target-repo] [--worker-agent <agent>:<model>] [--verifier-agent <agent>:<model>] [--tester-agent <agent>:<model>]",
   `       ${PUBLISH_USAGE}   ${PUBLISH_SUMMARY}`,
   "       factory stats [target-repo]",
@@ -101,6 +104,7 @@ interface Command {
   repoArg?: string;
   flags: RoleFlags;
   refinementFlag?: string;
+  turn: boolean;
 }
 
 export type WebActionFlag = { ok: true; args: string[]; id: string | null } | { ok: false };
@@ -122,17 +126,17 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
     env.err(USAGE);
     return 2;
   }
-  if (flag.id === null) return dispatch(flag.args, env);
+  if (flag.id === null) return dispatch(flag.args, env, null);
   let code = 1;
   try {
-    code = await dispatch(flag.args, env);
+    code = await dispatch(flag.args, env, flag.id);
     return code;
   } finally {
     await recordWebActionEnd(env.cwd, flag.id, { exitCode: code, endedAt: env.clock.now().toISOString() });
   }
 }
 
-async function dispatch(args: string[], env: CliEnv): Promise<number> {
+async function dispatch(args: string[], env: CliEnv, webActionId: string | null): Promise<number> {
   if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
     env.out(USAGE);
     return 0;
@@ -149,10 +153,10 @@ async function dispatch(args: string[], env: CliEnv): Promise<number> {
     env.err(USAGE);
     return 2;
   }
-  const { command, issue, repoArg, flags, refinementFlag } = parsed;
+  const { command, issue, repoArg, flags, refinementFlag, turn } = parsed;
   const repoDir = resolve(env.cwd, repoArg ?? ".");
   if (await refused(repoDir, env)) return 1;
-  if (command === "refine") return refine(repoDir, issue, refinementFlag, env);
+  if (command === "refine") return refine({ repoDir, issue, flag: refinementFlag, turn, webActionId }, env);
   if (command === "run" || command === "approve") {
     const busy = runInProgressRefusal(await latestRunEntry(join(repoDir, ".factory", "logs"), issue), env.clock.now());
     if (busy !== null) {
@@ -198,6 +202,7 @@ function parseCommand(args: string[]): Command | null {
         "verifier-agent": { type: "string" },
         "tester-agent": { type: "string" },
         "refinement-agent": { type: "string" },
+        turn: { type: "boolean" },
       },
     });
   } catch {
@@ -218,13 +223,15 @@ function parseCommand(args: string[]): Command | null {
   };
   const refinementFlag = parsed.values["refinement-agent"];
   if (command !== "run" && Object.keys(flags).length > 0) return null;
-  if (command !== "refine" && refinementFlag !== undefined) return null;
+  const turn = parsed.values.turn === true;
+  if (command !== "refine" && (refinementFlag !== undefined || turn)) return null;
   return {
     command,
     issue,
     ...(repoArg !== undefined ? { repoArg } : {}),
     flags,
     ...(refinementFlag !== undefined ? { refinementFlag } : {}),
+    turn,
   };
 }
 
@@ -310,14 +317,28 @@ async function run(repoDir: string, issue: number, flags: RoleFlags, env: CliEnv
   return report.publication.kind === "failed" ? 1 : 0;
 }
 
-async function refine(repoDir: string, issue: number, flag: string | undefined, env: CliEnv): Promise<number> {
+interface RefineInput {
+  repoDir: string;
+  issue: number;
+  flag: string | undefined;
+  turn: boolean;
+  webActionId: string | null;
+}
+
+async function refine({ repoDir, issue, flag, turn, webActionId }: RefineInput, env: CliEnv): Promise<number> {
   try {
     const probes = await gatherProbes("refine", envProbes(repoDir, env));
     const ready = readiness("refine", { probes, roles: {}, credentials: env.credentials });
     if (reportErr(readinessProblems(ready), env)) return 1;
-    const chosen = await refinementChoice(repoDir, flag, env);
+    const chosen = await refinementChoice(repoDir, flag, turn ? undefined : env.ask, turn ? noTurnProblem : () => null);
     if (!chosen.ok) {
       env.err(`factory: ${chosen.problem}`);
+      return 1;
+    }
+    if (turn) {
+      const ended = await refineTurn({ repoDir, issue, choice: chosen.choice, webActionId, env });
+      if (typeof ended === "number") return ended;
+      env.err(`factory: ${ended}`);
       return 1;
     }
     const workspace = await prepareRefinement({ repoDir, issue, github: env.github(repoDir) });
@@ -331,14 +352,19 @@ async function refine(repoDir: string, issue: number, flag: string | undefined, 
   }
 }
 
-async function refinementChoice(repoDir: string, flag: string | undefined, env: CliEnv): Promise<ChosenRole> {
+async function refinementChoice(
+  repoDir: string,
+  flag: string | undefined,
+  ask: CliEnv["ask"],
+  agentProblem: (choice: RoleChoice) => string | null,
+): Promise<ChosenRole> {
   const configured = await configuredRefinement(repoDir);
   const flagged = flag === undefined ? undefined : parseRoleFlag("refinement", flag, configured);
   if (flagged !== undefined && !flagged.ok) return flagged;
   const prompted =
-    flagged === undefined && env.ask !== undefined
+    flagged === undefined && ask !== undefined
       ? (
-          await env.ask(
+          await ask(
             menuEntries({
               roles: ["refinement"],
               flagged: {},
@@ -356,6 +382,8 @@ async function refinementChoice(repoDir: string, flag: string | undefined, env: 
     ...(configured ? { fallback: configured } : {}),
   });
   if (!chosen.ok) return chosen;
+  const agentRefused = agentProblem(chosen.choice);
+  if (agentRefused !== null) return { ok: false, problem: agentRefused };
   const problems = choiceProblems("refinement", chosen.choice);
   return problems.length > 0 ? { ok: false, problem: problems.join("; ") } : chosen;
 }
