@@ -7,6 +7,7 @@ import { handleRequest, TEXT } from "./handler.ts";
 import { WEB_HOST } from "./host.ts";
 import { launchWebAction, stopWebAction } from "./launcher.ts";
 import { processStartTime } from "./process-start.ts";
+import { NOTHING_TO_STOP } from "./web-action.ts";
 import { newToken } from "./token.ts";
 
 export const DEFAULT_WEB_PORT = 7433;
@@ -102,7 +103,7 @@ async function respond(
     const response = method === "POST" ? await serial(answer) : await answer();
     if (response.stop !== undefined && !(await stopWebAction(response.stop))) {
       outgoing.writeHead(409, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-      outgoing.end(JSON.stringify({ error: "the web action is not working: there is nothing to stop" }));
+      outgoing.end(JSON.stringify({ error: NOTHING_TO_STOP }));
       return;
     }
     outgoing.writeHead(response.status, {

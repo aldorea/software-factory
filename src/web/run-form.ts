@@ -1,7 +1,7 @@
 import { planLimitAnnotate } from "../cli/plan-limit-warning.ts";
 import { menuEntries, ROLE_LABELS, SUGGESTED_MODELS, type RoleOrigin } from "../cli/role-menu.ts";
 import type { RoleChoice, RunRole } from "../config/config.ts";
-import { ROLE_FLAGS } from "../config/roles.ts";
+import { ROLE_FLAGS } from "../config/role-flags.ts";
 import { defaultOrigin, resumeDefaults } from "../coordinator/resume.ts";
 import type { RunLog } from "../coordinator/run-log.ts";
 import type { AgentKind } from "../workers/types.ts";

@@ -5,7 +5,6 @@ import { runInProgressRefusal } from "../cli/run-in-progress.ts";
 import type { RoleChoice, RunRole } from "../config/config.ts";
 import { configPath, loadConfig } from "../config/load.ts";
 import { latestRunEntry } from "../coordinator/run-history.ts";
-import { turnInProgressMessage } from "../cli/refine-turn.ts";
 import { actionArgs, actionIssue, actionStdin, type ActionRequest } from "./action-args.ts";
 import { parseActionRequest } from "./action-request.ts";
 import type { WebRequest, WebResponse } from "./handler.ts";
@@ -14,6 +13,7 @@ import { refinementConversation } from "./refinement-api.ts";
 import { runForm } from "./run-form.ts";
 import { readOutput, readWebAction, readWebActions, type WebActionFiles } from "./web-action-files.ts";
 import { webActionView, type WebActionView } from "./web-action-view.ts";
+import { NOTHING_TO_STOP, refineTurnInProgress, webActionStamp, webActionState } from "./web-action.ts";
 
 const JSON_TYPE = "application/json; charset=utf-8";
 const OUTPUT_TAIL = 256 * 1024;
@@ -34,7 +34,7 @@ function error(status: number, message: string): WebResponse {
 
 function actionId(request: ActionRequest, now: Date): string {
   const issue = actionIssue(request);
-  return `${now.toISOString().replace(/[:.]/g, "-")}-${request.command}${issue === null ? "" : `-${issue}`}`;
+  return `${webActionStamp(now)}-${request.command}${issue === null ? "" : `-${issue}`}`;
 }
 
 async function view(files: WebActionFiles, request: WebRequest, withOutput: boolean): Promise<WebActionView> {
@@ -51,8 +51,13 @@ async function views(request: WebRequest): Promise<WebActionView[]> {
 async function busyRefusal(request: WebRequest, action: ActionRequest): Promise<string | null> {
   const issue = actionIssue(action);
   if (issue !== null && action.command === "refine") {
-    const turn = (await views(request)).find((other) => other.issue === issue && other.state.kind === "running" && other.name === "refine");
-    return turn === undefined ? null : turnInProgressMessage(issue, turn);
+    const actions = await Promise.all(
+      (await readWebActions(request.repoDir)).map(async ({ record, end }) => ({
+        record,
+        state: webActionState(record, end, { startTime: await request.processStart(record.pid) }, request.now),
+      })),
+    );
+    return refineTurnInProgress(actions, issue, null);
   }
   if (issue === null || !ONE_PER_ISSUE.has(action.command)) return null;
   const working = (await views(request)).find(
@@ -85,7 +90,7 @@ async function start(request: WebRequest): Promise<WebResponse> {
 async function stop(request: WebRequest, id: string): Promise<WebResponse> {
   const files = await readWebAction(request.repoDir, id);
   if (files === null) return error(404, "not found");
-  if (!(await view(files, request, false)).canStop) return error(409, "the web action is not working: there is nothing to stop");
+  if (!(await view(files, request, false)).canStop) return error(409, NOTHING_TO_STOP);
   return json(202, { id }, { stop: { pid: files.record.pid, processStart: files.record.processStart } });
 }
 

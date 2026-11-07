@@ -1,6 +1,6 @@
 import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { WebActionEnd, WebActionRecord } from "./web-action.ts";
+import { isWebActionCommand, type WebActionEnd, type WebActionRecord } from "./web-action.ts";
 
 const WEB_ACTION_ID = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}Z-[a-z]+(-[1-9][0-9]*)?$/;
 
@@ -54,7 +54,7 @@ function isRecord(value: unknown): value is WebActionRecord {
   return (
     record.version === 1 &&
     typeof record.id === "string" &&
-    typeof record.command === "string" &&
+    isWebActionCommand(record.command) &&
     Array.isArray(record.args) &&
     record.args.every((arg) => typeof arg === "string") &&
     (record.issue === null || typeof record.issue === "number") &&

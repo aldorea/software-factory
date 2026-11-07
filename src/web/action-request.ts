@@ -4,7 +4,7 @@ import { checkCredentialInput } from "../config/credentials.ts";
 import { choiceProblems, isAgentKind } from "../config/roles.ts";
 import { AGENT_KINDS } from "../workers/agents.ts";
 import { RUN_ROLES, type ActionRequest } from "./action-args.ts";
-import { WEB_ACTION_COMMANDS, type WebActionCommand } from "./web-action.ts";
+import { isWebActionCommand, WEB_ACTION_COMMANDS, type WebActionCommand } from "./web-action.ts";
 
 export type ParsedActionRequest = { ok: true; request: ActionRequest } | { ok: false; problem: string };
 
@@ -12,10 +12,6 @@ const ISSUE_COMMANDS: ReadonlySet<WebActionCommand> = new Set(["run", "approve",
 
 function refuse(problem: string): ParsedActionRequest {
   return { ok: false, problem };
-}
-
-function isCommand(value: unknown): value is WebActionCommand {
-  return typeof value === "string" && (WEB_ACTION_COMMANDS as readonly string[]).includes(value);
 }
 
 function parseAuth(value: { agent?: unknown; credential?: unknown; force?: unknown }): ParsedActionRequest {
@@ -34,7 +30,7 @@ function parseRefine(value: { issue?: unknown; agent?: unknown; answer?: unknown
   if (answer !== undefined && typeof answer !== "string") return refuse("the answer must be text");
   if (agent === undefined) return { ok: true, request: { command: "refine", issue, agent: null, answer: answer ?? "" } };
   const kind = typeof agent === "object" && agent !== null ? (agent as { agent?: unknown }).agent : undefined;
-  const noTurn = typeof kind === "string" && isAgentKind(kind) ? noTurnProblem({ agent: kind, model: "" }) : null;
+  const noTurn = typeof kind === "string" && isAgentKind(kind) ? noTurnProblem(kind) : null;
   if (noTurn !== null) return refuse(noTurn);
   const parsed = parseChoice("refinement", agent);
   return parsed.ok ? { ok: true, request: { command: "refine", issue, agent: parsed.choice, answer: answer ?? "" } } : refuse(parsed.problem);
@@ -75,7 +71,7 @@ export function parseActionRequest(body: string): ParsedActionRequest {
   }
   if (typeof value !== "object" || value === null) return refuse("the body is not an object");
   const { command, issue, roles } = value as { command?: unknown; issue?: unknown; roles?: unknown };
-  if (!isCommand(command)) return refuse(`${String(command)} is not a web action: use one of ${WEB_ACTION_COMMANDS.join(", ")}`);
+  if (!isWebActionCommand(command)) return refuse(`${String(command)} is not a web action: use one of ${WEB_ACTION_COMMANDS.join(", ")}`);
   if (command === "auth") return parseAuth(value);
   if (command === "refine") return parseRefine(value);
   if (!ISSUE_COMMANDS.has(command)) {

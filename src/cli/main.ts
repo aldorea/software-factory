@@ -330,7 +330,7 @@ async function refine({ repoDir, issue, flag, turn, webActionId }: RefineInput, 
     const probes = await gatherProbes("refine", envProbes(repoDir, env));
     const ready = readiness("refine", { probes, roles: {}, credentials: env.credentials });
     if (reportErr(readinessProblems(ready), env)) return 1;
-    const chosen = await refinementChoice(repoDir, flag, turn ? undefined : env.ask, turn ? noTurnProblem : () => null);
+    const chosen = await refinementChoice(repoDir, flag, turn ? undefined : env.ask, turn ? (choice) => noTurnProblem(choice.agent) : () => null);
     if (!chosen.ok) {
       env.err(`factory: ${chosen.problem}`);
       return 1;

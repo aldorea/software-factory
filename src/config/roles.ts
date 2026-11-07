@@ -9,8 +9,6 @@ export const ROLES: RunRole[] = ["workers", "verifier", "tester"];
 
 export const CONFIGURED_ROLES: Role[] = [...ROLES, "refinement"];
 
-export { ROLE_FLAGS };
-
 export type ChosenRole = { ok: true; choice: RoleChoice } | { ok: false; problem: string };
 
 export interface RoleSources {

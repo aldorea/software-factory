@@ -3,11 +3,11 @@ import { mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { processStartTime } from "./process-start.ts";
 import { ACTION_FILE, OUTPUT_FILE, webActionDir, webDir, writeJsonFile } from "./web-action-files.ts";
-import type { WebActionRecord } from "./web-action.ts";
+import type { WebActionCommand, WebActionRecord } from "./web-action.ts";
 
 export interface WebActionStart {
   id: string;
-  command: string;
+  command: WebActionCommand;
   args: string[];
   issue: number | null;
   stdin?: string;
