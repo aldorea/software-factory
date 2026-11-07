@@ -375,7 +375,7 @@ export function SettingsPrototype() {
   return (
     <>
       <View />
-      {import.meta.env.DEV && (
+      {(import.meta.env.DEV || import.meta.env.MODE === "prototype") && (
         <div className="fixed inset-x-0 bottom-4 z-50 mx-auto flex w-fit items-center gap-2 rounded-full bg-black px-2 py-1 text-sm text-white shadow-xl">
           <button aria-label="Variante anterior" onClick={() => go(-1)} className="rounded-full p-1 hover:bg-white/20"><ArrowLeft className="size-4" /></button>
           <span className="px-2">PROTOTIPO · {current.key} ({current.name})</span>
