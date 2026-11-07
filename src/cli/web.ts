@@ -10,7 +10,7 @@ import { refused } from "./target-repo.ts";
 
 export const WEB_USAGE = "factory web [target-repo] [--port <port>]";
 
-type WebEnv = Pick<CliEnv, "cwd" | "factoryRoot" | "clock" | "signal" | "out" | "err" | "color" | "errColor">;
+type WebEnv = Pick<CliEnv, "cwd" | "factoryRoot" | "clock" | "signal" | "out" | "err" | "color" | "errColor" | "auth">;
 
 interface WebArgs {
   repoArg?: string;
@@ -62,6 +62,7 @@ export async function web(args: string[], env: WebEnv, usage: string): Promise<n
       port: parsed.port,
       token,
       clock: env.clock,
+      ...(env.auth !== undefined ? { credentials: { path: env.auth.credentialsPath, environment: env.auth.environment } } : {}),
       err: env.err,
     });
   } catch (error) {

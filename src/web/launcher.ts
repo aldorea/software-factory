@@ -10,6 +10,7 @@ export interface WebActionStart {
   command: string;
   args: string[];
   issue: number | null;
+  stdin?: string;
 }
 
 export interface LaunchInput {
@@ -41,9 +42,13 @@ export async function launchWebAction({ repoDir, factoryBin, start, now }: Launc
       cwd: repoDir,
       detached: true,
       shell: false,
-      stdio: ["ignore", output.fd, output.fd],
+      stdio: [start.stdin === undefined ? "ignore" : "pipe", output.fd, output.fd],
     });
     pid = await spawned(child);
+    if (child.stdin !== null) {
+      child.stdin.on("error", () => undefined);
+      child.stdin.end(start.stdin);
+    }
     child.unref();
   } finally {
     await output.close();

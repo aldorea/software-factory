@@ -5,13 +5,11 @@ import { runTurnProcess } from "../commands/refine-turn.ts";
 import type { RoleChoice } from "../config/config.ts";
 import { processStartTime } from "../web/process-start.ts";
 import { readWebActions } from "../web/web-action-files.ts";
-import { webActionState } from "../web/web-action.ts";
+import { webActionState, type WebActionRecord } from "../web/web-action.ts";
 import { adapterFor } from "../workers/agents.ts";
 import { refinementTools } from "../workers/refinement-turn.ts";
 import { clockMinutes } from "./clock-time.ts";
 import type { CliEnv } from "./main.ts";
-
-export const TURN_FLAG = "--turn";
 
 export function noTurnProblem(choice: RoleChoice): string | null {
   if (adapterFor(choice.agent).refinementTurn !== undefined) return null;
@@ -22,11 +20,13 @@ async function turnInProgress(repoDir: string, issue: number, ownId: string | nu
   for (const { record, end } of await readWebActions(repoDir)) {
     if (record.command !== "refine" || record.issue !== issue || record.id === ownId) continue;
     const state = webActionState(record, end, { startTime: await processStartTime(record.pid) }, now);
-    if (state.kind === "running") {
-      return `a turn of the refinement of #${issue} is in progress since ${clockMinutes(new Date(record.startedAt))} (${record.id}); wait for it to end or stop it`;
-    }
+    if (state.kind === "running") return turnInProgressMessage(issue, record);
   }
   return null;
+}
+
+export function turnInProgressMessage(issue: number, record: Pick<WebActionRecord, "id" | "startedAt">): string {
+  return `a turn of the refinement of #${issue} is in progress since ${clockMinutes(new Date(record.startedAt))} (${record.id}); wait for it to end or stop it`;
 }
 
 function turnId(ownId: string | null, now: Date): string {
@@ -68,7 +68,7 @@ export async function refineTurn(input: {
     answer: command.readsAnswer ? answer : "",
     streamPath: await turnStreamPath(repoDir, issue, turnId(input.webActionId, env.clock.now())),
     checker: turn.checker(),
-    onLoaded: (loaded) => writeSession(repoDir, issue, loaded),
+    onLoaded: (loaded) => writeSession(repoDir, issue, { session: loaded, agent: choice.agent }),
     onStderr: env.err,
   });
   if (end.kind === "refused") return end.problem;

@@ -1,4 +1,4 @@
-export const WEB_ACTION_COMMANDS = ["run", "approve", "validate", "publish", "doctor", "image", "init"] as const;
+export const WEB_ACTION_COMMANDS = ["run", "approve", "validate", "publish", "doctor", "image", "init", "auth", "refine"] as const;
 
 export type WebActionCommand = (typeof WEB_ACTION_COMMANDS)[number];
 

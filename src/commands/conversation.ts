@@ -1,6 +1,8 @@
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { webDir, writeJsonFile } from "../web/web-action-files.ts";
+import { isAgentKind } from "../config/roles.ts";
+import type { AgentKind } from "../workers/types.ts";
 
 const SESSION_FILE = "session.json";
 const TURNS_DIR = "turns";
@@ -15,18 +17,28 @@ export function conversationDir(repoDir: string, issue: number): string {
   return join(webDir(repoDir), `refinement-${issue}`);
 }
 
-export async function readSession(repoDir: string, issue: number): Promise<string | null> {
+export interface ConversationSession {
+  session: string;
+  agent: AgentKind;
+}
+
+export async function readConversationSession(repoDir: string, issue: number): Promise<ConversationSession | null> {
   try {
-    const value = JSON.parse(await readFile(join(conversationDir(repoDir, issue), SESSION_FILE), "utf8")) as { session?: unknown };
-    return typeof value.session === "string" ? value.session : null;
+    const value = JSON.parse(await readFile(join(conversationDir(repoDir, issue), SESSION_FILE), "utf8")) as { session?: unknown; agent?: unknown };
+    if (typeof value.session !== "string") return null;
+    return { session: value.session, agent: typeof value.agent === "string" && isAgentKind(value.agent) ? value.agent : "claude-code" };
   } catch {
     return null;
   }
 }
 
-export async function writeSession(repoDir: string, issue: number, session: string): Promise<void> {
+export async function readSession(repoDir: string, issue: number): Promise<string | null> {
+  return (await readConversationSession(repoDir, issue))?.session ?? null;
+}
+
+export async function writeSession(repoDir: string, issue: number, recorded: ConversationSession): Promise<void> {
   await mkdir(conversationDir(repoDir, issue), { recursive: true });
-  await writeJsonFile(join(conversationDir(repoDir, issue), SESSION_FILE), { session });
+  await writeJsonFile(join(conversationDir(repoDir, issue), SESSION_FILE), recorded);
 }
 
 export async function turnStreamPath(repoDir: string, issue: number, turnId: string): Promise<string> {

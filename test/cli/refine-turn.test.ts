@@ -154,7 +154,7 @@ describe("factory refine <n> --turn", () => {
 
     expect(agent.args().slice(-2)).toEqual(["-p", "/factory:refine 42"]);
     expect(agent.stdin()).toBe("");
-    expect(JSON.parse(await readFile(join(conversation(repoDir), "session.json"), "utf8"))).toEqual({ session: SESSION });
+    expect(JSON.parse(await readFile(join(conversation(repoDir), "session.json"), "utf8"))).toEqual({ session: SESSION, agent: "claude-code" });
     const turns = (await readdir(join(conversation(repoDir), "turns"))).filter((name) => name.endsWith(".jsonl"));
     expect(turns).toHaveLength(1);
     expect((await readFile(join(conversation(repoDir), "turns", turns[0] ?? ""), "utf8")).trim().split("\n")).toEqual(loadedStream);

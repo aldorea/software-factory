@@ -5,10 +5,12 @@ import { runInProgressRefusal } from "../cli/run-in-progress.ts";
 import type { RoleChoice, RunRole } from "../config/config.ts";
 import { configPath, loadConfig } from "../config/load.ts";
 import { latestRunEntry } from "../coordinator/run-history.ts";
-import { actionArgs, actionIssue, type ActionRequest } from "./action-args.ts";
+import { turnInProgressMessage } from "../cli/refine-turn.ts";
+import { actionArgs, actionIssue, actionStdin, type ActionRequest } from "./action-args.ts";
 import { parseActionRequest } from "./action-request.ts";
 import type { WebRequest, WebResponse } from "./handler.ts";
 import type { WebActionStart } from "./launcher.ts";
+import { refinementConversation } from "./refinement-api.ts";
 import { runForm } from "./run-form.ts";
 import { readOutput, readWebAction, readWebActions, type WebActionFiles } from "./web-action-files.ts";
 import { webActionView, type WebActionView } from "./web-action-view.ts";
@@ -48,6 +50,10 @@ async function views(request: WebRequest): Promise<WebActionView[]> {
 
 async function busyRefusal(request: WebRequest, action: ActionRequest): Promise<string | null> {
   const issue = actionIssue(action);
+  if (issue !== null && action.command === "refine") {
+    const turn = (await views(request)).find((other) => other.issue === issue && other.state.kind === "running" && other.name === "refine");
+    return turn === undefined ? null : turnInProgressMessage(issue, turn);
+  }
   if (issue === null || !ONE_PER_ISSUE.has(action.command)) return null;
   const working = (await views(request)).find(
     (other) => other.issue === issue && other.state.kind === "running" && ONE_PER_ISSUE.has(other.name),
@@ -65,7 +71,14 @@ async function start(request: WebRequest): Promise<WebResponse> {
   const busy = await busyRefusal(request, parsed.request);
   if (busy !== null) return error(409, busy);
   const id = actionId(parsed.request, request.now);
-  const launch: WebActionStart = { id, command: parsed.request.command, args: actionArgs(parsed.request), issue: actionIssue(parsed.request) };
+  const stdin = actionStdin(parsed.request);
+  const launch: WebActionStart = {
+    id,
+    command: parsed.request.command,
+    args: actionArgs(parsed.request),
+    issue: actionIssue(parsed.request),
+    ...(stdin === null ? {} : { stdin }),
+  };
   return json(202, { id }, { start: launch });
 }
 
@@ -100,7 +113,11 @@ async function runFormResponse(request: WebRequest, issue: number): Promise<WebR
   return json(200, runForm({ issue, previous: latest?.log ?? null, configured: configured.roles, problem: configured.problem, now: request.now }));
 }
 
-export type ActionsRoute = { resource: "actions" } | { resource: "action" | "action-stop"; actionId: string } | { resource: "run-form"; issue: number };
+export type ActionsRoute =
+  | { resource: "actions" }
+  | { resource: "action" | "action-stop"; actionId: string }
+  | { resource: "run-form"; issue: number }
+  | { resource: "refinement"; issue: number };
 
 export async function actionsApi(route: ActionsRoute, request: WebRequest): Promise<WebResponse> {
   if (route.resource === "actions") {
@@ -115,6 +132,7 @@ export async function actionsApi(route: ActionsRoute, request: WebRequest): Prom
   }
   if (request.method !== "GET") return error(405, "method not allowed");
   if (route.resource === "run-form") return runFormResponse(request, route.issue);
+  if (route.resource === "refinement") return json(200, await refinementConversation(request.repoDir, route.issue, await views(request)));
   const files = await readWebAction(request.repoDir, route.actionId);
   return files === null ? error(404, "not found") : json(200, await view(files, request, true));
 }

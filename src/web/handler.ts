@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { readRunEntries, readRunEntry } from "../coordinator/run-history.ts";
 import { actionsApi } from "./actions-api.ts";
+import { authPage, type CredentialsSource } from "./auth-api.ts";
 import { runsResponse, type ApiError } from "./api.ts";
 import { readFileInside, resolveFileInside } from "./file-inside.ts";
 import { hostAllowed } from "./host.ts";
@@ -29,6 +30,7 @@ export interface WebRequest {
   port: number;
   now: Date;
   processStart: ProcessStartTime;
+  credentials?: CredentialsSource;
 }
 
 export interface WebActionStop {
@@ -124,8 +126,11 @@ async function runsList(logsDir: string, now: Date): Promise<WebResponse> {
 
 async function api(route: Extract<Route, { kind: "api" }>, request: WebRequest, logsDir: string): Promise<WebResponse> {
   if (route.resource === "actions") return actionsApi({ resource: "actions" }, request);
-  if (route.resource === "action" || route.resource === "action-stop" || route.resource === "run-form") return actionsApi(route, request);
+  if (route.resource === "action" || route.resource === "action-stop" || route.resource === "run-form" || route.resource === "refinement") {
+    return actionsApi(route, request);
+  }
   if (request.method !== "GET") return apiError(405, "method not allowed");
+  if (route.resource === "auth") return json(200, await authPage(request.credentials));
   if (route.resource === "run") return runResponse(logsDir, route.runId, request.now);
   if (route.resource === "run-activity") return runActivityResponse(logsDir, route.runId, request.now);
   if (route.resource === "runs") return runsList(logsDir, request.now);

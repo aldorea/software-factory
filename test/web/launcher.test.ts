@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { launchWebAction, stopWebAction } from "../../src/web/launcher.ts";
+import { launchWebAction, stopWebAction, type WebActionStart } from "../../src/web/launcher.ts";
 import { readWebAction } from "../../src/web/web-action-files.ts";
 import type { WebActionRecord } from "../../src/web/web-action.ts";
 import { isAlive } from "../process-alive.ts";
@@ -35,13 +35,17 @@ async function until(condition: () => boolean | Promise<boolean>, what: string):
   }
 }
 
-async function launchFromAServer(repoDir: string, args: string[]): Promise<{ record: WebActionRecord; server: number }> {
+async function launchFromAServer(
+  repoDir: string,
+  args: string[],
+  options: { start?: Partial<WebActionStart>; env?: Record<string, string> } = {},
+): Promise<{ record: WebActionRecord; server: number }> {
   const script = [
     `import { launchWebAction } from ${JSON.stringify(LAUNCHER)};`,
     `const input = ${JSON.stringify({
       repoDir,
       factoryBin: FACTORY_BIN,
-      start: { id: "2026-11-07T10-42-00-000Z-doctor", command: "doctor", args, issue: null },
+      start: { id: "2026-11-07T10-42-00-000Z-doctor", command: "doctor", args, issue: null, ...options.start },
     })};`,
     "const record = await launchWebAction({ ...input, now: new Date() });",
     "process.stdout.write(JSON.stringify(record) + '\\n');",
@@ -49,6 +53,7 @@ async function launchFromAServer(repoDir: string, args: string[]): Promise<{ rec
   ].join("\n");
   const server = spawn(process.execPath, ["--input-type=module", "-e", script], {
     detached: true,
+    env: { ...process.env, ...options.env },
     stdio: ["ignore", "pipe", "inherit"],
   });
   if (server.pid === undefined) throw new Error("the server did not start");
@@ -122,5 +127,25 @@ describe("the launcher of web actions", () => {
 
     expect((await readWebAction(repoDir, record.id))?.end?.exitCode).toBe(2);
     expect(existsSync(join(repoDir, "pwned"))).toBe(false);
+  });
+
+  it("should pass the standard input of the web action to the CLI and write it nowhere under .factory/web/, so a credential reaches factory auth alone", async () => {
+    const repoDir = await temp.make("launcher-stdin-");
+    const config = await temp.make("launcher-stdin-xdg-");
+    const secret = "sk-ant-oat01-launcher-secret-a1f3";
+    const { record } = await launchFromAServer(repoDir, ["auth", "claude-code"], {
+      start: { id: "2026-11-07T10-42-00-000Z-auth", command: "auth", stdin: `${secret}\n` },
+      env: { XDG_CONFIG_HOME: config, CLAUDE_CODE_OAUTH_TOKEN: "" },
+    });
+
+    await until(async () => (await readWebAction(repoDir, record.id))?.end != null, "the action to end");
+
+    expect((await readWebAction(repoDir, record.id))?.end?.exitCode).toBe(0);
+    expect(await readFile(join(config, "software-factory", "credentials"), "utf8")).toBe(`CLAUDE_CODE_OAUTH_TOKEN=${secret}\n`);
+    expect(record.args).toEqual(["auth", "claude-code"]);
+    const dir = join(repoDir, ".factory", "web", record.id);
+    for (const name of await readdir(dir)) {
+      expect(await readFile(join(dir, name), "utf8")).not.toContain("launcher-secret");
+    }
   });
 });

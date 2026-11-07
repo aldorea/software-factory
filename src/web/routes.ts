@@ -3,7 +3,7 @@ import { parseWebActionId } from "./web-action-files.ts";
 
 const RUN_ID_FORMAT = /^[1-9][0-9]*-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}Z$/;
 
-export type ApiResource = "runs" | "live" | "actions";
+export type ApiResource = "runs" | "live" | "actions" | "auth";
 
 export type Route =
   | { kind: "client" }
@@ -11,13 +11,14 @@ export type Route =
   | { kind: "api"; resource: "run" | "run-activity"; runId: string }
   | { kind: "api"; resource: "action" | "action-stop"; actionId: string }
   | { kind: "api"; resource: "run-form"; issue: number }
+  | { kind: "api"; resource: "refinement"; issue: number }
   | { kind: "asset"; segments: string[] }
   | { kind: "log"; runId: string; segments: string[] }
   | { kind: "not-found" };
 
 const NOT_FOUND: Route = { kind: "not-found" };
 const CLIENT: Route = { kind: "client" };
-const API_RESOURCES: readonly ApiResource[] = ["runs", "live", "actions"];
+const API_RESOURCES: readonly ApiResource[] = ["runs", "live", "actions", "auth"];
 
 export function parseRunId(candidate: string): string | null {
   return RUN_ID_FORMAT.test(candidate) ? candidate : null;
@@ -47,9 +48,10 @@ function apiRoute(parts: readonly (string | null)[]): Route {
     if (actionId === null) return { kind: "api", resource: null };
     return { kind: "api", resource: rest.length === 1 ? "action" : "action-stop", actionId };
   }
-  if (resource === "run-form" && rest.length === 1) {
+  if ((resource === "run-form" || resource === "refinements") && rest.length === 1) {
     const issue = /^[1-9][0-9]{0,8}$/.test(rest[0] ?? "") ? Number(rest[0]) : null;
-    return issue === null ? { kind: "api", resource: null } : { kind: "api", resource: "run-form", issue };
+    if (issue === null) return { kind: "api", resource: null };
+    return resource === "run-form" ? { kind: "api", resource: "run-form", issue } : { kind: "api", resource: "refinement", issue };
   }
   const known = API_RESOURCES.find((candidate) => candidate === resource);
   return { kind: "api", resource: known !== undefined && rest.length === 0 ? known : null };

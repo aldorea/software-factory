@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import type { Clock } from "../coordinator/ports.ts";
+import type { CredentialsSource } from "./auth-api.ts";
 import { handleRequest, TEXT } from "./handler.ts";
 import { WEB_HOST } from "./host.ts";
 import { launchWebAction, stopWebAction } from "./launcher.ts";
@@ -25,6 +26,7 @@ export interface WebServerOptions {
   port: number;
   token?: string;
   clock: Clock;
+  credentials?: CredentialsSource;
   err: (text: string) => void;
 }
 
@@ -72,6 +74,7 @@ async function respond(incoming: IncomingMessage, outgoing: ServerResponse, opti
       port,
       now,
       processStart: processStartTime,
+      ...(options.credentials !== undefined ? { credentials: options.credentials } : {}),
     });
     if (response.start !== undefined) {
       await launchWebAction({ repoDir: options.repoDir, factoryBin: FACTORY_BIN, start: response.start, now });
