@@ -15,7 +15,8 @@ import { dockerImages } from "../workers/docker-images.ts";
 import { askRolesInTerminal } from "./ask-role.ts";
 import { terminalMenuScreen } from "./auth-screen.ts";
 import { launchInteractive } from "./launch.ts";
-import { main } from "./main.ts";
+import { recordWebActionEnd } from "../web/web-action-files.ts";
+import { main, webActionFlag } from "./main.ts";
 import { confirmInTerminal, readLineFromStdin, readSecretInTerminal } from "./secret-input.ts";
 import { reportFailure } from "./report.ts";
 import { colorEnabled } from "./setup-render.ts";
@@ -28,6 +29,13 @@ const stop = new AbortController();
 if (process.argv[2] === "web") {
   process.once("SIGINT", () => stop.abort());
   process.once("SIGTERM", () => stop.abort());
+}
+const webAction = webActionFlag(process.argv.slice(2));
+if (webAction.ok && webAction.id !== null && process.argv[2] !== "web") {
+  const id = webAction.id;
+  process.once("SIGINT", () => {
+    void recordWebActionEnd(process.cwd(), id, { exitCode: 130, endedAt: clock.now().toISOString() }).finally(() => process.exit(130));
+  });
 }
 
 const stdoutIsTerminal = Boolean(process.stdout.isTTY);

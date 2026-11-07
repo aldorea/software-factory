@@ -18,6 +18,7 @@ import type { Verifier } from "../coordinator/verifier.ts";
 import type { GitHub } from "../github/github.ts";
 import { initRepo } from "../init/init.ts";
 import { WEB_HOST } from "../web/host.ts";
+import { parseWebActionId, recordWebActionEnd } from "../web/web-action-files.ts";
 import { DEFAULT_WEB_PORT } from "../web/server.ts";
 import type { ImageDocker } from "../workers/images.ts";
 import type { AgentKind, WorkerRunner } from "../workers/types.ts";
@@ -76,6 +77,8 @@ export interface CliEnv {
   err(text: string): void;
 }
 
+export const WEB_ACTION_FLAG = "--web-action";
+
 const COMMANDS = ["refine", "approve", "validate", "run"];
 const USAGE = [
   `usage: factory <${COMMANDS.join("|")}> <issue> [target-repo]`,
@@ -100,7 +103,36 @@ interface Command {
   refinementFlag?: string;
 }
 
+export type WebActionFlag = { ok: true; args: string[]; id: string | null } | { ok: false };
+
+export function webActionFlag(args: string[]): WebActionFlag {
+  const index = args.findIndex((arg) => arg === WEB_ACTION_FLAG || arg.startsWith(`${WEB_ACTION_FLAG}=`));
+  if (index === -1) return { ok: true, args, id: null };
+  const inline = args[index]?.startsWith(`${WEB_ACTION_FLAG}=`);
+  const value = inline ? args[index]?.slice(WEB_ACTION_FLAG.length + 1) : args[index + 1];
+  const id = value === undefined ? null : parseWebActionId(value);
+  if (id === null) return { ok: false };
+  const rest = [...args.slice(0, index), ...args.slice(index + (inline ? 1 : 2))];
+  return rest.some((arg) => arg === WEB_ACTION_FLAG || arg.startsWith(`${WEB_ACTION_FLAG}=`)) ? { ok: false } : { ok: true, args: rest, id };
+}
+
 export async function main(args: string[], env: CliEnv): Promise<number> {
+  const flag = webActionFlag(args);
+  if (!flag.ok) {
+    env.err(USAGE);
+    return 2;
+  }
+  if (flag.id === null) return dispatch(flag.args, env);
+  let code = 1;
+  try {
+    code = await dispatch(flag.args, env);
+    return code;
+  } finally {
+    await recordWebActionEnd(env.cwd, flag.id, { exitCode: code, endedAt: env.clock.now().toISOString() });
+  }
+}
+
+async function dispatch(args: string[], env: CliEnv): Promise<number> {
   if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
     env.out(USAGE);
     return 0;
