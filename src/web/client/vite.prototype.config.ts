@@ -15,6 +15,6 @@ export default defineConfig({
     assetsInlineLimit: 100000000,
     cssCodeSplit: false,
     modulePreload: false,
-    rollupOptions: { input: fileURLToPath(new URL("prototype.html", import.meta.url)), output: { inlineDynamicImports: true } },
+    rollupOptions: { input: fileURLToPath(new URL(process.env.PROTO_HTML ?? "prototype.html", import.meta.url)), output: { inlineDynamicImports: true } },
   },
 });
