@@ -182,7 +182,7 @@ describe("factory init", () => {
         "pnpm-lock.yaml": "",
         "package.json": manifest({ test: "vitest" }),
         ".factory/Dockerfile": "FROM mine\n",
-        ".gitignore": "node_modules\n.factory/logs/\n.factory/worktrees/\n.factory/.env\n",
+        ".gitignore": "node_modules\n.factory/logs/\n.factory/worktrees/\n.factory/.env\n.factory/web/\n",
       },
     });
     const { env, out } = cli(dir);
@@ -221,7 +221,7 @@ describe("factory init", () => {
     expect(await main(["init"], env)).toBe(0);
 
     expect(out).toContain("✓ updated .gitignore");
-    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("node_modules\n.factory/logs/\n.factory/worktrees/\n.factory/.env\n");
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("node_modules\n.factory/logs/\n.factory/worktrees/\n.factory/.env\n.factory/web/\n");
   });
 
   it("should treat /.factory/logs/ with a leading slash as already ignored, so .gitignore gets no duplicate of it", async () => {
@@ -230,7 +230,16 @@ describe("factory init", () => {
 
     expect(await main(["init"], env)).toBe(0);
 
-    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("/.factory/logs/\n.factory/worktrees/\n.factory/.env\n");
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe("/.factory/logs/\n.factory/worktrees/\n.factory/.env\n.factory/web/\n");
+  });
+
+  it("should add .factory/web/ to .gitignore, so the state of the web actions never enters git", async () => {
+    const dir = await targetRepo({ files: { "pnpm-lock.yaml": "" } });
+    const { env } = cli(dir);
+
+    expect(await main(["init"], env)).toBe(0);
+
+    expect((await readFile(join(dir, ".gitignore"), "utf8")).split("\n")).toContain(".factory/web/");
   });
 
   it("should take the target repo from the argument", async () => {

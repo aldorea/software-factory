@@ -12,7 +12,7 @@ export interface RepoManifestFacts {
   packageJson: string | null;
 }
 
-export const GITIGNORE_ENTRIES = [".factory/logs/", ".factory/worktrees/", ".factory/.env"];
+export const GITIGNORE_ENTRIES = [".factory/logs/", ".factory/worktrees/", ".factory/.env", ".factory/web/"];
 export const CHECK_SCRIPTS = ["lint", "typecheck", "test"];
 
 export function initRefusal(repoDir: string, facts: RepoGitFacts): string | null {
