@@ -42,7 +42,7 @@ describe("the causes and the steps on the page of a run", () => {
     const page = await pageWith(() => ({ result: "draft", subtasks: [subtaskRecord("health", { state: "blocked", blockType: "patience", reason: "5 attempts" })] }));
 
     expect(page.run.causes.map((cause) => [cause.where, cause.what, cause.next?.text])).toEqual([
-      ["Subtask health", "blocked (patience)", "Revisa la spec y empieza un run nuevo: factory run 23"],
+      ["Subtask health", "blocked (patience)", "Revisa la spec y empieza un run nuevo"],
     ]);
     expect(page.run.steps.map((step) => [step.kind, step.state])).toEqual([
       ["subtask", "failed"],

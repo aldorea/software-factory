@@ -25,7 +25,7 @@ function criterion(id: string, passed: boolean): CriterionRecord {
 }
 
 const NEW_RUN = { kind: "command", purpose: "new-run", command: "run", issue: 23, flags: [], text: "factory run 23" };
-const REVIEW_SPEC = { kind: "review-spec", issue: 23, text: "Revisa la spec y empieza un run nuevo: factory run 23" };
+const REVIEW_SPEC = { kind: "review-spec", issue: 23, text: "Revisa la spec y empieza un run nuevo" };
 
 describe("the causes of a run", () => {
   it("should give no cause for a ready run", () => {

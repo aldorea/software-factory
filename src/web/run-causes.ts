@@ -44,7 +44,7 @@ function command(purpose: "resume" | "new-run" | "publish", issue: number): Next
 }
 
 function reviewSpec(issue: number): NextStep {
-  return { kind: "review-spec", issue, text: `Revisa la spec y empieza un run nuevo: factory run ${issue}` };
+  return { kind: "review-spec", issue, text: "Revisa la spec y empieza un run nuevo" };
 }
 
 function cause(kind: CauseKind, where: string, what: string, detail: string | null, evidence: EvidenceLink | null, next: NextStep | null): RunCause {

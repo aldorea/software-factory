@@ -64,7 +64,7 @@ describe("the causes in the Summary of a run", () => {
     const causes = screen.getByRole("region", { name: "Causas" });
     expect(text(causes)).toContain("Subtask health: blocked (patience)");
     expect(text(causes)).toContain("expected 200, got 500");
-    expect(text(causes)).toContain("Revisa la spec y empieza un run nuevo: factory run 23");
+    expect(text(causes)).toContain("Revisa la spec y empieza un run nuevo");
     expect(screen.getByRole("link", { name: "Ver la evidencia" }).getAttribute("href")).toBe(`/runs/${log.runId}?tab=subtasks#subtask-health`);
   });
 
