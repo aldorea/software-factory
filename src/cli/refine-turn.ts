@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { readSession, turnStreamPath, writeSession } from "../commands/conversation.ts";
 import { prepareRefinement } from "../commands/refine.ts";
-import { runTurnProcess } from "../commands/refine-turn.ts";
+import { startTurnProcess } from "../commands/refine-turn.ts";
 import type { RoleChoice } from "../config/config.ts";
 import { processStartTime } from "../web/process-start.ts";
 import { readWebActions } from "../web/web-action-files.ts";
@@ -60,7 +60,7 @@ export async function refineTurn(input: {
   const command = turn.command({ place, session, model: choice.model, allowedTools: refinementTools(place) });
   if (!command.ok) return command.problem;
   env.out(`${session === null ? "Starting" : "Resuming"} the refinement of #${issue} in ${workspace.worktree}`);
-  const end = await runTurnProcess({
+  const end = await startTurnProcess({
     command: env.agentCommand?.(choice.agent) ?? adapterFor(choice.agent).processName,
     args: command.args,
     env: command.env,

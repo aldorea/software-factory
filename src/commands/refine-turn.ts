@@ -19,7 +19,7 @@ export type TurnEnd = { kind: "refused"; problem: string } | { kind: "ended"; ex
 
 const NOT_REPORTED = "the agent of the refinement did not report its tools, so the allowed tools cannot be checked";
 
-export async function runTurnProcess(turn: TurnProcess): Promise<TurnEnd> {
+export async function startTurnProcess(turn: TurnProcess): Promise<TurnEnd> {
   const stream = await open(turn.streamPath, "a");
   try {
     const child = spawn(turn.command, turn.args, {
