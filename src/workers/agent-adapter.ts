@@ -1,3 +1,4 @@
+import type { RefinementTurn } from "./refinement-turn.ts";
 import type { SupervisedProcess } from "./supervise.ts";
 import type { ActivityEvent, AgentKind, AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
 
@@ -40,6 +41,7 @@ export interface AgentAdapter {
   command(model: string): string[];
   isFinalLine?(line: string): boolean;
   createStream(options?: StreamOptions): AgentStream;
+  refinementTurn?: RefinementTurn;
 }
 
 export function emptyUsage(): TokenUsage {

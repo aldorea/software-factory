@@ -1,5 +1,6 @@
 import { firstLine, toolTarget } from "./activity.ts";
 import { emptyUsage, type AgentAdapter } from "./agent-adapter.ts";
+import { turnRequestProblem, type AllowedTool, type RefinementTurn, type TurnCheck, type TurnMessage, type TurnRequest } from "./refinement-turn.ts";
 import type { SupervisedProcess } from "./supervise.ts";
 import type { ActivityEvent, AttemptOutcome, PlanStatus, TokenUsage } from "./types.ts";
 
@@ -111,6 +112,11 @@ export const claudeCodeAdapter: AgentAdapter = {
   capabilities: { readsTokenUsage: true, detectsPlanLimit: true, deniesEveryTool: true, startsInteractiveSession: true },
   command: claudeCodeArgs,
   isFinalLine: isClaudeFinalLine,
+  refinementTurn: {
+    command: claudeTurnCommand,
+    checker: claudeTurnChecker,
+    transcript: claudeTurnTranscript,
+  },
   createStream() {
     let state = initialClaudeState();
     return {
@@ -124,6 +130,113 @@ export const claudeCodeAdapter: AgentAdapter = {
     };
   },
 };
+
+export const CLAUDE_TURN_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "Bash"];
+
+export function claudeAllowedRules(tools: readonly AllowedTool[]): string[] {
+  return tools.flatMap((tool) => {
+    if (tool.kind === "read") return [`Read(/${tool.path}/**)`];
+    if (tool.kind === "edit") return [`Edit(/${tool.path}/**)`];
+    return tool.more ? [`Bash(${tool.text})`, `Bash(${tool.text} *)`] : [`Bash(${tool.text})`];
+  });
+}
+
+function claudeTurnCommand(request: TurnRequest): ReturnType<RefinementTurn["command"]> {
+  const problem = turnRequestProblem(request);
+  if (problem !== null) return { ok: false, problem };
+  const { place, session } = request;
+  return {
+    ok: true,
+    args: [
+      "--verbose",
+      "--output-format",
+      "stream-json",
+      "--model",
+      request.model,
+      "--plugin-dir",
+      place.pluginDir,
+      "--permission-mode",
+      "default",
+      "--strict-mcp-config",
+      "--tools",
+      CLAUDE_TURN_TOOLS.join(","),
+      "--allowedTools",
+      ...claudeAllowedRules(request.allowedTools),
+      ...(session === null ? [] : ["--resume", session]),
+      "-p",
+      session === null ? `/factory:refine ${place.issue}` : "-",
+    ],
+    env: { FACTORY_CLI: place.factoryCli },
+    readsAnswer: session !== null,
+  };
+}
+
+function claudeTurnChecker() {
+  let decided: TurnCheck | null = null;
+  return {
+    onLine(line: string): TurnCheck {
+      if (decided !== null) return decided;
+      const event = parseJson(line);
+      if (event === undefined) return { kind: "waiting" };
+      if (event.type === "system" && event.subtype === "init") {
+        decided = initCheck(event);
+        return decided;
+      }
+      if (event.type === "assistant" || event.type === "user" || event.type === "result") {
+        decided = {
+          kind: "refused",
+          problem: "the agent of the refinement acted before it reported its tools, so the allowed tools cannot be checked",
+        };
+        return decided;
+      }
+      return { kind: "waiting" };
+    },
+  };
+}
+
+function initCheck(event: Record<string, unknown>): TurnCheck {
+  const { tools, mcpServers } = { ...namesOf("tools", event.tools), ...namesOf("mcpServers", event.mcp_servers) };
+  if (tools === undefined || mcpServers === undefined) {
+    return { kind: "refused", problem: "the agent of the refinement did not report its tools, so the allowed tools cannot be checked" };
+  }
+  const sameTools = tools.length === CLAUDE_TURN_TOOLS.length && CLAUDE_TURN_TOOLS.every((tool) => tools.includes(tool));
+  if (!sameTools) {
+    return {
+      kind: "refused",
+      problem: `the agent of the refinement did not load the allowed tools: it reported ${tools.length === 0 ? "no tools" : tools.join(", ")} instead of ${CLAUDE_TURN_TOOLS.join(", ")}`,
+    };
+  }
+  if (mcpServers.length > 0) {
+    return { kind: "refused", problem: `the agent of the refinement loaded MCP servers outside the allowed tools: ${mcpServers.join(", ")}` };
+  }
+  if (event.permissionMode !== "default") {
+    return { kind: "refused", problem: `the agent of the refinement runs in the permission mode ${String(event.permissionMode)}, not default` };
+  }
+  if (typeof event.session_id !== "string") {
+    return { kind: "refused", problem: "the agent of the refinement reported no session" };
+  }
+  return { kind: "loaded", session: event.session_id };
+}
+
+function claudeTurnTranscript(lines: readonly string[]): TurnMessage[] {
+  let cwd: string | undefined;
+  return lines.flatMap((line): TurnMessage[] => {
+    const event = parseJson(line);
+    if (event === undefined) return [];
+    if (event.type === "system" && event.subtype === "init" && typeof event.cwd === "string") cwd = event.cwd;
+    if (event.type === "result") return [{ kind: "end", text: event.is_error === true ? "failed" : "completed" }];
+    if (event.type !== "assistant" || !isRecord(event.message) || !Array.isArray(event.message.content)) return [];
+    return event.message.content.flatMap((block: unknown): TurnMessage[] => {
+      if (!isRecord(block)) return [];
+      if (block.type === "text" && typeof block.text === "string" && block.text.trim() !== "") return [{ kind: "text", text: block.text }];
+      if (block.type === "tool_use" && typeof block.name === "string") {
+        const target = toolTarget(block.input, cwd);
+        return [{ kind: "tool", text: target === undefined ? block.name : `${block.name} ${target}` }];
+      }
+      return [];
+    });
+  });
+}
 
 export function claudeActivity(state: ClaudeStreamState, line: string): ActivityEvent[] {
   const event = parseJson(line);
