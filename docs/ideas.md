@@ -11,3 +11,7 @@ Raised on 2026-11-06, when version 2 (freelance engagements) was withdrawn. They
 - **Models per target repo.** A target repo that overrides the default models of the settings. Today the settings hold them for every repo, and a run changes them only for itself ([ADR 0015](adr/0015-workspace-and-settings-on-the-host.md)).
 - **More integrations** after Slack, in the Integrations section of the settings.
 - **Edit the skills and prompts of the factory from the web.** Each save is a commit in the repo of the factory, so each change is a new version that the runs record. Until then the web only shows them.
+- **The AI writes the script once, and then the script runs.** Where a script can do the work, no agent acts on each run: an agent writes the script, I review it, it is versioned in git, and from then on every run executes the script. Today this already holds for the evidence tests, the holdout scenarios and the coordinator. Two places to apply it:
+  - `factory init` starts an agent that reads the target repo and proposes the commands of the gates in `.factory/config.ts` (checks, app start, Playwright, holdout); I review and approve them in the web, and every run executes them with no AI;
+  - a library of scripts of my own ("load test data", "regenerate the API types"), written by an agent, reviewed and versioned, and started from the web as a command.
+- **Compare two runs**: what changed between them, in prompts, skill, models or commands, from the versions that each `run.json` records.
