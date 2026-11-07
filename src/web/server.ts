@@ -56,29 +56,50 @@ function bodyOf(incoming: IncomingMessage): Promise<string> {
   });
 }
 
-async function respond(incoming: IncomingMessage, outgoing: ServerResponse, options: WebServerOptions, port: number, token: string): Promise<void> {
+function oneAtATime(): <T>(task: () => Promise<T>) => Promise<T> {
+  let last: Promise<unknown> = Promise.resolve();
+  return (task) => {
+    const next = last.then(task, task);
+    last = next.catch(() => undefined);
+    return next;
+  };
+}
+
+async function respond(
+  incoming: IncomingMessage,
+  outgoing: ServerResponse,
+  options: WebServerOptions,
+  port: number,
+  token: string,
+  serial: ReturnType<typeof oneAtATime>,
+): Promise<void> {
   try {
     const method = incoming.method ?? "GET";
-    const now = options.clock.now();
-    const response = await handleRequest({
-      method,
-      path: pathOf(incoming.url),
-      query: queryOf(incoming.url),
-      host: incoming.headers.host,
-      origin: incoming.headers.origin,
-      cookie: incoming.headers.cookie,
-      body: method === "POST" ? await bodyOf(incoming) : "",
-      token,
-      repoDir: options.repoDir,
-      clientDir: options.clientDir,
-      port,
-      now,
-      processStart: processStartTime,
-      ...(options.credentials !== undefined ? { credentials: options.credentials } : {}),
-    });
-    if (response.start !== undefined) {
-      await launchWebAction({ repoDir: options.repoDir, factoryBin: FACTORY_BIN, start: response.start, now });
-    }
+    const body = method === "POST" ? await bodyOf(incoming) : "";
+    const answer = async () => {
+      const now = options.clock.now();
+      const response = await handleRequest({
+        method,
+        path: pathOf(incoming.url),
+        query: queryOf(incoming.url),
+        host: incoming.headers.host,
+        origin: incoming.headers.origin,
+        cookie: incoming.headers.cookie,
+        body,
+        token,
+        repoDir: options.repoDir,
+        clientDir: options.clientDir,
+        port,
+        now,
+        processStart: processStartTime,
+        ...(options.credentials !== undefined ? { credentials: options.credentials } : {}),
+      });
+      if (response.start !== undefined) {
+        await launchWebAction({ repoDir: options.repoDir, factoryBin: FACTORY_BIN, start: response.start, now });
+      }
+      return response;
+    };
+    const response = method === "POST" ? await serial(answer) : await answer();
     if (response.stop !== undefined && !(await stopWebAction(response.stop))) {
       outgoing.writeHead(409, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
       outgoing.end(JSON.stringify({ error: "the web action is not working: there is nothing to stop" }));
@@ -102,8 +123,9 @@ export function startWebServer(options: WebServerOptions): Promise<WebServer> {
   return new Promise((resolve, reject) => {
     let bound = options.port;
     const token = options.token ?? newToken();
+    const serial = oneAtATime();
     const server = createServer((incoming, outgoing) => {
-      void respond(incoming, outgoing, options, bound, token);
+      void respond(incoming, outgoing, options, bound, token, serial);
     });
     server.once("error", reject);
     server.listen(options.port, WEB_HOST, () => {

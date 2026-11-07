@@ -1,27 +1,42 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { writeRunLog } from "../../src/coordinator/run-log.ts";
 import { startWebServer, type WebServer } from "../../src/web/server.ts";
+import { readWebActions } from "../../src/web/web-action-files.ts";
 import { cleanRun } from "../coordinator/run-log-fixtures.ts";
 import { FakeClock } from "../fakes/clock.ts";
+import { isAlive } from "../process-alive.ts";
 import { tempDirs } from "../temp-dirs.ts";
-import { CLIENT_DIR } from "./web-helpers.ts";
+import { CLIENT_DIR, TOKEN } from "./web-helpers.ts";
 
 const temp = tempDirs();
 const servers: WebServer[] = [];
 const errors: string[] = [];
+const launchedIn: string[] = [];
+
+async function untilLaunchedEnd(repoDir: string): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  for (const { record } of await readWebActions(repoDir)) {
+    while (isAlive(record.pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+    try {
+      process.kill(-record.pid, "SIGKILL");
+    } catch {}
+  }
+}
 
 afterEach(async () => {
   errors.splice(0);
   await Promise.all(servers.splice(0).map((server) => server.close()));
+  await Promise.all(launchedIn.splice(0).map(untilLaunchedEnd));
   await temp.removeAll();
 });
 
 async function start(repoDir?: string): Promise<WebServer> {
   const server = await startWebServer({
+    token: TOKEN,
     repoDir: repoDir ?? (await temp.make("web-server-")),
     clientDir: CLIENT_DIR,
     port: 0,
@@ -126,6 +141,25 @@ describe("the web server", () => {
     } finally {
       await chmod(locked, 0o755);
     }
+  });
+
+  it("should start one web action of two that ask for the same issue at the same moment, because the second must see the first as working", async () => {
+    const dir = await temp.make("web-server-actions-");
+    launchedIn.push(dir);
+    const server = await start(dir);
+    const origin = `http://127.0.0.1:${server.port}`;
+    const post = () =>
+      fetch(`${origin}/api/actions`, {
+        method: "POST",
+        headers: { origin, cookie: `factory-token=${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ command: "refine", issue: 28 }),
+      });
+
+    const responses = await Promise.all([post(), post()]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([202, 409]);
+    expect(await readdir(join(dir, ".factory", "web"))).toHaveLength(1);
+    expect(errors).toEqual([]);
   });
 
   it("should stop answering after close, even to a client that keeps its connection open", async () => {
