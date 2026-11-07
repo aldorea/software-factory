@@ -6,7 +6,11 @@ argument-hint: <issue number>
 
 # Refine an issue into a spec
 
-You are in the worktree of the integration branch `factory/<n>-<slug>` of the target repo, started by `factory refine <n>`. `<n>` is the argument of this skill. The developer is at the terminal. Your job is to turn issue `<n>` into a spec that `factory run` can execute without asking anything else.
+You are in the worktree of the integration branch `factory/<n>-<slug>` of the target repo, started by `factory refine <n>`. `<n>` is the argument of this skill. Your job is to turn issue `<n>` into a spec that `factory run` can execute without asking anything else.
+
+The developer may answer in a terminal or from the web. From the web, each answer is one turn: you get the answer as the next message of the same session, and the developer reads only the message you end each turn with. So never wait for input in the middle of a turn: end the turn with your questions, or with what you did, and carry on in the next one.
+
+In a turn from the web nobody can approve a tool, so only these run: reading the files of the worktree; writing and editing inside the worktree and inside `.factory/holdout/<n>/` of the target repo; and the commands `gh issue view <n>`, `gh issue edit <n>`, `gh issue comment <n>`, `git add specs/<n>.md`, `git commit` and `node "$FACTORY_CLI" validate <n>`, written exactly so. Any other tool is denied: when you need one, say so in your message and what you would have done with it.
 
 The environment variable `FACTORY_CLI` holds the path of the factory CLI. Run it as `node "$FACTORY_CLI" <command>`.
 
@@ -42,7 +46,7 @@ Edit the issue so its "Acceptance criteria" section holds the final criteria, ea
 
 - One behaviour per criterion, observable from outside, written so that a test can pass or fail it.
 - Keep the criteria the developer already agreed; change one only when a decision of step 2 says so.
-- Apply it with `gh issue edit <n> --body-file <file>`, keeping every other part of the body as it is. Show the developer the final list before you apply it.
+- Apply it with `gh issue edit <n> --body-file <file>`, keeping every other part of the body as it is. Write the file inside the worktree and never add it to git. Show the developer the final list before you apply it, and apply it once the developer agrees.
 
 ## 4. Partition by scope
 
@@ -90,7 +94,7 @@ Then:
 2. Run `node "$FACTORY_CLI" validate <n>`.
 3. If it fails, read each problem, fix the spec or the criteria, commit again and run it again. Do this until it prints that the spec is valid.
 
-You do not finish while `node "$FACTORY_CLI" validate <n>` fails. If a problem needs a decision from the developer, ask it. If you cannot make it pass, say so plainly and stop with the failure on screen: never tell the developer the spec is ready.
+You do not finish while `node "$FACTORY_CLI" validate <n>` fails. If a problem needs a decision from the developer, ask it. If you cannot make it pass, say so plainly and stop with the failure in your message: never tell the developer the spec is ready.
 
 Do not run `factory approve`: the developer does it after reading the spec.
 

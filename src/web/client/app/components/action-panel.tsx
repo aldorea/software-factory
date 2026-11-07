@@ -9,7 +9,8 @@ import { Card } from "./ui/card.tsx";
 
 export type FormCommand = ActionRequest["command"];
 
-const FORM_COMMANDS: readonly FormCommand[] = ["run", "approve", "validate", "publish", "doctor", "image", "init"];
+const FORM_COMMANDS: readonly FormCommand[] = ["run", "approve", "validate", "publish", "doctor", "image", "init", "auth"];
+const AGENTS = ["claude-code", "opencode"] as const;
 const ISSUE_COMMANDS: readonly FormCommand[] = ["run", "approve", "validate", "publish"];
 
 type RoleChoices = Partial<Record<RunFormRole["role"], { agent: string; model: string }>>;
@@ -20,11 +21,22 @@ function formSearch(command: FormCommand, issue: number | null): string {
   return `?${params.toString()}`;
 }
 
-export function ActionLink({ command, issue = null, children }: { command: FormCommand; issue?: number | null; children: ReactNode }) {
+export function ActionLink({
+  command,
+  issue = null,
+  extra = {},
+  children,
+}: {
+  command: FormCommand;
+  issue?: number | null;
+  extra?: Record<string, string>;
+  children: ReactNode;
+}) {
   const [current] = useSearchParams();
   const params = new URLSearchParams(current);
   params.delete("action");
   for (const [key, value] of new URLSearchParams(formSearch(command, issue))) params.set(key, value);
+  for (const [key, value] of Object.entries(extra)) params.set(key, value);
   return (
     <Link
       to={{ search: `?${params.toString()}` }}
@@ -50,7 +62,7 @@ export function ActionStateBadge({ action }: { action: WebActionView }) {
   return <Badge tone={tone}>{`exit ${state.exitCode}`}</Badge>;
 }
 
-async function post(origin: string, path: string, body: object): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+export async function post(origin: string, path: string, body: object): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   try {
     const response = await fetch(`${origin}${path}`, {
       method: "POST",
@@ -197,6 +209,62 @@ function ActionForm({ command, issue }: { command: FormCommand; issue: number | 
   );
 }
 
+function AuthForm({ agent }: { agent: string }) {
+  const origin = useContext(ApiOrigin);
+  const [, setSearchParams] = useSearchParams();
+  const [credential, setCredential] = useState("");
+  const [force, setForce] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  if (!AGENTS.some((known) => known === agent)) return <p className="text-sm text-bad">Falta el agente.</p>;
+  const save = async () => {
+    setSending(true);
+    const answer = await post(origin, "/api/actions", { command: "auth", agent, credential, force });
+    setSending(false);
+    setCredential("");
+    if (answer.ok) setSearchParams((params) => {
+      params.delete("form");
+      params.delete("agent");
+      params.set("action", answer.id);
+      return params;
+    });
+    else setError(answer.error);
+  };
+  return (
+    <div className="space-y-3">
+      <label className="block space-y-1 text-sm">
+        <span className="font-medium">Credencial</span>
+        <input
+          aria-label="Credencial"
+          type="password"
+          autoComplete="off"
+          value={credential}
+          onChange={(event) => setCredential(event.target.value)}
+          className="w-full rounded-md border bg-background px-2 py-1 font-mono text-sm"
+        />
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />
+        Guardar aunque un token de Claude Code no empiece por sk-ant-oat (--force)
+      </label>
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground">Comando (la credencial va por la entrada estándar)</p>
+        <pre aria-label="Comando" className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs">
+          {`factory auth ${agent}${force ? " --force" : ""}`}
+        </pre>
+      </div>
+      {error !== null && (
+        <p role="alert" className="text-sm text-bad">
+          {error}
+        </p>
+      )}
+      <Button onClick={() => void save()} disabled={sending}>
+        Guardar
+      </Button>
+    </div>
+  );
+}
+
 function ActionOutput({ id }: { id: string }) {
   const origin = useContext(ApiOrigin);
   const { data, missing } = usePoll<WebActionView>(`/api/actions/${encodeURIComponent(id)}`);
@@ -246,7 +314,7 @@ export function ActionPanel() {
   if (command === undefined && action === null) return null;
   const close = () =>
     setSearchParams((current) => {
-      for (const key of ["form", "issue", "action"]) current.delete(key);
+      for (const key of ["form", "issue", "action", "agent"]) current.delete(key);
       return current;
     });
   return (
@@ -258,7 +326,13 @@ export function ActionPanel() {
             <X />
           </Button>
         </div>
-        {command !== undefined ? <ActionForm key={`${command}-${params.get("issue")}`} command={command} issue={parsedIssue(params.get("issue"))} /> : <ActionOutput id={action ?? ""} />}
+        {command === "auth" ? (
+          <AuthForm key={params.get("agent") ?? ""} agent={params.get("agent") ?? ""} />
+        ) : command !== undefined ? (
+          <ActionForm key={`${command}-${params.get("issue")}`} command={command} issue={parsedIssue(params.get("issue"))} />
+        ) : (
+          <ActionOutput id={action ?? ""} />
+        )}
       </Card>
     </aside>
   );

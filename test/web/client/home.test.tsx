@@ -158,9 +158,9 @@ describe("the shell of the client", () => {
   it("should move between pages with the menu, and say that a page does not exist yet", async () => {
     await open([]);
 
-    fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("link", { name: "Board" }));
 
-    expect(await screen.findByRole("heading", { name: "Settings" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Board" })).toBeDefined();
     expect(screen.getByText("Esta página todavía no existe.")).toBeDefined();
   });
 

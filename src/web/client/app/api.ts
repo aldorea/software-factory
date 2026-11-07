@@ -22,6 +22,9 @@ export type { WebActionView } from "../../web-action-view.ts";
 export type { WebActionsList } from "../../actions-api.ts";
 export type { RunForm, RunFormRole } from "../../run-form.ts";
 export type { ActionRequest } from "../../action-args.ts";
+export type { AuthAgent, AuthPage } from "../../auth-api.ts";
+export type { RefinementConversation, RefinementTurnView } from "../../refinement-api.ts";
+export type { TurnMessage } from "../../../workers/refinement-turn.ts";
 
 export const POLL_MS = 2000;
 export const IDLE_POLL_MS = 15_000;
