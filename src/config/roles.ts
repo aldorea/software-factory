@@ -3,17 +3,13 @@ import { AGENT_KINDS, missingRequirements } from "../workers/agents.ts";
 import type { AgentKind } from "../workers/types.ts";
 import type { RoleChoice } from "./config.ts";
 import { credentialHint, CREDENTIAL_VARIABLES } from "./credentials.ts";
+import { ROLE_FLAGS } from "./role-flags.ts";
 
 export const ROLES: RunRole[] = ["workers", "verifier", "tester"];
 
 export const CONFIGURED_ROLES: Role[] = [...ROLES, "refinement"];
 
-export const ROLE_FLAGS: Record<Role, string> = {
-  workers: "--worker-agent",
-  verifier: "--verifier-agent",
-  tester: "--tester-agent",
-  refinement: "--refinement-agent",
-};
+export { ROLE_FLAGS };
 
 export type ChosenRole = { ok: true; choice: RoleChoice } | { ok: false; problem: string };
 

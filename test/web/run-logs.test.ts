@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { handleRequest } from "../../src/web/handler.ts";
-import { aRun, repoWithRuns, request, temp } from "./web-helpers.ts";
+import { aRun, OWN_BROWSER, repoWithRuns, request, temp } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 
@@ -148,7 +148,7 @@ describe("a path that leaves the run folder", () => {
   it("should answer 405 to a method other than GET, as for every page", async () => {
     const { dir, runId } = await repoWithSecrets();
 
-    const response = await handleRequest(request(dir, `/runs/${runId}/S1-attempt-1.jsonl`, { method: "POST" }));
+    const response = await handleRequest(request(dir, `/runs/${runId}/S1-attempt-1.jsonl`, { method: "POST", ...OWN_BROWSER }));
 
     expect(response.status).toBe(405);
   });

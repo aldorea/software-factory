@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { clientBuildDir, clientBuildProblem } from "../web/client-build.ts";
 import { DEFAULT_WEB_PORT, startWebServer } from "../web/server.ts";
+import { newToken } from "../web/token.ts";
 import type { CliEnv } from "./main.ts";
 import { readiness, readinessProblems } from "./readiness.ts";
 import { reportErr } from "./report.ts";
@@ -52,12 +53,14 @@ export async function web(args: string[], env: WebEnv, usage: string): Promise<n
   const repoDir = resolve(env.cwd, parsed.repoArg ?? ".");
   if (await refused(repoDir, env)) return 1;
   if (await notReady(env)) return 1;
+  const token = newToken();
   let server;
   try {
     server = await startWebServer({
       repoDir,
       clientDir: clientBuildDir(env.factoryRoot),
       port: parsed.port,
+      token,
       clock: env.clock,
       err: env.err,
     });
@@ -70,7 +73,7 @@ export async function web(args: string[], env: WebEnv, usage: string): Promise<n
     );
     return 1;
   }
-  env.out(`factory web: http://${server.host}:${server.port}/ (Ctrl-C to stop)`);
+  env.out(`factory web: http://${server.host}:${server.port}/?token=${token} (Ctrl-C to stop)`);
   await stopped(env.signal);
   await server.close();
   return 0;

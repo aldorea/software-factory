@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { createServer, type Server } from "node:net";
@@ -5,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { main, type CliEnv } from "../../src/cli/main.ts";
 import type { RunsResponse } from "../../src/web/api.ts";
+import type { WebActionView } from "../../src/web/web-action-view.ts";
 import { FakeClock } from "../fakes/clock.ts";
 import { FakeGitHub } from "../fakes/github.ts";
 import { FakeImageDocker } from "../fakes/image-docker.ts";
@@ -83,7 +85,7 @@ describe("factory web", () => {
     const exit = main(["web", "--port", "0"], env);
 
     const url = urlOf(await firstLine);
-    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/\?token=[0-9a-f]{64}$/);
     const page = await fetch(url);
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('<div id="root"></div>');
@@ -139,6 +141,73 @@ describe("factory web", () => {
     expect(err).toEqual([]);
   });
 
+  it("should create a new random token each time it starts", async () => {
+    const dir = await temp.make("web-cli-token-");
+    const tokens: string[] = [];
+    for (let started = 0; started < 2; started++) {
+      const { env, stop, firstLine } = await cli(dir);
+      const exit = main(["web", "--port", "0"], env);
+      tokens.push(new URL(urlOf(await firstLine)).searchParams.get("token") ?? "");
+      stop.abort();
+      await exit;
+    }
+
+    expect(tokens[0]).not.toBe(tokens[1]);
+  });
+
+  it("should start a web action from the browser that visited the printed URL, and record its end and output under .factory/web/", async () => {
+    const dir = await temp.make("web-cli-action-");
+    const { env, stop, firstLine } = await cli(dir);
+    const exit = main(["web", "--port", "0"], env);
+    const url = new URL(urlOf(await firstLine));
+    const origin = url.origin;
+
+    const visit = await fetch(url, { redirect: "manual" });
+    expect(visit.status).toBe(303);
+    const cookie = (visit.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    expect(cookie).toMatch(/^factory-token=[0-9a-f]{64}$/);
+
+    const started = await fetch(new URL("/api/actions", origin), {
+      method: "POST",
+      headers: { origin, cookie, "content-type": "application/json" },
+      body: JSON.stringify({ command: "validate", issue: 28 }),
+    });
+    expect(started.status).toBe(202);
+    const { id } = (await started.json()) as { id: string };
+
+    let view: WebActionView | undefined;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      view = (await (await fetch(new URL(`/api/actions/${id}`, origin))).json()) as WebActionView;
+      if (view.state.kind !== "running") break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(view?.command).toBe("factory validate 28");
+    expect(view?.state).toMatchObject({ kind: "ended", exitCode: 1 });
+    expect(view?.output).toContain("config.ts");
+
+    stop.abort();
+    expect(await exit).toBe(0);
+  });
+
+  it("should start nothing for a POST without the cookie of the token, even from its own Origin", async () => {
+    const dir = await temp.make("web-cli-no-token-");
+    const { env, stop, firstLine } = await cli(dir);
+    const exit = main(["web", "--port", "0"], env);
+    const origin = new URL(urlOf(await firstLine)).origin;
+
+    const response = await fetch(new URL("/api/actions", origin), {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({ command: "doctor" }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(existsSync(join(dir, ".factory", "web"))).toBe(false);
+    stop.abort();
+    expect(await exit).toBe(0);
+  });
+
   it("should take the target repo from the argument", async () => {
     const dir = await repoWithRuns([{ log: cleanRun(0) }]);
     const { env, firstLine } = await cli(await temp.make("web-cli-elsewhere-"));
@@ -158,7 +227,7 @@ describe("factory web", () => {
     const { env, stop, firstLine } = await cli(dir);
     const exit = main(["web", "--port", String(free)], env);
 
-    expect(urlOf(await firstLine)).toBe(`http://127.0.0.1:${free}/`);
+    expect(urlOf(await firstLine)).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${free}/\\?token=`));
     stop.abort();
     expect(await exit).toBe(0);
   });

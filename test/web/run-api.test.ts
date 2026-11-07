@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { handleRequest } from "../../src/web/handler.ts";
-import { aRun, repoWithRuns, request, runDetail, temp } from "./web-helpers.ts";
+import { aRun, OWN_BROWSER, repoWithRuns, request, runDetail, temp } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 
@@ -43,7 +43,7 @@ describe("the run of the API", () => {
     const dir = await repoWithRuns([{ log }]);
 
     expect((await handleRequest(request(dir, `/api/runs/${log.runId}`, { host: "evil.example" }))).status).toBe(403);
-    expect((await handleRequest(request(dir, `/api/runs/${log.runId}`, { method: "POST" }))).status).toBe(405);
+    expect((await handleRequest(request(dir, `/api/runs/${log.runId}`, { method: "POST", ...OWN_BROWSER }))).status).toBe(405);
   });
 });
 

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { RunsResponse } from "../../src/web/api.ts";
 import { handleRequest } from "../../src/web/handler.ts";
 import { cleanRun, failedRun, pausedRun } from "../coordinator/run-log-fixtures.ts";
-import { CLIENT_DIR, NOW, PORT, aRun, repoWithRuns, request, temp } from "./web-helpers.ts";
+import { CLIENT_DIR, NOW, OWN_BROWSER, PORT, aRun, repoWithRuns, request, temp } from "./web-helpers.ts";
 
 afterEach(() => temp.removeAll());
 
@@ -184,7 +184,7 @@ describe("what the handler refuses", () => {
   it.each(["POST", "PUT", "DELETE", "PATCH", "HEAD"])("should answer 405 in JSON to the method %s on the API, because the API only reads", async (method) => {
     const dir = await temp.make("web-method-");
 
-    const response = await handleRequest(request(dir, "/api/runs", { method }));
+    const response = await handleRequest(request(dir, "/api/runs", { method, ...OWN_BROWSER }));
 
     expect(response.status).toBe(405);
     expect(JSON.parse(String(response.body))).toEqual({ error: "method not allowed" });
@@ -193,7 +193,7 @@ describe("what the handler refuses", () => {
   it.each(["POST", "PUT", "DELETE", "HEAD"])("should answer 405 to the method %s on a page", async (method) => {
     const dir = await temp.make("web-method-");
 
-    expect((await handleRequest(request(dir, "/", { method }))).status).toBe(405);
+    expect((await handleRequest(request(dir, "/", { method, ...OWN_BROWSER }))).status).toBe(405);
   });
 
   it.each(["/api", "/api/", "/api/nope", "/api/runs/extra"])("should answer 404 in JSON to the unknown API path %s", async (path) => {
