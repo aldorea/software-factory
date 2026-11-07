@@ -38,6 +38,7 @@ import { publish, PUBLISH_SUMMARY, PUBLISH_USAGE } from "./publish.ts";
 import { envProbes } from "./env-probes.ts";
 import { specCredentialNeeds } from "./spec-needs.ts";
 import { runSummary } from "./run-summary.ts";
+import { runInProgressRefusal } from "./run-in-progress.ts";
 import { RunView } from "./run-view.ts";
 import { refused } from "./target-repo.ts";
 import { renderProgress } from "./terminal-render.ts";
@@ -120,6 +121,13 @@ export async function main(args: string[], env: CliEnv): Promise<number> {
   const repoDir = resolve(env.cwd, repoArg ?? ".");
   if (await refused(repoDir, env)) return 1;
   if (command === "refine") return refine(repoDir, issue, refinementFlag, env);
+  if (command === "run" || command === "approve") {
+    const busy = runInProgressRefusal(await latestRunEntry(join(repoDir, ".factory", "logs"), issue), env.clock.now());
+    if (busy !== null) {
+      env.err(`factory: ${busy}`);
+      return 1;
+    }
+  }
   try {
     if (command === "run") return await run(repoDir, issue, flags, env);
     const input: SpecCommandInput = {
